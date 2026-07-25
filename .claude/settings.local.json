@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(B=\"/c/Users/me/AppData/Local/Temp/claude/C--Users-me-voxiCraft/3d953b83-d341-4688-bf64-14fb09157d84/scratchpad/index-monolith-backup.html\"; sed -n '3922,3927p' \"$B\"; echo ---TAIL-OF-BOOT-JS---; tail -4 js/23-boot.js)",
+      "mcp__codegraph__codegraph_explore"
+    ]
+  }
+}

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>voxiCraft</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="mono"></div>
+<div id="version">alpha 0.5943</div>
+<div id="crosshair"></div>
+<div id="blockname"></div>
+<div id="toast"></div>
+<div id="worldLoading">
+  <div>
+    <div id="worldLoadingName"></div>
+    <div class="wl-dots"><span></span><span></span><span></span></div>
+  </div>
+</div>
+<canvas id="vitals" width="860" height="70"></canvas>
+<div id="deathScreen">
+  <div class="dbox">
+    <h1>You Died</h1>
+    <div id="deathCause"></div>
+    <div id="deathStats"></div>
+    <button id="respawnBtn">Respawn</button>
+  </div>
+</div>
+<div id="hotbar"></div>
+<canvas id="radial" width="360" height="360"></canvas>
+<div id="invWrap">
+  <div id="craftPanel"></div>
+  <div id="inv"></div>
+  <div id="furnacePanel"></div>
+</div>
+
+ <div id="overlay"> 
+  <div class="panel"> 
+    <h1>voxiCraft</h1>
+    <div class="sub" id="menuSub">infinite voxel world &middot; greedy-meshed &middot; worker-generated</div>
+    <div id="menuHome">
+      <div class="seedrow">
+        <button id="worldsBtn" style="min-width:230px">Singleplayer</button>
+      </div>
+    </div>
+    <div id="menuWorlds" style="display:none">
+      <div id="worldList" class="wlist"></div>
+      <div class="seedrow">
+        <button id="newWorldBtn">Create New World</button>
+        <button id="worldsBackBtn" class="grey">Back</button>
+      </div>
+    </div>
+    <div id="menuCreate" style="display:none">
+      <div class="seedrow">
+        <input id="worldName" maxlength="24" spellcheck="false" placeholder="world name">
+        <input id="seedInput" class="mono" maxlength="24" spellcheck="false" placeholder="seed (optional)">
+      </div>
+      <div class="seedrow">
+        <select id="newModeSel" style="background:#0b0d16;color:#dfe;border:1px solid #445;border-radius:6px;padding:8px 10px;">
+          <option value="survival">Survival</option>
+          <option value="creative">Creative</option>
+        </select>
+        <label style="color:#9ab;font-size:13px;display:flex;align-items:center;gap:6px;">random tick
+          <input id="tickInput" type="number" min="0" max="20" step="1" value="3" style="width:56px;">
+        </label>
+        <button id="createBtn">Create World</button>
+        <button id="createBackBtn" class="grey">Back</button>
+      </div>
+    </div>
+    <div id="menuPause" style="display:none">
+      <div class="seedrow">
+        <button id="resumeBtn">Resume</button>
+        <button id="quitBtn" style="background:#7d5a32">Save &amp; Quit</button>
+      </div>
+    </div>
+    <div id="menuExtras">
+    <div class="opts">
+      <label id="modeLabel">gamemode
+        <select id="modeSel">
+          <option value="creative">Creative</option>
+          <option value="survival">Survival</option>
+        </select>
+      </label>
+      <label>fps limit
+        <select id="fpsSel">
+          <option value="0">off</option>
+          <option>30</option><option>60</option><option>90</option><option>120</option><option>144</option>
+        </select>
+      </label>
+      <label>render distance
+        <input id="distInput" type="number" min="4" max="32" step="1">
+      </label>
+      <label>shadow dist
+        <select id="shadowSel">
+          <option value="0">off</option>
+          <option value="80">80</option>
+          <option value="110">110</option>
+          <option value="160">160</option>
+          <option value="240">240</option>
+        </select>
+      </label>
+      <label>sensitivity %
+        <input id="sensInput" type="number" min="10" max="400" step="10">
+      </label>
+      <button id="fsBtn" title="Fullscreen (F1)" style="padding:6px 11px;font-size:14px">&#9974;</button>
+    </div>
+    <div id="hzNote"></div>
+    <div class="controls">
+      <div><b>WASD</b> move &middot; <b>mouse</b> look</div>
+      <div><b>Space / Shift</b> up &middot; down / jump</div>
+      <div><b>2×Space / 2×A</b> toggle flying</div>
+      <div><b>sneak-land</b> also stops flying</div>
+      <div><b>LMB / RMB</b> break / place</div>
+      <div><b>1–9 / wheel</b> select block</div>
+      <div><b>E</b> inventory</div>
+      <div><b>Ctrl</b> toggle fast move</div>
+      <div><b>[ ]</b> view distance</div>
+      <div><b>Stick L/R</b> move / look</div>
+      <div><b>A / X</b> fly up / down</div>
+      <div><b>RT / LT</b> break / place</div>
+      <div><b>LB / RB</b> cycle block</div>
+      <div><b>hold Y</b> radial picker (aim R-stick)</div>
+      <div><b>L3</b> toggle fast move</div>
+      <div><b>Esc / Start</b> open / close menu</div>
+      <div><b>F1 / Back</b> fullscreen</div>
+      <div><b>B</b> inventory &middot; <b>A</b> drag &middot; <b>Y</b> quick-move</div>
+      <div><b>sun &amp; moon</b> rise east, set west</div>
+    </div>
+    </div>
+  </div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js" } }
+</script>
+<script type="module">
+/* three.js is ESM-only; expose it as a global for the classic deferred game scripts below.
+   Module scripts and deferred classic scripts share one in-order execution queue, so this
+   is guaranteed to run first. */
+import * as THREE from 'three';
+window.THREE = THREE;
+</script>
+<script defer src="js/00-config.js"></script>
+<script defer src="js/01-textures-data.js"></script>
+<script defer src="js/02-voxel-core.js"></script>
+<script defer src="js/03-atlas.js"></script>
+<script defer src="js/04-materials.js"></script>
+<script defer src="js/05-icons.js"></script>
+<script defer src="js/06-renderer.js"></script>
+<script defer src="js/07-sky.js"></script>
+<script defer src="js/08-light-glow.js"></script>
+<script defer src="js/09-light-sky.js"></script>
+<script defer src="js/10-workers.js"></script>
+<script defer src="js/11-chunks.js"></script>
+<script defer src="js/12-player.js"></script>
+<script defer src="js/13-actions.js"></script>
+<script defer src="js/14-mining.js"></script>
+<script defer src="js/15-drops.js"></script>
+<script defer src="js/16-worlds.js"></script>
+<script defer src="js/17-input.js"></script>
+<script defer src="js/18-hud.js"></script>
+<script defer src="js/19-vitals.js"></script>
+<script defer src="js/25-crafting.js"></script>
+<script defer src="js/26-furnace.js"></script>
+<script defer src="js/27-doors.js"></script>
+<script defer src="js/20-inventory-ui.js"></script>
+<script defer src="js/21-spawn.js"></script>
+<script defer src="js/22-main-loop.js"></script>
+<script defer src="js/24-hands.js"></script>
+<script defer src="js/23-boot.js"></script>
+</body>
+</html>
