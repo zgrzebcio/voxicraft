@@ -96,8 +96,8 @@ function buildFurnacePanel() {
   if (!f) { panel.style.display = 'none'; return; }
   panel.style.display = 'flex';
   const bar = (cls) =>
-    `<div class="fbar ${cls}"><img class="fbase" src="/textures/Gui/Interactables/Lit_progress.png" alt="">` +
-    `<div class="ffill"><img src="/textures/Gui/Interactables/Lit_progress.png" alt=""></div></div>`;
+    `<div class="fbar ${cls}"><img class="fbase" src="textures/Gui/Interactables/Lit_progress.png" alt="">` +
+    `<div class="ffill"><img src="textures/Gui/Interactables/Lit_progress.png" alt=""></div></div>`;
   panel.innerHTML =
     `<div class="ctitle">Furnace</div>` +
     `<div id="furnGrid">` +
