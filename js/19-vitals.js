@@ -180,17 +180,17 @@ let vitalsDirty = true, vitalsShown = false;
 const GUI_IMG = {};
 {
   const _p = {
-    heartContainer:      'textures/gui/vitals/Heart/container.png',
-    heartFull:           'textures/gui/vitals/Heart/full.png',
-    heartHalf:           'textures/gui/vitals/Heart/half.png',
-    airFull:             'textures/gui/vitals/Oxygen/air.png',
-    airBursting:         'textures/gui/vitals/Oxygen/air_bursting.png',
-    airEmpty:            'textures/gui/vitals/Oxygen/air_empty.png',
-    foodEmpty:           'textures/gui/vitals/food/food_empty.png',
-    foodFull:            'textures/gui/vitals/food/food_full.png',
-    foodHalf:            'textures/gui/vitals/food/food_half.png',
-    foodSaturation:      'textures/gui/vitals/food/food_Saturation.png',
-    foodSaturationHalf:  'textures/gui/vitals/food/food_Saturation_half.png',
+    heartContainer:      'textures/Gui/Vitals/Heart/container.png',
+    heartFull:           'textures/Gui/Vitals/Heart/full.png',
+    heartHalf:           'textures/Gui/Vitals/Heart/half.png',
+    airFull:             'textures/Gui/Vitals/Oxygen/air.png',
+    airBursting:         'textures/Gui/Vitals/Oxygen/air_bursting.png',
+    airEmpty:            'textures/Gui/Vitals/Oxygen/air_empty.png',
+    foodEmpty:           'textures/Gui/Vitals/Food/food_empty.png',
+    foodFull:            'textures/Gui/Vitals/Food/food_full.png',
+    foodHalf:            'textures/Gui/Vitals/Food/food_half.png',
+    foodSaturation:      'textures/Gui/Vitals/Food/food_Saturation.png',
+    foodSaturationHalf:  'textures/Gui/Vitals/Food/food_Saturation_half.png',
   };
   for (const [k, src] of Object.entries(_p)) {
     const img = new Image();
