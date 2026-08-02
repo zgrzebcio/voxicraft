@@ -23,8 +23,8 @@ const TEXTURES = {
   iron_ore:         'textures/Blocks/Ores/iron_ore.png',
   diamond_ore:      'textures/Blocks/Ores/diamond_ore.png',
   gravel:           'textures/Blocks/Natures/gravel.png',
-  red_mushroom:     'textures/Billboards/Plants/red_mushroom.png',
-  brown_mushroom:   'textures/Billboards/Plants/brown_mushroom.png',
+  red_mushroom:     'textures/Billboards/Plants/Mushrooms/red_mushroom.png',
+  brown_mushroom:   'textures/Billboards/Plants/Mushrooms/brown_mushroom.png',
   crafting_bench_top:   'textures/Blocks/Interactables/crafting_bench_top.png',
   crafting_bench_front: 'textures/Blocks/Interactables/crafting_bench_front.png',
   crafting_bench_side:  'textures/Blocks/Interactables/crafting_bench_side.png',
@@ -56,8 +56,8 @@ const TEXTURES = {
   marble:               'textures/Blocks/Natures/marble.png',
   granite:              'textures/Blocks/Natures/granite.png',
   limestone:            'textures/Blocks/Natures/limestone.png',
-  poppy:                'textures/Billboards/Plants/poppy.png',
-  orchid:               'textures/Billboards/Plants/blue_orchid.png',
+  poppy:                'textures/Billboards/Plants/Flowers/poppy.png',
+  orchid:               'textures/Billboards/Plants/Flowers/blue_orchid.png',
   tallgrass:            'textures/Billboards/Plants/tall_grass.png',
   tin_ore:              'textures/Blocks/Ores/tin_ore.png',
   copper_ore:           'textures/Blocks/Ores/copper_ore.png',
@@ -71,8 +71,8 @@ const TEXTURES = {
   sulfur_down_tip:      'textures/Billboards/sulfur_down_tip.png',
   sulfur_up_tip:        'textures/Billboards/sulfur_up_tip.png',
   sugar_cane:           'textures/Billboards/Plants/sugar_cane.png',
-  oak_sapling:          'textures/Billboards/Plants/oak_sapling.png',
-  birch_sapling:        'textures/Billboards/Plants/birch_sapling.png',
+  oak_sapling:          'textures/Billboards/Plants/Saplings/oak_sapling.png',
+  birch_sapling:        'textures/Billboards/Plants/Saplings/birch_sapling.png',
 };
 
 const ITEM_TEXTURES = {

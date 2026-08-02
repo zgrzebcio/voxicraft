@@ -226,9 +226,9 @@ function queueWaterAt(x, y, z, delay = waterStep()) {
   const prev = _waterQueue.get(k);
   if (prev === undefined || t < prev) _waterQueue.set(k, t);
 }
-function queueWaterAround(x, y, z) {
+function queueWaterAround(x, y, z, delay = waterStep()) {
   for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])
-    queueWaterAt(x + dx, y + dy, z + dz);
+    queueWaterAt(x + dx, y + dy, z + dz, delay);
 }
 // a flowing cell survives only if still fed: water directly above, or a horizontal neighbour
 // one level fuller. Sources (level 0) always stay — so oceans/lakes never drain.
@@ -257,8 +257,15 @@ function dryWaterFrom(sx, sy, sz) {
   }
 }
 const WATER_MAX_PER_TICK = 256;           // safety valve only; timing comes from per-cell schedule
-function updateWaterFlow(dt) {
+// Water must always tick before lava in a frame: lava is the slower fluid and its
+// water-contact rule (obsidian/stone) has to see water's moves from this same frame, not the
+// previous one. updateFluids() enforces that order and owns the shared clock.
+function updateFluids(dt) {
   _fluidClock += dt;
+  updateWaterFlow();
+  updateLavaFlow();
+}
+function updateWaterFlow() {
   if (_waterQueue.size === 0) return;
   const todo = [];
   for (const [k, t] of _waterQueue) {
@@ -274,37 +281,67 @@ function updateWaterFlow(dt) {
     const level = (val >> 8) & 15;
     // flowing cell that lost its feed (source removed or path cut by a placed block) dries up,
     // and the dry-out propagates outward so no orphaned puddle is left behind
-    if (!_waterFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueWaterAround(x, y, z); continue; }
-    // water touching lava → this water cell turns to cobblestone
-    {
+    if (!_waterFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueWaterAround(x, y, z, waterDry()); continue; }
+    // funnel retract: any upstream neighbour (lower level, same y) that is draining downward
+    // means this cell is a wasted sideways branch and must dry back. Chains outward one cell
+    // per tick, so a hole opened anywhere upstream collapses the whole horizontal spread.
+    if (level > 0) {
+      let retract = false;
+      for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nv = getBlock(x + dx, y, z + dz);
+        if ((nv & 255) !== B.WATER) continue;
+        if (((nv >> 8) & 15) >= level) continue;                       // must be upstream
+        if (!_hasFluidFloor(B.WATER, x + dx, y, z + dz)) { retract = true; break; }
+      }
+      if (retract) { setBlock(x, y, z, B.AIR); queueWaterAround(x, y, z, waterDry()); continue; }
+    }
+    // water touching lava → this water cell turns to cobblestone, but ONLY if it is resting on a
+    // floor. A falling column is just passing through: it must not weld itself into the wall it
+    // slides past — only the lava side reacts there (see the lava tick).
+    if (_hasFluidFloor(B.WATER, x, y, z)) {
       let touched = false;
       for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
         if ((getBlock(x + dx, y + dy, z + dz) & 255) === B.LAVA) { touched = true; break; }
       }
       if (touched) { setBlock(x, y, z, B.COBBLE); continue; }
     }
-    // flow down first (falling keeps same level)
+    // ALWAYS flow down before considering sideways. A cell whose own floor is open (or holds
+    // thinner water it can top up) drops and does nothing else this tick. When it drops it also
+    // retracts any downstream (higher-level) horizontal sibling — those sideways branches only
+    // existed because there was no downward path; now there is, so they're wasted and must dry.
     if (y > 0) {
-      const bId = getBlock(x, y - 1, z) & 255;
-      if (bId === B.AIR || _isFluidPassable(bId)) {
-        if (bId !== B.AIR) _breakBillboard(x, y - 1, z, bId);
+      const bVal = getBlock(x, y - 1, z), bId = bVal & 255;
+      const openBelow = bId === B.AIR || _isFluidPassable(bId);
+      const thinBelow = bId === B.WATER && ((bVal >> 8) & 15) > level;
+      if (openBelow || thinBelow) {
+        if (openBelow && bId !== B.AIR) _breakBillboard(x, y - 1, z, bId);
         setBlock(x, y - 1, z, B.WATER | (level << 8));
         queueWaterAt(x, y - 1, z);
+        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + dx, nz = z + dz;
+          const nv = getBlock(nx, y, nz);
+          if ((nv & 255) === B.WATER && ((nv >> 8) & 15) > level) {
+            setBlock(nx, y, nz, B.AIR);
+            queueWaterAround(nx, y, nz, waterDry());
+          }
+        }
         continue;
       }
     }
-    // horizontal spread at level+1 (capped at 7).
+    // horizontal spread at level+1 (capped at 7). Requires a real floor: a cell standing on
+    // air/plants/its own fluid is still draining and must never creep sideways.
     // Funnel priority: if any candidate has an open cell below (would drop), spread ONLY into
     // those — prevents fluid from overflowing a plateau when a hole is right next to it.
-    if (level < 7) {
+    if (level < 7 && _hasFluidFloor(B.WATER, x, y, z)) {
       const cands = [];
       for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const nx = x + dx, nz = z + dz;
         const nb = getBlock(nx, y, nz);
         const nbId = nb & 255;
         if (nbId !== B.AIR && !_isFluidPassable(nbId) && !(nbId === B.WATER && level + 1 < ((nb >> 8) & 15))) continue;
-        const below = getBlock(nx, y - 1, nz) & 255;
-        const holed = below === B.AIR || _isFluidPassable(below);
+        const bv = getBlock(nx, y - 1, nz), below = bv & 255;
+        const holed = below === B.AIR || _isFluidPassable(below)
+                   || (below === B.WATER && ((bv >> 8) & 15) > level + 1);
         cands.push({ nx, nz, nbId, holed });
       }
       const anyHoled = cands.some(c => c.holed);
@@ -314,8 +351,21 @@ function updateWaterFlow(dt) {
         setBlock(c.nx, y, c.nz, B.WATER | ((level + 1) << 8));
         queueWaterAt(c.nx, y, c.nz);
       }
+      // re-check self later: if a neighbouring edit opens the floor under this cell, it must
+      // fall rather than keep creeping sideways
+      if (cands.length) queueWaterAt(x, y, z);
     }
   }
+}
+// A fluid cell may only spread sideways when it stands on a REAL floor. Air and sweepable
+// billboards are obviously not floors — but neither is the same fluid: a cell sitting on its
+// own kind is still draining downward, and letting it creep sideways is what made water walk
+// past a hole that had just been opened under it.
+function _hasFluidFloor(fluidId, x, y, z) {
+  if (y <= 0) return true;
+  const bId = getBlock(x, y - 1, z) & 255;
+  if (bId === B.AIR || _isFluidPassable(bId) || bId === fluidId) return false;
+  return true;
 }
 // billboards (cross model — plants, flowers, torches, saplings, cane, sulfur tips) get swept
 // away by advancing fluids. Excludes cactus (solid stack) and non-cross things.
@@ -332,6 +382,7 @@ function _breakBillboard(x, y, z, id) {
 const _lavaQueue = new Map();
 const LAVA_STEP = WATER_STEP * 5;             // 5× slower than water, per block of advance
 const lavaStep = () => LAVA_STEP / tickFactor();
+const lavaDry  = () => LAVA_STEP / (tickFactor() * DRY_SPEEDUP);
 
 function queueLavaAt(x, y, z, delay = lavaStep()) {
   if ((getBlock(x, y, z) & 255) !== B.LAVA) return;
@@ -339,9 +390,9 @@ function queueLavaAt(x, y, z, delay = lavaStep()) {
   const prev = _lavaQueue.get(k);
   if (prev === undefined || t < prev) _lavaQueue.set(k, t);
 }
-function queueLavaAround(x, y, z) {
+function queueLavaAround(x, y, z, delay = lavaStep()) {
   for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])
-    queueLavaAt(x + dx, y + dy, z + dz);
+    queueLavaAt(x + dx, y + dy, z + dz, delay);
 }
 function _lavaFed(x, y, z, level) {
   if (level === 0) return true;
@@ -368,8 +419,8 @@ function dryLavaFrom(sx, sy, sz) {
   }
 }
 const LAVA_MAX_PER_TICK = 128;            // safety valve only; timing comes from per-cell schedule
-function updateLavaFlow(dt) {
-  // _fluidClock is advanced by updateWaterFlow, which always runs first in the frame
+function updateLavaFlow() {
+  // clock is advanced by updateFluids(), which runs water first
   if (_lavaQueue.size === 0) return;
   const todo = [];
   for (const [k, t] of _lavaQueue) {
@@ -383,6 +434,18 @@ function updateLavaFlow(dt) {
     const val = getBlock(x, y, z);
     if ((val & 255) !== B.LAVA) continue;
     const level = (val >> 8) & 15;
+    // funnel retract: mirror of the water rule, kills wasted sideways branches as soon as any
+    // upstream neighbour starts draining downward
+    if (level > 0) {
+      let retract = false;
+      for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nv = getBlock(x + dx, y, z + dz);
+        if ((nv & 255) !== B.LAVA) continue;
+        if (((nv >> 8) & 15) >= level) continue;
+        if (!_hasFluidFloor(B.LAVA, x + dx, y, z + dz)) { retract = true; break; }
+      }
+      if (retract) { setBlock(x, y, z, B.AIR); queueLavaAround(x, y, z, lavaDry()); continue; }
+    }
     // lava touching water: source → obsidian, flowing → stone
     {
       let touched = false;
@@ -391,25 +454,37 @@ function updateLavaFlow(dt) {
       }
       if (touched) { setBlock(x, y, z, level === 0 ? B.OBSIDIAN : B.STONE); continue; }
     }
-    if (!_lavaFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueLavaAround(x, y, z); continue; }
+    if (!_lavaFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueLavaAround(x, y, z, lavaDry()); continue; }
+    // ALWAYS flow down before sideways (see the water version for the rationale + retract rule)
     if (y > 0) {
-      const bId = getBlock(x, y - 1, z) & 255;
-      if (bId === B.AIR || _isFluidPassable(bId)) {
-        if (bId !== B.AIR) _breakBillboard(x, y - 1, z, bId);
+      const bVal = getBlock(x, y - 1, z), bId = bVal & 255;
+      const openBelow = bId === B.AIR || _isFluidPassable(bId);
+      const thinBelow = bId === B.LAVA && ((bVal >> 8) & 15) > level;
+      if (openBelow || thinBelow) {
+        if (openBelow && bId !== B.AIR) _breakBillboard(x, y - 1, z, bId);
         setBlock(x, y - 1, z, B.LAVA | (level << 8));
         queueLavaAt(x, y - 1, z);
+        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + dx, nz = z + dz;
+          const nv = getBlock(nx, y, nz);
+          if ((nv & 255) === B.LAVA && ((nv >> 8) & 15) > level) {
+            setBlock(nx, y, nz, B.AIR);
+            queueLavaAround(nx, y, nz, lavaDry());
+          }
+        }
         continue;
       }
     }
-    if (level < 4) {
+    if (level < 4 && _hasFluidFloor(B.LAVA, x, y, z)) {
       const cands = [];
       for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const nx = x + dx, nz = z + dz;
         const nb = getBlock(nx, y, nz);
         const nbId = nb & 255;
         if (nbId !== B.AIR && !_isFluidPassable(nbId) && !(nbId === B.LAVA && level + 1 < ((nb >> 8) & 15))) continue;
-        const below = getBlock(nx, y - 1, nz) & 255;
-        const holed = below === B.AIR || _isFluidPassable(below);
+        const bv = getBlock(nx, y - 1, nz), below = bv & 255;
+        const holed = below === B.AIR || _isFluidPassable(below)
+                   || (below === B.LAVA && ((bv >> 8) & 15) > level + 1);
         cands.push({ nx, nz, nbId, holed });
       }
       const anyHoled = cands.some(c => c.holed);
@@ -419,6 +494,7 @@ function updateLavaFlow(dt) {
         setBlock(c.nx, y, c.nz, B.LAVA | ((level + 1) << 8));
         queueLavaAt(c.nx, y, c.nz);
       }
+      if (cands.length) queueLavaAt(x, y, z);
     }
   }
 }
@@ -890,8 +966,7 @@ function frame(now) {
   updateVitals(dt);
   processFalling(dt);
   if (!player.canFly) { updateDrops(dt); updateProjectiles(dt); processLeavesDecay(dt); }
-  updateWaterFlow(dt);
-  updateLavaFlow(dt);
+  updateFluids(dt);
   updateTNTs(dt);
   updateSaplings();
   processGrassSpread(dt);
