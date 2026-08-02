@@ -3,3 +3,7 @@ desktop.ini
 .DS_Store
 FutureRoadmap.md
 xd.txt
+*.txt
+*.ini
+*.zip
+.codegraph/
