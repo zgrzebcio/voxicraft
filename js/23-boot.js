@@ -80,7 +80,7 @@ window.__vc = {
 /* ---- background music: loops forever at low volume; starts on first user gesture
    (browsers block autoplay until an interaction) ---- */
 {
-  const bgm = new Audio('sound/Music/Sneaky.mp3');
+  const bgm = new Audio('Sound/Music/Sneaky.mp3');
   bgm.loop = true;
   bgm.volume = 0.1;
   const startMusic = () => {
