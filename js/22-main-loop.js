@@ -206,14 +206,25 @@ function updateEating(dt, wantPlace) {
 let randomTickSpeed = 3;
 const tickFactor = () => Math.max(0.05, randomTickSpeed / 3);
 
-/* ---- water flow simulation ---- */
-const _waterQueue = new Set();
-let _waterTick = 0;
-const WATER_BASE_RATE = 0.90;             // slow flow; divided by tickFactor
-const waterInterval = () => WATER_BASE_RATE / tickFactor();
+/* ---- fluid flow simulation ----
+   Cells are scheduled INDIVIDUALLY, not batch-throttled: the queue is a Map of
+   "x,y,z" -> the sim time at which that cell may act. A cell that spreads schedules its
+   children one STEP later, so the visible advance rate is exactly one block per STEP along
+   each branch regardless of how many cells are pending. (The old global batch cap made a
+   large settled pool starve the actual flow frontier, which stalled flat spreads.) */
+let _fluidClock = 0;
+const _waterQueue = new Map();
+const WATER_STEP = 0.4;                   // seconds per block of advance (at random tick 3)
+const DRY_SPEEDUP = 2.5;                  // drying propagates this much faster than flowing
+const waterStep = () => WATER_STEP / tickFactor();
+const waterDry  = () => WATER_STEP / (tickFactor() * DRY_SPEEDUP);
 
-function queueWaterAt(x, y, z) {
-  if ((getBlock(x, y, z) & 255) === B.WATER) _waterQueue.add(`${x},${y},${z}`);
+// schedule a water cell; `delay` defaults to one full step. An earlier pending time wins.
+function queueWaterAt(x, y, z, delay = waterStep()) {
+  if ((getBlock(x, y, z) & 255) !== B.WATER) return;
+  const k = `${x},${y},${z}`, t = _fluidClock + delay;
+  const prev = _waterQueue.get(k);
+  if (prev === undefined || t < prev) _waterQueue.set(k, t);
 }
 function queueWaterAround(x, y, z) {
   for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])
@@ -245,50 +256,88 @@ function dryWaterFrom(sx, sy, sz) {
     push(x, y, z);
   }
 }
+const WATER_MAX_PER_TICK = 256;           // safety valve only; timing comes from per-cell schedule
 function updateWaterFlow(dt) {
-  _waterTick += dt;
-  const rate = waterInterval();
-  if (_waterTick < rate || _waterQueue.size === 0) return;
-  _waterTick -= rate;
-  const todo = [..._waterQueue];
-  _waterQueue.clear();
+  _fluidClock += dt;
+  if (_waterQueue.size === 0) return;
+  const todo = [];
+  for (const [k, t] of _waterQueue) {
+    if (t > _fluidClock) continue;
+    todo.push(k);
+    if (todo.length >= WATER_MAX_PER_TICK) break;
+  }
+  for (const k of todo) _waterQueue.delete(k);
   for (const key of todo) {
     const [x, y, z] = key.split(',').map(Number);
     const val = getBlock(x, y, z);
     if ((val & 255) !== B.WATER) continue;
     const level = (val >> 8) & 15;
-    // flow down first (falling keeps same level)
-    if (y > 0 && (getBlock(x, y - 1, z) & 255) === B.AIR) {
-      setBlock(x, y - 1, z, B.WATER | (level << 8));
-      queueWaterAt(x, y - 1, z);
-      continue;  // skip horizontal spread this tick
+    // flowing cell that lost its feed (source removed or path cut by a placed block) dries up,
+    // and the dry-out propagates outward so no orphaned puddle is left behind
+    if (!_waterFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueWaterAround(x, y, z); continue; }
+    // water touching lava → this water cell turns to cobblestone
+    {
+      let touched = false;
+      for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+        if ((getBlock(x + dx, y + dy, z + dz) & 255) === B.LAVA) { touched = true; break; }
+      }
+      if (touched) { setBlock(x, y, z, B.COBBLE); continue; }
     }
-    // horizontal spread at level+1 (capped at 7)
+    // flow down first (falling keeps same level)
+    if (y > 0) {
+      const bId = getBlock(x, y - 1, z) & 255;
+      if (bId === B.AIR || _isFluidPassable(bId)) {
+        if (bId !== B.AIR) _breakBillboard(x, y - 1, z, bId);
+        setBlock(x, y - 1, z, B.WATER | (level << 8));
+        queueWaterAt(x, y - 1, z);
+        continue;
+      }
+    }
+    // horizontal spread at level+1 (capped at 7).
+    // Funnel priority: if any candidate has an open cell below (would drop), spread ONLY into
+    // those — prevents fluid from overflowing a plateau when a hole is right next to it.
     if (level < 7) {
+      const cands = [];
       for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const nx = x + dx, nz = z + dz;
         const nb = getBlock(nx, y, nz);
         const nbId = nb & 255;
-        if (nbId === B.AIR) {
-          setBlock(nx, y, nz, B.WATER | ((level + 1) << 8));
-          queueWaterAt(nx, y, nz);
-        } else if (nbId === B.WATER && level + 1 < ((nb >> 8) & 15)) {
-          setBlock(nx, y, nz, B.WATER | ((level + 1) << 8));
-          queueWaterAt(nx, y, nz);
-        }
+        if (nbId !== B.AIR && !_isFluidPassable(nbId) && !(nbId === B.WATER && level + 1 < ((nb >> 8) & 15))) continue;
+        const below = getBlock(nx, y - 1, nz) & 255;
+        const holed = below === B.AIR || _isFluidPassable(below);
+        cands.push({ nx, nz, nbId, holed });
+      }
+      const anyHoled = cands.some(c => c.holed);
+      for (const c of cands) {
+        if (anyHoled && !c.holed) continue;
+        if (c.nbId !== B.AIR && _isFluidPassable(c.nbId)) _breakBillboard(c.nx, y, c.nz, c.nbId);
+        setBlock(c.nx, y, c.nz, B.WATER | ((level + 1) << 8));
+        queueWaterAt(c.nx, y, c.nz);
       }
     }
   }
 }
+// billboards (cross model — plants, flowers, torches, saplings, cane, sulfur tips) get swept
+// away by advancing fluids. Excludes cactus (solid stack) and non-cross things.
+function _isFluidPassable(id) {
+  const p = PROPS[id];
+  return !!p && p.model === 'cross';
+}
+function _breakBillboard(x, y, z, id) {
+  if (!player.canFly)
+    for (const d of blockDrop(id, true)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, y, z);
+}
 
 /* ---- lava flow simulation (same as water but much slower, max spread level 4) ---- */
-const _lavaQueue = new Set();
-let _lavaTick = 0;
-const LAVA_BASE_RATE = 9.0;
-const lavaInterval = () => LAVA_BASE_RATE / tickFactor();
+const _lavaQueue = new Map();
+const LAVA_STEP = WATER_STEP * 5;             // 5× slower than water, per block of advance
+const lavaStep = () => LAVA_STEP / tickFactor();
 
-function queueLavaAt(x, y, z) {
-  if ((getBlock(x, y, z) & 255) === B.LAVA) _lavaQueue.add(`${x},${y},${z}`);
+function queueLavaAt(x, y, z, delay = lavaStep()) {
+  if ((getBlock(x, y, z) & 255) !== B.LAVA) return;
+  const k = `${x},${y},${z}`, t = _fluidClock + delay;
+  const prev = _lavaQueue.get(k);
+  if (prev === undefined || t < prev) _lavaQueue.set(k, t);
 }
 function queueLavaAround(x, y, z) {
   for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])
@@ -303,36 +352,72 @@ function _lavaFed(x, y, z, level) {
   }
   return false;
 }
+// mirror of dryWaterFrom for lava: remove every flowing lava cell that was fed by this source
+function dryLavaFrom(sx, sy, sz) {
+  const work = [];
+  const push = (x, y, z) => { for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,-1,0],[0,1,0]]) work.push([x+dx, y+dy, z+dz]); };
+  push(sx, sy, sz);
+  let guard = 0;
+  while (work.length && guard++ < 50000) {
+    const [x, y, z] = work.pop();
+    const val = getBlock(x, y, z);
+    if ((val & 255) !== B.LAVA) continue;
+    if (_lavaFed(x, y, z, (val >> 8) & 15)) continue;
+    setBlock(x, y, z, B.AIR);
+    push(x, y, z);
+  }
+}
+const LAVA_MAX_PER_TICK = 128;            // safety valve only; timing comes from per-cell schedule
 function updateLavaFlow(dt) {
-  _lavaTick += dt;
-  const rate = lavaInterval();
-  if (_lavaTick < rate || _lavaQueue.size === 0) return;
-  _lavaTick -= rate;
-  const todo = [..._lavaQueue];
-  _lavaQueue.clear();
+  // _fluidClock is advanced by updateWaterFlow, which always runs first in the frame
+  if (_lavaQueue.size === 0) return;
+  const todo = [];
+  for (const [k, t] of _lavaQueue) {
+    if (t > _fluidClock) continue;
+    todo.push(k);
+    if (todo.length >= LAVA_MAX_PER_TICK) break;
+  }
+  for (const k of todo) _lavaQueue.delete(k);
   for (const key of todo) {
     const [x, y, z] = key.split(',').map(Number);
     const val = getBlock(x, y, z);
     if ((val & 255) !== B.LAVA) continue;
     const level = (val >> 8) & 15;
-    if (!_lavaFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); continue; }
-    if (y > 0 && (getBlock(x, y - 1, z) & 255) === B.AIR) {
-      setBlock(x, y - 1, z, B.LAVA | (level << 8));
-      queueLavaAt(x, y - 1, z);
-      continue;
+    // lava touching water: source → obsidian, flowing → stone
+    {
+      let touched = false;
+      for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+        if ((getBlock(x + dx, y + dy, z + dz) & 255) === B.WATER) { touched = true; break; }
+      }
+      if (touched) { setBlock(x, y, z, level === 0 ? B.OBSIDIAN : B.STONE); continue; }
+    }
+    if (!_lavaFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueLavaAround(x, y, z); continue; }
+    if (y > 0) {
+      const bId = getBlock(x, y - 1, z) & 255;
+      if (bId === B.AIR || _isFluidPassable(bId)) {
+        if (bId !== B.AIR) _breakBillboard(x, y - 1, z, bId);
+        setBlock(x, y - 1, z, B.LAVA | (level << 8));
+        queueLavaAt(x, y - 1, z);
+        continue;
+      }
     }
     if (level < 4) {
+      const cands = [];
       for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const nx = x + dx, nz = z + dz;
         const nb = getBlock(nx, y, nz);
         const nbId = nb & 255;
-        if (nbId === B.AIR) {
-          setBlock(nx, y, nz, B.LAVA | ((level + 1) << 8));
-          queueLavaAt(nx, y, nz);
-        } else if (nbId === B.LAVA && level + 1 < ((nb >> 8) & 15)) {
-          setBlock(nx, y, nz, B.LAVA | ((level + 1) << 8));
-          queueLavaAt(nx, y, nz);
-        }
+        if (nbId !== B.AIR && !_isFluidPassable(nbId) && !(nbId === B.LAVA && level + 1 < ((nb >> 8) & 15))) continue;
+        const below = getBlock(nx, y - 1, nz) & 255;
+        const holed = below === B.AIR || _isFluidPassable(below);
+        cands.push({ nx, nz, nbId, holed });
+      }
+      const anyHoled = cands.some(c => c.holed);
+      for (const c of cands) {
+        if (anyHoled && !c.holed) continue;
+        if (c.nbId !== B.AIR && _isFluidPassable(c.nbId)) _breakBillboard(c.nx, y, c.nz, c.nbId);
+        setBlock(c.nx, y, c.nz, B.LAVA | ((level + 1) << 8));
+        queueLavaAt(c.nx, y, c.nz);
       }
     }
   }

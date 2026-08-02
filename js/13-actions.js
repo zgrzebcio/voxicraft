@@ -212,6 +212,24 @@ function doPlace() {
   const heldId = slotId(HOTBAR[hotbarSel]);
   // buckets: fill empty bucket from a water source, or pour a water source from a full one
   if (heldId === ITEM.BUCKET || heldId === ITEM.WATER_BUCKET || heldId === ITEM.LAVA_BUCKET) { useBucket(heldId, hit); return; }
+  // sulfur tip: only placeable on the top or bottom face of a sulfur block.
+  // Face → variant: top face = 0 (upward tip), bottom face = 1 (downward tip).
+  if (heldId === B.SULFUR_UP_TIP) {
+    if (hit.id !== B.SULFUR_BLOCK) return;
+    if (hit.ny !== 1 && hit.ny !== -1) return;
+    const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
+    const cur = getBlock(px, py, pz) & 255;
+    if (cur !== B.AIR && cur !== B.WATER) return;
+    const varb = hit.ny === 1 ? 0 : 1;
+    setBlock(px, py, pz, B.SULFUR_UP_TIP | (varb << 8));
+    handPlaceSwing = true;
+    if (!player.canFly) {
+      const s = HOTBAR[hotbarSel]; s.count--;
+      if (s.count <= 0) HOTBAR[hotbarSel] = null;
+      saveHotbar(); updateHotbar(); buildHotbar();
+    }
+    return;
+  }
   // snow carpet placed onto a cross/billboard plant -> replaces the plant in the same cell
   if (heldId === B.SNOW_CARPET && PROPS[hit.id] && PROPS[hit.id].model === 'cross' && isSolid(hit.x, hit.y - 1, hit.z)) {
     setBlock(hit.x, hit.y, hit.z, B.SNOW_CARPET);
@@ -261,7 +279,7 @@ function doPlace() {
   }
   const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
   const cur = getBlock(px, py, pz) & 255;
-  if (cur !== B.AIR && cur !== B.WATER) {                   // only into air or water...
+  if (cur !== B.AIR && cur !== B.WATER && cur !== B.LAVA) {  // only into air/water/lava...
     // ...case 2: unless the target cell holds a single slab the held slab can complete
     if (heldSlab && PROPS[cur].model === 'slab') {
       const tv = (getBlock(px, py, pz) >> 8) & 255;

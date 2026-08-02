@@ -123,12 +123,16 @@ function VOXEL_CORE() {
   PROPS[B.SULFUR_BLOCK] = { name:'Sulfur block', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, faces:[T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK] };
   // Sulfur tip billboards: cross model, two orientations. Down tip = stalactite (from ceiling),
   // up tip = stalagmite (from floor). Break drops ITEM.SULFUR only (handled in blockDrop).
-  PROPS[B.SULFUR_DOWN_TIP] = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:60, hardness:0.6, boxes:[[0.2,0.2,0.2,0.8,1,0.8]], faces:[T.SULFUR_DOWN_TIP] };
-  PROPS[B.SULFUR_UP_TIP]   = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:60, hardness:0.6, boxes:[[0.2,0,0.2,0.8,0.8,0.8]], faces:[T.SULFUR_UP_TIP] };
+  // Sulfur tip — single placeable block with rotation via variant (0 = up, 1 = down).
+  // Legacy SULFUR_DOWN_TIP kept for storage compatibility, hidden from inventory, drops as SULFUR_UP_TIP.
+  PROPS[B.SULFUR_DOWN_TIP] = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', noInv:true, stack:60, hardness:0.6, boxes:[[0.2,0.2,0.2,0.8,1,0.8]], faces:[T.SULFUR_DOWN_TIP] };
+  PROPS[B.SULFUR_UP_TIP]   = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:60, hardness:0.6, boxes:[[0.2,0,0.2,0.8,0.8,0.8]], faces:[T.SULFUR_UP_TIP] };
   // TNT: full cube. Variant byte's low bit (0/1) is the "lit" blink flag — mesher swaps faces to
   // the snow (white) tile when set, so a ticking TNT visibly pulses. hardness 0.5 for a quick pre-arm
   // break; a separate map (TNTS in 22-main-loop.js) protects blocks with an active fuse.
   PROPS[B.TNT] = { name:'TNT', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:0.5, faces:[T.TNT_SIDE,T.TNT_SIDE,T.TNT_TOP,T.TNT_BOTTOM,T.TNT_SIDE,T.TNT_SIDE] };
+  // Obsidian: dark blast/lava-quench block. Very hard, pickaxe required (see MINE_REQ / TOOL_BLOCKS).
+  PROPS[B.OBSIDIAN] = { name:'Obsidian', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:30, faces:[T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN] };
   // Saplings — placed on grass, grow into a tree after 7..14 in-game days (tracked in SAPLINGS map)
   PROPS[B.OAK_SAPLING]   = { name:'Oak sapling',   solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.OAK_SAPLING] };
   PROPS[B.BIRCH_SAPLING] = { name:'Birch sapling', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.BIRCH_SAPLING] };
@@ -1027,7 +1031,7 @@ function VOXEL_CORE() {
           if (airTop && (tipHash === undefined || tipHash < 0.5))
             data[idx(bx, by + 1, bz)] = B.SULFUR_UP_TIP;
           if (airBot && (tipHash === undefined || tipHash >= 0.5))
-            data[idx(bx, by - 1, bz)] = B.SULFUR_DOWN_TIP;
+            data[idx(bx, by - 1, bz)] = B.SULFUR_UP_TIP | (1 << 8);   // variant 1 = down orientation
         };
         // (a) under-lava clusters
         for (let z = 0; z < CZ; z++) for (let x = 0; x < CX; x++) {
@@ -1698,8 +1702,10 @@ function VOXEL_CORE() {
 
     // ---- non-cube: cross/billboard (plants) ----
     // Two diagonal quads, each emitted front + back (double-sided)
-    function emitCross(x, y, z, blockId) {
-      const tile = PROPS[blockId].faces[0];
+    function emitCross(x, y, z, blockId, varb) {
+      // sulfur tip: variant 1 = flipped/down orientation, swap tile to the down-tip texture
+      let tile = PROPS[blockId].faces[0];
+      if (blockId === B.SULFUR_UP_TIP && (varb & 1)) tile = T.SULFUR_DOWN_TIP;
       const lite = gl(x, y + 1, z);
       const sh = 210;
       quad(1,[x,y,z+1],[x+1,y,z],[x+1,y+1,z],[x,y+1,z+1], [0,0],[1,0],[1,1],[0,1],tile,sh,lite);
@@ -1710,8 +1716,9 @@ function VOXEL_CORE() {
     for (let y = 1; y < Math.min(199, yCap); y++)
       for (let z = 0; z < 16; z++)
         for (let x = 0; x < 16; x++) {
-          const bid = data[x + (z << 4) + (y << 8)] & 255;
-          if (PROPS[bid] && PROPS[bid].model === 'cross') emitCross(x, y, z, bid);
+          const val = data[x + (z << 4) + (y << 8)];
+          const bid = val & 255;
+          if (PROPS[bid] && PROPS[bid].model === 'cross') emitCross(x, y, z, bid, (val >> 8) & 255);
         }
 
     // ---- non-cube: cactus — full-height column, side faces inset 1/16 (thin look) ----
@@ -2100,6 +2107,8 @@ function blockDrop(blockId, isNatural = false) {
   if (blockId === B.SUGAR_CANE) return [{ id: ITEM.SUGAR_CANE, count: 1 }];
   if (blockId === B.OAK_SAPLING || blockId === B.BIRCH_SAPLING) return [{ id: blockId, count: 1 }];
   if (blockId === B.SULFUR_DOWN_TIP || blockId === B.SULFUR_UP_TIP) {
+    // legacy DOWN_TIP still drops sulfur so terrain-generated tips work; both variants of the
+    // canonical SULFUR_UP_TIP block also drop sulfur only (never the tip back)
     const n = Math.floor(Math.random() * 3);   // 0..2
     return n > 0 ? [{ id: ITEM.SULFUR, count: n }] : [];
   }

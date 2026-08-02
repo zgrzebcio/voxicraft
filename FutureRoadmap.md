@@ -39,49 +39,50 @@ legends: B = big update, M= medium update, S = small update
 37. M: ~~hoe, hay block~~. 0.47
 38. B: ~~canyons, Caves block update~~ v0.5
 39. M: ~~fix canyon and more cave entrance~~ v0.51
-40. M: more caves ore tin/copper/gold v0.55
+40. M: ~~more caves ore tin/copper/gold~~ v0.55
 41. M: ~~sulfur~~, ~~gunpowder and TNT with explosion~~. v0.58
 42. M: ~~lava pools on top and in caves~~. v0.56
-43. M: obsidian block with fluid connecting to create obsidian and stone. 0.595
+43. M: ~~obsidian block with fluid connecting to create obsidian and stone~~. 0.595
 44. M: ~~new biome and blocks~~ v0.54
 45. M: ~~grass and popy and sunflower, orchid flowers.~~ 0.53
-46. S: sapling, sugarcane and growing system. 0.59
+46. S: ~~sapling, sugarcane and growing system~~. 0.59
 47. M: ~~Lake better rivers, and small ponds.~~
 48. S: ~~snow carpet in snow biome with new snow biome~~. 0.57
 49. B: first mob as player so with own inventory and are neutral as enemy. v0.6
 50. S: weapon like sword, add string, flint, feather items.
 51. S: new mob: sheep with mutton and wool block and shears tool.
 52. M: chest and inventory transferring and item manage,
-53. S: fiber and cloth more item.
+53. S: fiber seeds and cloth more item.
 54. M: armor system, and defense.
 55. M: belt with accessories.
-56. M: Structure system.
-57. B: leveling system. v0.7
-58. S: hostile mobs like zombie with animations.
-59. S: cow and leather with steak, crafting leather armor.
-60. S: horse and saddle.
-61. M: pig, chicken, bear.
-62. M: fishing rod and fishing cod, pike, salmon.
-63. M: backpack system.
-64. M: boats and swimming it.
-65. S: farming system.
-66. M: heatstroke and sandstorm weather.
-67. B: weather and season system. v0.8
-68. S: bed with sleep through night or rain.
-69. S: bow arrow and skeleton
-70. M: cloud and rain weather snowing with snow carpet block.
-71. M: drinking and temperature system.
-72. M: ice block new mores biomes winter season.
-73. M: adding more flower and dyes
-74. B: electric update add new ore and generator v0.9
-75. M: electric cables and batteries.
-76. M: crusher and ore powder
-77. M: electric furnace
-78. M: bronze a lot new stuff.
-79. M: Steel and resin other machines.
-80. M: Particles a lot
-81. B: sound effect 1.0 FULL GAME!
-82. M: Achievements update
+56. S: flat terrain mostly for testing.
+57. M: Structure system.
+58. B: leveling system. v0.7
+59. S: hostile mobs like zombie with animations.
+60. S: cow and leather with steak, crafting leather armor.
+61. S: horse and saddle.
+62. M: pig, chicken, bear.
+63. M: fishing rod and fishing cod, pike, salmon.
+64. M: backpack system.
+65. M: boats and swimming it.
+66. S: farming system.
+67. M: heatstroke and sandstorm weather.
+68. B: weather and season system. v0.8
+69. S: bed with sleep through night or rain.
+70. S: bow arrow and skeleton
+71. M: cloud and rain weather snowing with snow carpet block.
+72. M: drinking and temperature system.
+73. M: ice block new mores biomes winter season.
+74. M: adding more flower and dyes
+75. B: electric update add new ore and generator v0.9
+76. M: electric cables and batteries.
+77. M: crusher and ore powder
+78. M: electric furnace
+79. M: bronze a lot new stuff.
+80. M: Steel and resin other machines.
+81. M: Particles a lot
+82. B: sound effect 1.0 FULL GAME!
+83. M: Achievements update
 
 
 

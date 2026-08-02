@@ -70,7 +70,7 @@ const TEXTURES = {
   sulfur_block:         'textures/Blocks/Natures/sulfur.png',
   sulfur_down_tip:      'textures/Billboards/sulfur_down_tip.png',
   sulfur_up_tip:        'textures/Billboards/sulfur_up_tip.png',
-  sugar_cane:            'textures/Billboards/Plants/sugar_cane.png',
+  sugar_cane:           'textures/Billboards/Plants/sugar_cane.png',
   oak_sapling:          'textures/Billboards/Plants/oak_sapling.png',
   birch_sapling:        'textures/Billboards/Plants/birch_sapling.png',
 };

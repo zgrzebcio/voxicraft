@@ -344,6 +344,23 @@ function setBlock(x, y, z, val) {
     const below = getBlock(x, y - 1, z);
     if ((below & 255) === B.GRASS && ((below >> 8) & 255) === V.GRASS_SNOWY) setBlock(x, y - 1, z, B.GRASS);
   }
+  // fluid contact reactions: placing water next to lava (or vice versa) must trigger the
+  // opposite fluid's own tick queue so the transmute rules (obsidian/stone/cobble) fire.
+  if (newId === B.WATER) queueLavaAround(x, y, z);
+  if (newId === B.LAVA)  queueWaterAround(x, y, z);
+  // any block change ripples nearby fluids: cleared cells let them fill, placed cells might cut
+  // off flow. Cheap because queueWaterAt/queueLavaAt no-op unless neighbour is actually fluid.
+  if (newId !== B.WATER && newId !== B.LAVA) {
+    queueWaterAround(x, y, z);
+    queueLavaAround(x, y, z);
+  }
+  // fluid on top of grass block wears it back to dirt (any level, water or lava)
+  if ((newId === B.WATER || newId === B.LAVA) && y > 0 && (getBlock(x, y - 1, z) & 255) === B.GRASS)
+    setBlock(x, y - 1, z, B.DIRT);
+  // water source destroyed (replaced by anything non-water): dry every flowing cell it fed
+  if (oldId === B.WATER && ((oldVal >> 8) & 15) === 0 && newId !== B.WATER) dryWaterFrom(x, y, z);
+  // same rule for lava sources
+  if (oldId === B.LAVA && ((oldVal >> 8) & 15) === 0 && newId !== B.LAVA) dryLavaFrom(x, y, z);
   // furnace removed/replaced: spill its contents and drop the state
   if (oldId === B.FURNACE && newId !== B.FURNACE) furnaceBroken(x, y, z);
   // door half removed: take the other half + the animated mesh with it
@@ -368,6 +385,15 @@ function setBlock(x, y, z, val) {
       setBlock(x, y + 1, z, B.AIR);
       if (!player.canFly)
         for (const d of blockDrop(above)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, y + 1, z);
+    }
+  }
+  // sulfur down-tip hangs from the block ABOVE — pop it when that ceiling block is destroyed
+  if (newId === B.AIR && y > 0) {
+    const bVal = getBlock(x, y - 1, z);
+    if ((bVal & 255) === B.SULFUR_UP_TIP && ((bVal >> 8) & 1)) {
+      setBlock(x, y - 1, z, B.AIR);
+      if (!player.canFly)
+        for (const d of blockDrop(B.SULFUR_UP_TIP)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, y - 1, z);
     }
   }
   // gravity: clear below a gravity block → it falls; gravity block placed above air → also falls
