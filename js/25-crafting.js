@@ -6,32 +6,37 @@
    opens the ADVANCED list (basic + bench-only recipes). No grid patterns — having the
    ingredients anywhere in hotbar+inventory is enough. */
 
-// recipe: { in: [[id, count], ...], out: [id, count] }
+/* recipe: { in: [[id, count], ...], out: [id, count] }
+   An ingredient id may also be an ARRAY of interchangeable ids — a variant group. Any mix of
+   them satisfies the requirement (4 oak + 5 birch planks crafts a bench), and the row's icon
+   cycles through the group every CRAFT_VARIANT_MS so you can see what else is accepted. */
+const V_PLANKS = [B.PLANKS, B.BIRCH_PLANKS];
+const V_LOG    = [B.LOG, B.BIRCH_LOG];
+const V_STONE  = [B.COBBLE, B.STONE];          // anything that takes cobble takes stone too
+
 const RECIPES_BASIC = [
   { in: [[B.LOG, 1]],                                                        out: [B.PLANKS, 3] },
   { in: [[B.BIRCH_LOG, 1]],                                                  out: [B.BIRCH_PLANKS, 3] },
-  { in: [[B.PLANKS, 2]],                                                     out: [ITEM.STICK, 6] },
-  { in: [[B.BIRCH_PLANKS, 2]],                                               out: [ITEM.STICK, 6] },
-  { in: [[B.PLANKS, 1]],                                                     out: [B.OAKSLAB, 2] },
+  { in: [[V_PLANKS, 2]],                                                     out: [ITEM.STICK, 6] },
+  { in: [[V_PLANKS, 1]],                                                     out: [B.OAKSLAB, 2] },
   { in: [[ITEM.SNOWBALL, 4]],                                                out: [B.SNOW, 1] },
   { in: [[ITEM.WHEAT, 9]],                                                   out: [B.HAY, 1] },
   { in: [[ITEM.CLAY_BALL, 4]],                                               out: [B.CLAY, 1] },
   { in: [[ITEM.COAL, 1]],                                                    out: [ITEM.COAL_CHUNK, 8] },
-  { in: [[B.PLANKS, 4]],                                                     out: [B.CRAFTING_BENCH, 1] },
-  { in: [[B.BIRCH_PLANKS, 4]],                                               out: [B.CRAFTING_BENCH, 1] },
+  { in: [[V_PLANKS, 4]],                                                     out: [B.CRAFTING_BENCH, 1] },
   { in: [[ITEM.BOWL, 1], [B.RED_MUSHROOM, 1], [B.BROWN_MUSHROOM, 1]],        out: [ITEM.MUSHROOM_STEW, 1] },
   { in: [[ITEM.COAL, 1], [ITEM.STICK, 1]],                                   out: [B.TORCH, 4] },
   { in: [[ITEM.GLASS_SHARD, 4]],                                             out: [B.GLASS, 1] },
   { in: [[ITEM.SUGAR_CANE, 1]],                                              out: [ITEM.SUGAR, 2] },
   { in: [[B.STONE, 1]],                                                      out: [B.STONE_BRICK, 1] },
   { in: [[ITEM.BRICK, 4]],                                                   out: [B.BRICKS, 1] },
+  { in: [[ITEM.IRON_INGOT, 2]],                                              out: [ITEM.IRON_SHEARS, 1] },
 ];
 const RECIPES_ADVANCED = [
   { in: [[ITEM.COAL_CHUNK, 8]],                                              out: [ITEM.COAL, 1] },
   { in: [[B.STONE, 1], [ITEM.FLINT, 1], [ITEM.COAL, 1]],                     out: [ITEM.GLOW_DUST, 1] },
-  { in: [[B.PLANKS, 3]],                                                     out: [ITEM.BOWL, 4] },
-  { in: [[B.BIRCH_PLANKS, 3]],                                               out: [ITEM.BOWL, 4] },
-  { in: [[B.COBBLE, 8]],                                                     out: [B.FURNACE, 1] },
+  { in: [[V_PLANKS, 3]],                                                     out: [ITEM.BOWL, 4] },
+  { in: [[V_STONE, 8]],                                                      out: [B.FURNACE, 1] },
   { in: [[ITEM.IRON_INGOT, 1]],                                              out: [ITEM.IRON_NUGGET, 9] },
   { in: [[ITEM.IRON_NUGGET, 9]],                                             out: [ITEM.IRON_INGOT, 1] },
   { in: [[ITEM.GOLD_INGOT, 1]],                                              out: [ITEM.GOLD_NUGGET, 9] },
@@ -40,28 +45,33 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.TIN_NUGGET, 9]],                                              out: [ITEM.TIN_INGOT, 1] },
   { in: [[ITEM.COPPER_INGOT, 1]],                                            out: [ITEM.COPPER_NUGGET, 9] },
   { in: [[ITEM.COPPER_NUGGET, 9]],                                           out: [ITEM.COPPER_INGOT, 1] },
-  { in: [[B.PLANKS, 6]],                                                     out: [B.DOOR, 1] },
-  { in: [[B.PLANKS, 3]],                                                     out: [B.STAIRS, 2] },
+  { in: [[V_PLANKS, 6]],                                                     out: [B.DOOR, 1] },
+  { in: [[V_PLANKS, 3]],                                                     out: [B.STAIRS, 2] },
+  { in: [[ITEM.DIAMOND, 3], [ITEM.STICK, 2]],                                out: [ITEM.DIAMOND_SWORD, 1] },
   { in: [[ITEM.DIAMOND, 1], [ITEM.STICK, 3]],                                out: [ITEM.DIAMOND_SHOVEL, 1] },
   { in: [[ITEM.DIAMOND, 5], [ITEM.STICK, 3]],                                out: [ITEM.DIAMOND_PICKAXE, 1] },
   { in: [[ITEM.DIAMOND, 4], [ITEM.STICK, 3]],                                out: [ITEM.DIAMOND_HATCHET, 1] },
-  { in: [[ITEM.DIAMOND, 3], [ITEM.STICK, 3]],                                out: [ITEM.DIAMOND_HOE, 1] },
+  { in: [[ITEM.DIAMOND, 2], [ITEM.STICK, 3]],                                out: [ITEM.DIAMOND_HOE, 1] },
+  { in: [[ITEM.GOLD_INGOT, 3], [ITEM.STICK, 2]],                             out: [ITEM.GOLDEN_SWORD, 1] },
   { in: [[ITEM.GOLD_INGOT, 1], [ITEM.STICK, 3]],                             out: [ITEM.GOLDEN_SHOVEL, 1] },
   { in: [[ITEM.GOLD_INGOT, 5], [ITEM.STICK, 3]],                             out: [ITEM.GOLDEN_PICKAXE, 1] },
   { in: [[ITEM.GOLD_INGOT, 4], [ITEM.STICK, 3]],                             out: [ITEM.GOLDEN_HATCHET, 1] },
-  { in: [[ITEM.GOLD_INGOT, 3], [ITEM.STICK, 3]],                             out: [ITEM.GOLDEN_HOE, 1] },
+  { in: [[ITEM.GOLD_INGOT, 2], [ITEM.STICK, 3]],                             out: [ITEM.GOLDEN_HOE, 1] },
+  { in: [[ITEM.IRON_INGOT, 3], [ITEM.STICK, 2]],                             out: [ITEM.IRON_SWORD, 1] },
   { in: [[ITEM.IRON_INGOT, 1], [ITEM.STICK, 3]],                             out: [ITEM.IRON_SHOVEL, 1] },
   { in: [[ITEM.IRON_INGOT, 5], [ITEM.STICK, 3]],                             out: [ITEM.IRON_PICKAXE, 1] },
   { in: [[ITEM.IRON_INGOT, 4], [ITEM.STICK, 3]],                             out: [ITEM.IRON_HATCHET, 1] },
-  { in: [[ITEM.IRON_INGOT, 3], [ITEM.STICK, 3]],                             out: [ITEM.IRON_HOE, 1] },
-  { in: [[B.COBBLE, 1], [ITEM.STICK, 3]],                                    out: [ITEM.STONE_SHOVEL, 1] },
-  { in: [[B.COBBLE, 5], [ITEM.STICK, 3]],                                    out: [ITEM.STONE_PICKAXE, 1] },
-  { in: [[B.COBBLE, 4], [ITEM.STICK, 3]],                                    out: [ITEM.STONE_HATCHET, 1] },
-  { in: [[B.COBBLE, 3], [ITEM.STICK, 3]],                                    out: [ITEM.STONE_HOE, 1] },
-  { in: [[B.PLANKS, 1], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_SHOVEL, 1] },
-  { in: [[B.PLANKS, 5], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_PICKAXE, 1] },
-  { in: [[B.PLANKS, 4], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_HATCHET, 1] },
-  { in: [[B.PLANKS, 3], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_HOE, 1] },
+  { in: [[ITEM.IRON_INGOT, 2], [ITEM.STICK, 3]],                             out: [ITEM.IRON_HOE, 1] },
+  { in: [[V_STONE, 3], [ITEM.STICK, 2]],                                     out: [ITEM.STONE_SWORD, 1] },
+  { in: [[V_STONE, 1], [ITEM.STICK, 3]],                                     out: [ITEM.STONE_SHOVEL, 1] },
+  { in: [[V_STONE, 5], [ITEM.STICK, 3]],                                     out: [ITEM.STONE_PICKAXE, 1] },
+  { in: [[V_STONE, 4], [ITEM.STICK, 3]],                                     out: [ITEM.STONE_HATCHET, 1] },
+  { in: [[V_STONE, 2], [ITEM.STICK, 3]],                                     out: [ITEM.STONE_HOE, 1] },
+  { in: [[V_PLANKS, 3], [ITEM.STICK, 2]],                                    out: [ITEM.WOODEN_SWORD, 1] },
+  { in: [[V_PLANKS, 1], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_SHOVEL, 1] },
+  { in: [[V_PLANKS, 5], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_PICKAXE, 1] },
+  { in: [[V_PLANKS, 4], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_HATCHET, 1] },
+  { in: [[V_PLANKS, 2], [ITEM.STICK, 3]],                                    out: [ITEM.WOODEN_HOE, 1] },
   { in: [[ITEM.IRON_INGOT, 3]],                                              out: [ITEM.BUCKET, 1] },
   { in: [[ITEM.WHEAT, 3]],                                                   out: [ITEM.FLOUR, 1] },
   { in: [[ITEM.FLOUR, 3], [B.PUMPKIN, 1]],                                   out: [ITEM.PUMPKIN_PIE, 1] },
@@ -76,11 +86,14 @@ let craftMode = 'basic';
 const craftRecipes = () => craftMode === 'advanced' ? [...RECIPES_BASIC, ...RECIPES_ADVANCED] : RECIPES_BASIC;
 const idName = (id) => id >= 256 ? ITEM_PROPS[id].name : PROPS[id].name;
 
+// an ingredient entry is either a bare id or a variant group; normalise to a list
+const ingIds = (id) => Array.isArray(id) ? id : [id];
 // total count of an id across hotbar + inventory
 function invCount(id) {
   let n = 0;
-  for (const s of HOTBAR)   if (s && s.id === id) n += s.count;
-  for (const s of invSlots) if (s && s.id === id) n += s.count;
+  const ids = ingIds(id);
+  for (const s of HOTBAR)   if (s && ids.includes(s.id)) n += s.count;
+  for (const s of invSlots) if (s && ids.includes(s.id)) n += s.count;
   return n;
 }
 const canCraft = (r) => r.in.every(([id, n]) => invCount(id) >= n);
@@ -91,10 +104,11 @@ function doCraft(r) {
   const hot = HOTBAR.map(s => s && { ...s }), inv = invSlots.map(s => s && { ...s });
   for (const [id, need] of r.in) {                  // consume ingredients (inventory first)
     let n = need;
+    const ids = ingIds(id);                         // a variant group drains from any member
     for (const arr of [inv, hot])
       for (let i = 0; i < arr.length && n > 0; i++) {
         const s = arr[i];
-        if (s && s.id === id) {
+        if (s && ids.includes(s.id)) {
           const t = Math.min(s.count, n);
           s.count -= t; n -= t;
           if (s.count <= 0) arr[i] = null;
@@ -134,6 +148,23 @@ function cycleCraftCategory(dir) {         // dir = +1 (RB) / -1 (LB); wraps
 }
 let _craftScroll = 0;                       // saved scroll position preserved across doCraft rebuild
 
+/* Variant cycling: rather than rebuilding the panel (which would fight the scroll position),
+   a ticker rewrites the icon and tooltip of every ingredient that has a variant group. */
+const CRAFT_VARIANT_MS = 2000;
+let _variantPhase = 0;
+setInterval(() => {
+  _variantPhase++;
+  const panel = document.getElementById('craftPanel');
+  if (!panel || panel.style.display === 'none') return;
+  for (const el of panel.querySelectorAll('.cing[data-ids]')) {
+    const ids = el.dataset.ids.split(',').map(Number);
+    const shown = ids[_variantPhase % ids.length];
+    const img = el.querySelector('img');
+    if (img) img.src = renderBlockIcon(shown);
+    el.dataset.name = idName(shown);
+  }
+}, CRAFT_VARIANT_MS);
+
 // populates the permanent #craftPanel div whenever the inventory rebuilds
 function buildCraftPanel() {
   const panel = document.getElementById('craftPanel');
@@ -171,8 +202,12 @@ function buildCraftPanel() {
     let html = '';
     for (const [id, n] of r.in) {
       const have = invCount(id) >= n;
-      html += `<span class="cing${have ? '' : ' miss'}" data-name="${idName(id)}">` +
-              `<img src="${renderBlockIcon(id)}" alt="">${n > 1 ? `<b>${n}</b>` : ''}</span>`;
+      const ids = ingIds(id);
+      // variant groups carry their whole id list so the cycler can swap icon + tooltip in place
+      const shown = ids[_variantPhase % ids.length];
+      const attr = ids.length > 1 ? ` data-ids="${ids.join(',')}"` : '';
+      html += `<span class="cing${have ? '' : ' miss'}" data-name="${idName(shown)}"${attr}>` +
+              `<img src="${renderBlockIcon(shown)}" alt="">${n > 1 ? `<b>${n}</b>` : ''}</span>`;
     }
     const [oid, on] = r.out;
     html += `<button class="cbtn" data-name="${idName(oid)}">` +

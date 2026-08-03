@@ -27,10 +27,26 @@ const _armUpper = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.27, 0.72), _matSl
 _armUpper.position.z = 0.84;
 
 /* ─── held-item container ─── */
+/* Pose is re-applied per item in _rebuildHeld: blocks/generic items keep the old loose grip,
+   while tools and weapons get a dedicated "held by the handle" pose (see HELD_POSE). */
 const heldGroup = new THREE.Group();
 heldGroup.position.set(0.02, 0.12, -0.44);  // connected to hand tip
 heldGroup.scale.setScalar(0.60);             // larger item in hand
 heldGroup.rotation.set(-0.15, -0.52, 0.30); // -0.52 rad ≈ 30° left rotation
+
+/* Tool/weapon grip.
+   Item sprites are built as an upright quad in the XY plane with the icon's handle in the
+   LOWER-LEFT corner and the head in the upper-right, so the shaft runs along the (1,1,0)
+   diagonal. Euler order is XYZ, i.e. Z is applied first:
+     Rz(+45°)  swings that diagonal onto +Y, so the tool now stands straight up
+     Ry(-0.55) yaws it to the right (negative Y swings the tip toward +X)
+     Rx(-70°)  tips the top away from the camera, pointing it forward into the scene
+   The inner group then slides the sprite so its lower-left (the handle) sits on the pivot,
+   which is what makes the fist grab the handle instead of the middle of the blade. */
+const HELD_POSE = {
+  tool:  { pos: [0.10, -0.01, -0.30], scale: 0.95, rot: [-70 * Math.PI / 180, -0.55, Math.PI / 4], grip: 0.42 },
+  block: { pos: [0.02, 0.12, -0.44],  scale: 0.60, rot: [-0.15, -0.52, 0.30],        grip: 0 },
+};
 
 /* ─── arm pivot — swing / bob animations rotate this ─── */
 const armPivot = new THREE.Group();
@@ -70,8 +86,25 @@ function _rebuildHeld(id) {
   if (id === null) return;
   const passes = buildDropGeom(id);
   const isCross = id < 256 && PROPS[id]?.model === 'cross';
-  const mountY = isCross ? 0.35 : 0;
-  const target = mountY !== 0 ? (() => { const g = new THREE.Group(); g.position.y = mountY; heldGroup.add(g); return g; })() : heldGroup;
+  // anything with a tool type (pick/shovel/hatchet/hoe/sword) is gripped by its handle
+  const isTool = id >= 256 && !!ITEM_PROPS[id]?.tool;
+  const pose = isTool ? HELD_POSE.tool : HELD_POSE.block;
+  heldGroup.position.set(...pose.pos);
+  heldGroup.scale.setScalar(pose.scale);
+  heldGroup.rotation.set(...pose.rot);
+  let target = heldGroup;
+  if (pose.grip) {
+    // shift the sprite diagonally so its lower-left handle corner lands on the pivot
+    const g = new THREE.Group();
+    g.position.set(pose.grip, pose.grip, 0);
+    heldGroup.add(g);
+    target = g;
+  } else if (isCross) {
+    const g = new THREE.Group();
+    g.position.y = 0.35;
+    heldGroup.add(g);
+    target = g;
+  }
   for (const { p, geo, mat: mo } of passes)
     target.add(new THREE.Mesh(geo, mo || MATERIALS[p]));
 }

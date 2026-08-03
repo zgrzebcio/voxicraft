@@ -31,12 +31,13 @@ function buildInventory() {
   invEl.innerHTML =
     '<div class="title">Inventory</div>' +
     '<div class="hint">drag: hold <b>LMB</b>/<b>A</b> &middot; quick-move: <b>Shift+LMB</b>/<b>Y</b> &middot; close: <b>E</b>/<b>B</b></div>';
-  // one 3×9 grid bound to a slot array + region; DOM order == slot index (slot 0 = bottom-left)
+  // one N×9 grid bound to a slot array + region; DOM order == slot index (slot 0 = bottom-left)
   const mkGrid = (arr, region) => {
     const grid = document.createElement('div');
     grid.className = 'grid';
     grid.dataset.region = region;
-    for (let row = 0; row < 3; row++) {           // row 0 renders at the bottom
+    const rows = Math.ceil(arr.length / 9);       // row count follows the array, not a fixed 3
+    for (let row = 0; row < rows; row++) {        // row 0 renders at the bottom
       const rowEl = document.createElement('div');
       rowEl.className = 'row';
       for (let col = 0; col < 9; col++) {
@@ -49,8 +50,15 @@ function buildInventory() {
     }
     return grid;
   };
-  // creative: a second grid sits ABOVE the main one (overflow palette / future survival backpack)
-  if (player.canFly) invEl.appendChild(mkGrid(invSlots2, 'inv2'));
+  // Creative: the overflow palette sits ABOVE the main grid inside a fixed-height scroller, so
+  // adding rows to it grows the scroll range instead of the panel.
+  if (player.canFly) {
+    const scroller = document.createElement('div');
+    scroller.className = 'invScroll';
+    scroller.appendChild(mkGrid(invSlots2, 'inv2'));
+    invEl.appendChild(scroller);
+    scroller.scrollTop = scroller.scrollHeight;     // start at the bottom row, next to the main grid
+  }
   invEl.appendChild(mkGrid(invSlots, 'inv'));
   // survival: crafting list on the left, plus the furnace GUI on the right when one is open
   if (!player.canFly) buildCraftPanel();

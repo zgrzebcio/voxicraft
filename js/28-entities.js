@@ -90,22 +90,103 @@ function buildHumanoid() {
   const legL = _limb(mat, 4, 12, 4, 16, 48);
   legL.position.set(2 * PX, 12 * PX, 0);
   root.add(head, body, armR, armL, legR, legL);
-  return { root, head, body, armR, armL, legR, legL, mat };
+  return { root, head, body, armR, armL, legR, legL, mat, mats: [mat] };
 }
 
-// walk cycle + head aim, shared by the local player model and every NPC
-function animateHumanoid(m, phase, swing, pitch) {
+// walk cycle + head aim, shared by the local player model and every NPC.
+// `atk` (0..1) overlays a downward chopping swing on the right arm.
+function animateHumanoid(m, phase, swing, pitch, atk = 0) {
   const s = Math.sin(phase) * swing;
   const c = Math.sin(phase + Math.PI) * swing;
   m.armR.rotation.x = s;  m.armL.rotation.x = c;
   m.legR.rotation.x = c;  m.legL.rotation.x = s;
   m.head.rotation.x = pitch;
+  if (atk > 0) {
+    // arm winds up over the first third of the window, then chops through
+    const t = 1 - atk;                                   // 0 at swing start -> 1 at the end
+    m.armR.rotation.x = -2.5 + Math.sin(Math.min(1, t * 1.4) * Math.PI) * 2.2;
+    m.armR.rotation.z = -0.25 * atk;
+  } else {
+    m.armR.rotation.z = 0;
+  }
 }
-// Bake world lighting (and the hurt flash) into this humanoid's own material colour.
+// Bake world lighting (and the hurt flash) into this model's own material(s).
 function shadeHumanoid(m, x, y, z, hurt) {
   const b = _lightAt(x, y + 1.0, z);          // sample around chest height
-  if (hurt) m.mat.color.setRGB(_HURT_COL.r * b, _HURT_COL.g * b, _HURT_COL.b * b);
-  else m.mat.color.setScalar(b);
+  for (const mat of (m.mats || [m.mat])) {
+    if (!mat) continue;
+    if (hurt) mat.color.setRGB(_HURT_COL.r * b, _HURT_COL.g * b, _HURT_COL.b * b);
+    else mat.color.setScalar(b);
+  }
+}
+
+/* ================================ sheep ================================
+   Separate skin (textures/Entity/sheep.png) painted BARE — the fleece is not part of it.
+   Wool is drawn as two oversized boxes wrapped around the body and head, textured from the
+   wool block tile, so shearing/regrowing is just a visibility + scale change on those boxes. */
+const _sheepTex = new THREE.TextureLoader().load('/textures/Entity/sheep.png');
+_sheepTex.colorSpace = THREE.SRGBColorSpace;
+_sheepTex.magFilter = THREE.NearestFilter;
+_sheepTex.minFilter = THREE.NearestFilter;
+_sheepTex.generateMipmaps = false;
+function _newSheepMat() {
+  return new THREE.MeshBasicMaterial({ map: _sheepTex, transparent: true, alphaTest: 0.5 });
+}
+// wool material reuses the block atlas source image; built lazily because IMAGES is only
+// populated once buildAtlas() has resolved
+let _woolTex = null;
+function _newWoolMat() {
+  if (!_woolTex && IMAGES && IMAGES.wool) {
+    _woolTex = new THREE.Texture(IMAGES.wool);
+    _woolTex.colorSpace = THREE.SRGBColorSpace;
+    _woolTex.magFilter = THREE.NearestFilter;
+    _woolTex.minFilter = THREE.NearestFilter;
+    _woolTex.generateMipmaps = false;
+    _woolTex.needsUpdate = true;
+  }
+  return new THREE.MeshBasicMaterial({ map: _woolTex || null, color: _woolTex ? 0xffffff : 0xf2f2f2 });
+}
+
+function _sheepPart(mat, w, h, d, u, v) {
+  const geo = new THREE.BoxGeometry(w * PX, h * PX, d * PX);
+  _skinUV(geo, w, h, d, u, v);
+  return new THREE.Mesh(geo, mat);
+}
+function _sheepLeg(mat, u, v) {
+  const g = new THREE.Group();
+  const m = _sheepPart(mat, 4, 12, 4, u, v);
+  m.position.y = -6 * PX;                       // pivots at the hip
+  g.add(m);
+  return g;
+}
+/* Body is 8w x 6h x 16d and faces +Z like the humanoids. Texture regions (see mksheep):
+   body base (0,0), head base (0,24), leg base (26,24) — one leg atlas shared by all four. */
+function buildSheep() {
+  const root = new THREE.Group();
+  const mat = _newSheepMat();
+  const wmat = _newWoolMat();
+  const body = _sheepPart(mat, 8, 6, 16, 0, 0);
+  body.position.set(0, 15 * PX, 0);
+  const head = _sheepPart(mat, 6, 6, 6, 0, 24);
+  head.position.set(0, 16 * PX, 11 * PX);
+  const legFL = _sheepLeg(mat, 26, 24); legFL.position.set(-3 * PX, 12 * PX,  5 * PX);
+  const legFR = _sheepLeg(mat, 26, 24); legFR.position.set( 3 * PX, 12 * PX,  5 * PX);
+  const legBL = _sheepLeg(mat, 26, 24); legBL.position.set(-3 * PX, 12 * PX, -5 * PX);
+  const legBR = _sheepLeg(mat, 26, 24); legBR.position.set( 3 * PX, 12 * PX, -5 * PX);
+  // fleece: plain boxes a little larger than the parts they cover
+  const woolBody = new THREE.Mesh(new THREE.BoxGeometry(10 * PX, 8 * PX, 17 * PX), wmat);
+  woolBody.position.copy(body.position);
+  const woolHead = new THREE.Mesh(new THREE.BoxGeometry(7 * PX, 5 * PX, 5 * PX), wmat);
+  woolHead.position.set(0, 18 * PX, 9 * PX);
+  root.add(body, head, legFL, legFR, legBL, legBR, woolBody, woolHead);
+  return { root, head, body, legs: [legFL, legFR, legBL, legBR],
+           wool: [woolBody, woolHead], mat, wmat, mats: [mat, wmat] };
+}
+function animateSheep(m, phase, swing, headPitch) {
+  const s = Math.sin(phase) * swing, c = Math.sin(phase + Math.PI) * swing;
+  m.legs[0].rotation.x = s;  m.legs[1].rotation.x = c;   // front pair alternates
+  m.legs[2].rotation.x = c;  m.legs[3].rotation.x = s;   // back pair mirrors it
+  m.head.rotation.x = headPitch;
 }
 
 /* ================================ third-person view ================================ */
@@ -146,17 +227,28 @@ function _syncSelfHeld() {
   while (_selfHeld.children.length) _selfHeld.remove(_selfHeld.children[0]);
   if (id == null) return;
   const isItem = id >= 256;
+  const isTool = isItem && !!ITEM_PROPS[id]?.tool;
   // Sit the object at the fist and tip it FORWARD (out of the chest) so the pose reads as
-  // actually gripping it rather than dangling it. Blocks are hefted at half size; flat item
-  // sprites are a bit smaller again and face backwards along the arm, like a carried tool.
+  // actually gripping it. Tools get the same handle-first treatment as the first-person view:
+  // the sprite's lower-left corner is slid onto the pivot and the shaft runs out of the fist.
   _selfHeld.position.set(0, -11.5 * PX, isItem ? 1.5 * PX : 3.0 * PX);
-  _selfHeld.scale.setScalar(isItem ? 0.42 * 0.70 : 0.42 * 0.50);
-  _selfHeld.rotation.set(isItem ? -0.55 : -0.35, isItem ? Math.PI : 0.4, isItem ? 0.35 : 0);
+  _selfHeld.scale.setScalar(isTool ? 0.42 : isItem ? 0.42 * 0.70 : 0.42 * 0.50);
+  if (isTool) _selfHeld.rotation.set(-0.30, Math.PI, Math.PI / 4);
+  else _selfHeld.rotation.set(isItem ? -0.55 : -0.35, isItem ? Math.PI : 0.4, isItem ? 0.35 : 0);
   const passes = buildDropGeom(id);
   const isCross = !isItem && PROPS[id]?.model === 'cross';
-  const target = isCross
-    ? (() => { const g = new THREE.Group(); g.position.y = 0.35; _selfHeld.add(g); return g; })()
-    : _selfHeld;
+  let target = _selfHeld;
+  if (isTool) {
+    const g = new THREE.Group();
+    g.position.set(0.42, 0.42, 0);
+    _selfHeld.add(g);
+    target = g;
+  } else if (isCross) {
+    const g = new THREE.Group();
+    g.position.y = 0.35;
+    _selfHeld.add(g);
+    target = g;
+  }
   for (const { p, geo, mat: mo } of passes)
     target.add(new THREE.Mesh(geo, mo || _brightMat(p)));
 }
@@ -224,6 +316,10 @@ const ENT_NAMES = ['Wanderer', 'Drifter', 'Stray', 'Nomad', 'Traveller'];
 const ENT_THINK_TIME = 0.3;              // beat between being provoked and starting to fight back
 const ENT_KNOCK = 0.5, ENT_KNOCK_HOP = 6.2;
 const ENT_KNOCK_DECAY = 7.0;             // how fast the knockback velocity bleeds off
+const ENT_ATK_ANIM = 0.35;               // arm-swing window when a mob lands a hit
+const ENT_FLAIL_TIME = 0.6;              // arms/legs thrash for this long after taking damage
+const ENT_PUSH = 3.2;                    // separation force between overlapping bodies
+const PLY_KNOCK = 6.5, PLY_KNOCK_HOP = 4.2, PLY_KNOCK_DECAY = 6.0;
 const ENT_HAZARD_CD = 0.5;               // seconds between lava / cactus ticks
 const ENT_LAVA_DMG = 4, ENT_CACTUS_DMG = 1, ENT_DROWN_DMG = 2;
 const ENT_AIR_MAX = 12;                  // seconds underwater before drowning starts
@@ -253,6 +349,17 @@ const ENT_CARRY_POOL = [
 ];
 const _ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 
+/* ---- sheep: passive grazers. They never attack; being hit makes them bolt. ---- */
+const SHEEP_MAX = 4;
+const SHEEP_HP = 8;
+const SHEEP_SPEED = 1.9, SHEEP_FLEE_SPEED = 5.2;
+const SHEEP_FLEE_TIME = 6;
+const SHEEP_H = 1.3;                     // shorter than a humanoid
+const SHEEP_REGROW = 12;                 // seconds for the fleece to grow back once it starts
+const SHEEP_GRAZE_CD = 4;                // how often a shorn sheep looks for grass to eat
+const SHEEP_GRAZE_CHANCE = 0.35;
+const SHEEP_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
+
 function _rollInventory() {
   const inv = [];
   const n = _ri(1, 4);
@@ -277,10 +384,37 @@ function spawnEntity(x, y, z, opts = {}) {
     state: 'wander', wanderT: 0, walk: 0, hurtT: 0,
     aggroT: 0, atkCd: 0, jumpCd: 0, thinkT: 0,
     kx: 0, kz: 0, hazCd: 0, airT: ENT_AIR_MAX, escapeT: 0, turnCd: 0,
+    atkAnimT: 0, flailT: 0,
     hx: opts.hx != null ? opts.hx : x,        // home anchor — the leash centre, persisted
     hz: opts.hz != null ? opts.hz : z,
     name: opts.name || ENT_NAMES[Math.floor(Math.random() * ENT_NAMES.length)],
     inventory: opts.inventory || _rollInventory(),
+    kind: 'npc',
+  };
+  ENTITIES.push(ent);
+  return ent;
+}
+
+function spawnSheep(x, y, z, opts = {}) {
+  const m = buildSheep();
+  m.root.position.set(x, y, z);
+  scene.add(m.root);
+  const woolly = opts.woolly !== undefined ? opts.woolly : true;
+  const ent = {
+    model: m, x, y, z, vy: 0, yaw: Math.random() * Math.PI * 2,
+    hp: opts.hp != null ? opts.hp : SHEEP_HP, onGround: false,
+    state: 'wander', wanderT: 0, walk: 0, hurtT: 0,
+    fleeT: 0, jumpCd: 0, kx: 0, kz: 0, hazCd: 0, airT: ENT_AIR_MAX,
+    escapeT: 0, turnCd: 0, flailT: 0,
+    woolly,                                   // fleece present -> shearable, drops wool
+    woolGrow: woolly ? 1 : 0,                 // 0..1 regrow animation
+    regrowing: false,
+    grazeCd: SHEEP_GRAZE_CD,
+    hx: opts.hx != null ? opts.hx : x,
+    hz: opts.hz != null ? opts.hz : z,
+    inventory: [],
+    kind: 'sheep',
+    name: 'Sheep',
   };
   ENTITIES.push(ent);
   return ent;
@@ -296,7 +430,11 @@ function clearEntities() { while (ENTITIES.length) _removeEntity(ENTITIES.length
 function _entBlocked(x, y, z) {
   const x0 = Math.floor(x - ENT_R), x1 = Math.floor(x + ENT_R);
   const z0 = Math.floor(z - ENT_R), z1 = Math.floor(z + ENT_R);
-  const y0 = Math.floor(y + 0.02), y1 = Math.floor(y + ENT_H - 0.02);
+  // NO epsilon on the bottom edge. A +0.02 lift meant a mob resting exactly on a block top
+  // tested the AIR cell it stands in rather than the floor, so gravity pulled it ~0.02 down
+  // every frame until the check finally caught and snapped it back — a permanent shake, and
+  // onGround stayed false, which also killed the knockback hop.
+  const y0 = Math.floor(y), y1 = Math.floor(y + ENT_H - 0.02);
   for (let yy = y0; yy <= y1; yy++)
     for (let zz = z0; zz <= z1; zz++)
       for (let xx = x0; xx <= x1; xx++)
@@ -324,13 +462,56 @@ function _entDropLoot(ent) {
         x: (Math.random() - 0.5) * 3.5, y: 2.4 + Math.random() * 1.6, z: (Math.random() - 0.5) * 3.5,
       }, 0.6);
   };
+  if (ent.kind === 'sheep') {
+    pop(ITEM.MUTTON, _ri(1, 3));
+    if (ent.woolly) { pop(B.WOOL, 1); pop(ITEM.STRING, _ri(1, 3)); }
+    return;
+  }
   for (const l of ENT_LOOT) { const id = l.id(); if (id != null) pop(id, _ri(l.min, l.max)); }
   for (const s of ent.inventory) pop(s.id, s.count);
+}
+
+/* Right-clicking a woolly sheep with shears takes the fleece: drops 1-3 wool, leaves the sheep
+   shorn so it starts looking for grass to eat. Called from doPlace before block placement. */
+function tryShearSheep() {
+  const held = slotId(HOTBAR[hotbarSel]);
+  if (held == null || held < 256 || ITEM_PROPS[held]?.tool !== 'shears') return false;
+  const ent = pickEntity();
+  if (!ent || ent.kind !== 'sheep' || !ent.woolly) return false;
+  ent.woolly = false;
+  ent.woolGrow = 0;
+  ent.regrowing = false;
+  ent.grazeCd = SHEEP_GRAZE_CD;
+  const bx = Math.floor(ent.x), by = Math.floor(ent.y + 0.5), bz = Math.floor(ent.z);
+  const n = _ri(1, 3);
+  for (let i = 0; i < n; i++)
+    spawnDrop(B.WOOL, bx, by, bz, {
+      x: (Math.random() - 0.5) * 2.5, y: 2.2 + Math.random(), z: (Math.random() - 0.5) * 2.5,
+    }, 0.5);
+  const slot = HOTBAR[hotbarSel];
+  if (!player.canFly && slot && slot.dur != null) {
+    slot.dur--;
+    if (slot.dur <= 0) { HOTBAR[hotbarSel] = null; toast(`${ITEM_PROPS[slot.id].name} broke`); }
+    saveHotbar(); buildHotbar(); updateHotbar();
+  }
+  return true;
 }
 
 function damageEntity(ent, dmg) {
   ent.hp -= dmg;
   ent.hurtT = 0.25;
+  ent.flailT = ENT_FLAIL_TIME;                   // limbs thrash on impact even while standing
+  // Sheep are passive: they bolt rather than retaliate.
+  if (ent.kind === 'sheep') {
+    if (!player.canFly) ent.fleeT = SHEEP_FLEE_TIME;
+    if (ent.hp <= 0) {
+      if (!player.canFly) _entDropLoot(ent);
+      const i = ENTITIES.indexOf(ent);
+      if (i >= 0) _removeEntity(i);
+      return true;
+    }
+    return false;
+  }
   // Creative is a build mode: mobs never turn hostile and never leave loot behind.
   if (!player.canFly) {
     ent.aggroT = ENT_AGGRO_TIME;               // neutral until provoked — this is the provocation
@@ -349,9 +530,15 @@ function damageEntity(ent, dmg) {
 /* Ray from the camera against every entity's AABB — used by the attack hook so hitting a mob
    takes priority over mining the block behind it. Returns the nearest entity within reach. */
 const _atkDir = new THREE.Vector3();
+const _atkOrigin = new THREE.Vector3();
 function pickEntity(maxDist = 4.0) {
   camera.getWorldDirection(_atkDir);
-  const o = camera.position;
+  if (camView === 2) _atkDir.negate();     // front view: the camera looks back at the player
+  // Always swing from the EYE, never from camera.position — in third person the camera has been
+  // pulled several blocks backwards, which put most of the reach behind the player and made
+  // hits (and therefore knockback) silently miss.
+  _atkOrigin.set(player.pos.x, player.pos.y + player.EYE, player.pos.z);
+  const o = _atkOrigin;
   let best = null, bestT = Infinity;
   for (const e of ENTITIES) {
     // slab test against the entity box
@@ -374,18 +561,29 @@ function pickEntity(maxDist = 4.0) {
   return best;
 }
 
-// Attack hook, rate-limited so a held mouse button swings rather than shreds.
+/* Attack pacing. A bare hand needs HAND_ATTACK_TIME between swings; a weapon's attackSpeed is a
+   multiplier that shortens that (attackSpeed 2 = twice as fast). Swapping what you're holding
+   re-arms the full hand delay, so you can't scroll onto a fast sword and hit instantly. */
+const HAND_ATTACK_TIME = 0.5;
+const HAND_DAMAGE = 1;
 let _atkCooldown = 0;
+let _lastHeldForAtk;
+function attackCooldownFor(id) {
+  const p = id != null && id >= 256 ? ITEM_PROPS[id] : null;
+  const spd = p && p.attackSpeed > 0 ? p.attackSpeed : 1;
+  return HAND_ATTACK_TIME / spd;
+}
+function attackDamageFor(id) {
+  const p = id != null && id >= 256 ? ITEM_PROPS[id] : null;
+  return p && p.damage > 0 ? p.damage : HAND_DAMAGE;
+}
 function tryAttackEntity() {
   if (_atkCooldown > 0) return false;
   const ent = pickEntity();
   if (!ent) return false;
-  _atkCooldown = 0.42;
-  // held tool decides the hit: tools carry toolSpeed, bare hands are weak
   const held = slotId(HOTBAR[hotbarSel]);
-  const p = held != null && held >= 256 ? ITEM_PROPS[held] : null;
-  const dmg = p && p.tool ? 2 + (p.tier || 0) * 1.5 : 1.5;
-  const died = damageEntity(ent, dmg);
+  _atkCooldown = attackCooldownFor(held);
+  const died = damageEntity(ent, attackDamageFor(held));
   // Knockback: push along player -> entity. When the two overlap that vector is ~zero and
   // normalising it produced a random direction (the occasional "pulled toward me" hit), so fall
   // back to the aim direction, which is always outward.
@@ -397,7 +595,8 @@ function tryAttackEntity() {
     // read as a teleport
     ent.kx = dx / m * ENT_KNOCK * 12;
     ent.kz = dz / m * ENT_KNOCK * 12;
-    if (ent.onGround) ent.vy = ENT_KNOCK_HOP;
+    // test the floor directly rather than trusting the onGround flag from the previous tick
+    if (_entBlocked(ent.x, ent.y - 0.02, ent.z)) ent.vy = ENT_KNOCK_HOP;
   }
   // tools wear from swinging at mobs, same as breaking a block
   const slot = HOTBAR[hotbarSel];
@@ -423,6 +622,7 @@ function serializeEntities() {
       +e.yaw.toFixed(3), Math.max(0, +e.hp.toFixed(1)),
       e.name, e.inventory.map(s => [s.id, s.count]),
       +e.hx.toFixed(1), +e.hz.toFixed(1),
+      e.kind, e.kind === 'sheep' ? (e.woolly ? 1 : 0) : 0,
     ]);
   }
   return out;
@@ -431,8 +631,18 @@ function restoreEntities(list) {
   if (!Array.isArray(list)) return;
   for (const r of list) {
     if (!Array.isArray(r) || r.length < 5) continue;
-    const [x, y, z, yaw, hp, name, inv, hx, hz] = r;
+    const [x, y, z, yaw, hp, name, inv, hx, hz, kind, woolly] = r;
     if (![x, y, z].every(v => typeof v === 'number' && isFinite(v))) continue;
+    if (kind === 'sheep') {                    // saves written before sheep existed have no kind
+      const s = spawnSheep(x, y, z, {
+        hp: typeof hp === 'number' && hp > 0 ? hp : SHEEP_HP,
+        woolly: !!woolly,
+        hx: typeof hx === 'number' ? hx : x,
+        hz: typeof hz === 'number' ? hz : z,
+      });
+      if (typeof yaw === 'number') s.yaw = yaw;
+      continue;
+    }
     const inventory = Array.isArray(inv)
       ? inv.filter(s => Array.isArray(s) && s.length === 2 && (PROPS[s[0]] || ITEM_PROPS[s[0]]))
            .map(s => ({ id: s[0], count: Math.max(1, s[1] | 0) }))
@@ -450,8 +660,8 @@ function restoreEntities(list) {
 
 /* ---- spawning: keep a small population in the loaded ring around the player ---- */
 let _spawnTimer = 0;
-function _trySpawnEntity() {
-  if (ENTITIES.length >= ENT_MAX) return;
+// find a legal, out-of-view surface spot near the player; returns {x,y,z} or null
+function _findSpawnSpot(biomes) {
   for (let attempt = 0; attempt < 8; attempt++) {
     const a = Math.random() * Math.PI * 2;
     const r = 14 + Math.random() * 18;
@@ -464,23 +674,238 @@ function _trySpawnEntity() {
     const vx = x - player.pos.x, vz = z - player.pos.z;
     const vm = Math.hypot(vx, vz) || 1;
     if ((vx / vm) * _atkDir.x + (vz / vm) * _atkDir.z > 0.15) continue;
-    if (!ENT_BIOMES.has(mainGen.biomeAt(Math.floor(x), Math.floor(z)))) continue;
+    if (!biomes.has(mainGen.biomeAt(Math.floor(x), Math.floor(z)))) continue;
     const gy = surfaceY(Math.floor(x), Math.floor(z));
     const top = getBlock(Math.floor(x), gy, Math.floor(z)) & 255;
     if (top === B.AIR || top === B.WATER || top === B.LAVA || top === B.CACTUS) continue;
     const y = gy + 1;
     if (_entBlocked(x, y, z) || _entHazard(x, y, z)) continue;
-    spawnEntity(x, y, z);
-    return;
+    return { x, y, z, top };
   }
+  return null;
+}
+function _trySpawnEntity() {
+  const npcs = ENTITIES.reduce((n, e) => n + (e.kind === 'npc' ? 1 : 0), 0);
+  if (npcs >= ENT_MAX) return;
+  const s = _findSpawnSpot(ENT_BIOMES);
+  if (s) spawnEntity(s.x, s.y, s.z);
+}
+function _trySpawnSheep() {
+  const sheep = ENTITIES.reduce((n, e) => n + (e.kind === 'sheep' ? 1 : 0), 0);
+  if (sheep >= SHEEP_MAX) return;
+  const s = _findSpawnSpot(SHEEP_BIOMES);
+  if (!s || s.top !== B.GRASS) return;                 // grazers only appear on grass
+  spawnSheep(s.x, s.y, s.z);
+}
+
+/* Player shove: mob hits and body collisions feed a decaying velocity here rather than moving
+   the player outright, so being struck slides you back instead of teleporting you. */
+const _plyKick = { x: 0, z: 0 };
+function _movePlayerBy(dx, dz) {
+  const p = player.pos;
+  if (!_entBlocked(p.x + dx, p.y, p.z)) p.x += dx;
+  if (!_entBlocked(p.x, p.y, p.z + dz)) p.z += dz;
+}
+function _updatePlayerKick(dt) {
+  if (!_plyKick.x && !_plyKick.z) return;
+  _movePlayerBy(_plyKick.x * dt, _plyKick.z * dt);
+  const k = Math.max(0, 1 - PLY_KNOCK_DECAY * dt);
+  _plyKick.x *= k; _plyKick.z *= k;
+  if (Math.abs(_plyKick.x) < 0.05 && Math.abs(_plyKick.z) < 0.05) { _plyKick.x = 0; _plyKick.z = 0; }
+}
+
+/* Bodies are solid to each other: overlapping mobs (and the player) get pushed apart so nothing
+   ends up standing inside anyone. Vertical overlap is required, otherwise stacked mobs on
+   different floors would shove each other. */
+function _separateBodies(dt) {
+  const minD = ENT_R * 2, minD2 = minD * minD;
+  for (let a = 0; a < ENTITIES.length; a++) {
+    const e = ENTITIES[a];
+    // vs other entities
+    for (let b = a + 1; b < ENTITIES.length; b++) {
+      const o = ENTITIES[b];
+      if (Math.abs(o.y - e.y) >= ENT_H) continue;
+      let dx = o.x - e.x, dz = o.z - e.z;
+      let d2 = dx * dx + dz * dz;
+      if (d2 >= minD2) continue;
+      let d = Math.sqrt(d2);
+      if (d < 1e-4) { dx = Math.random() - 0.5; dz = Math.random() - 0.5; d = Math.hypot(dx, dz) || 1; }
+      const push = (minD - d) / minD * ENT_PUSH * dt;
+      const ux = dx / d * push, uz = dz / d * push;
+      if (!_entBlocked(e.x - ux, e.y, e.z - uz)) { e.x -= ux; e.z -= uz; }
+      if (!_entBlocked(o.x + ux, o.y, o.z + uz)) { o.x += ux; o.z += uz; }
+    }
+    // vs the player — creative flying passes through, survival gets shoved
+    if (player.canFly && player.flying) continue;
+    if (Math.abs(player.pos.y - e.y) >= ENT_H) continue;
+    let dx = player.pos.x - e.x, dz = player.pos.z - e.z;
+    let d2 = dx * dx + dz * dz;
+    const pMin = ENT_R + player.R, pMin2 = pMin * pMin;
+    if (d2 >= pMin2) continue;
+    let d = Math.sqrt(d2);
+    if (d < 1e-4) { dx = Math.random() - 0.5; dz = Math.random() - 0.5; d = Math.hypot(dx, dz) || 1; }
+    const push = (pMin - d) / pMin * ENT_PUSH * dt;
+    const ux = dx / d * push, uz = dz / d * push;
+    if (!_entBlocked(e.x - ux, e.y, e.z - uz)) { e.x -= ux; e.z -= uz; }
+    _movePlayerBy(ux, uz);
+  }
+}
+
+/* Sheep tick. Passive: wander, graze, and sprint directly away from the player after being hit.
+   A shorn sheep periodically tries to eat the grass block under it — that converts the grass to
+   dirt and starts the fleece growing back, which is animated by scaling the wool boxes. */
+function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
+  if (e.flailT > 0) e.flailT -= dt;
+  if (e.turnCd > 0) e.turnCd -= dt;
+  if (e.fleeT > 0) e.fleeT -= dt;
+
+  const inWater = (getBlock(Math.floor(e.x), Math.floor(e.y + 0.4), Math.floor(e.z)) & 255) === B.WATER;
+
+  /* ---- fleece: graze to regrow, then animate it filling out ---- */
+  if (!e.woolly) {
+    if (e.regrowing) {
+      e.woolGrow = Math.min(1, e.woolGrow + dt / SHEEP_REGROW);
+      if (e.woolGrow >= 1) { e.woolly = true; e.regrowing = false; }
+    } else {
+      e.grazeCd -= dt;
+      if (e.grazeCd <= 0) {
+        e.grazeCd = SHEEP_GRAZE_CD;
+        const gx = Math.floor(e.x), gy = Math.floor(e.y - 0.02), gz = Math.floor(e.z);
+        if (e.onGround && (getBlock(gx, gy, gz) & 255) === B.GRASS && Math.random() < SHEEP_GRAZE_CHANCE) {
+          setBlock(gx, gy, gz, B.DIRT);        // eats the turf down to bare dirt
+          e.regrowing = true;
+          e.woolGrow = 0;
+          e.state = 'idle';
+          e.wanderT = 1.2;                     // pause to chew
+        }
+      }
+    }
+  }
+
+  /* ---- heading ---- */
+  let moveSpeed = 0;
+  if (inWater) {
+    e.escapeT -= dt;
+    if (e.escapeT <= 0) { e.escapeT = 0.8; e.yaw += 1.2; }
+    moveSpeed = SHEEP_SPEED;
+  } else if (e.fleeT > 0) {
+    e.yaw = Math.atan2(-pdx, -pdz);            // straight away from whoever hit it
+    moveSpeed = SHEEP_FLEE_SPEED;
+  } else {
+    e.wanderT -= dt;
+    if (e.wanderT <= 0) {
+      e.wanderT = 2 + Math.random() * 5;
+      e.state = Math.random() < 0.45 ? 'idle' : 'wander';
+      if (e.state === 'wander') e.yaw = Math.random() * Math.PI * 2;
+    }
+    moveSpeed = e.state === 'wander' ? SHEEP_SPEED : 0;
+    const hdx = e.hx - e.x, hdz = e.hz - e.z;
+    if (Math.hypot(hdx, hdz) > ENT_HOME_RANGE) {
+      e.yaw = Math.atan2(hdx, hdz); e.state = 'wander'; moveSpeed = SHEEP_SPEED;
+    }
+  }
+
+  /* ---- move ---- */
+  let moved = 0;
+  const stunned = (e.kx !== 0 || e.kz !== 0);
+  if (moveSpeed > 0 && !stunned) {
+    const sx = Math.sin(e.yaw) * moveSpeed * dt, sz = Math.cos(e.yaw) * moveSpeed * dt;
+    const bad = (nx, nz) => _entBlocked(nx, e.y, nz) || (!inWater && _entHazard(nx, e.y, nz));
+    let blocked = false;
+    if (!bad(e.x + sx, e.z)) { e.x += sx; moved += Math.abs(sx); } else blocked = true;
+    if (!bad(e.x, e.z + sz)) { e.z += sz; moved += Math.abs(sz); } else blocked = true;
+    if (blocked && (e.onGround || inWater) && e.jumpCd <= 0 && !_entBlocked(e.x + sx, e.y + 1, e.z + sz)) {
+      e.vy = ENT_JUMP; e.jumpCd = 0.6; e.onGround = false;
+    } else if (blocked && e.turnCd <= 0 && !inWater) {
+      e.yaw = Math.random() * Math.PI * 2; e.turnCd = 0.5;
+    }
+  }
+  if (e.kx || e.kz) {
+    const kdx = e.kx * dt, kdz = e.kz * dt;
+    if (!_entBlocked(e.x + kdx, e.y, e.z)) e.x += kdx;
+    if (!_entBlocked(e.x, e.y, e.z + kdz)) e.z += kdz;
+    const k = Math.max(0, 1 - ENT_KNOCK_DECAY * dt);
+    e.kx *= k; e.kz *= k;
+    if (Math.abs(e.kx) < 0.05 && Math.abs(e.kz) < 0.05) { e.kx = 0; e.kz = 0; }
+  }
+  if (inWater && waterFlowVec(Math.floor(e.x), Math.floor(e.y + 0.4), Math.floor(e.z), _flowV)) {
+    const fdx = _flowV.x * 1.9 * dt, fdz = _flowV.z * 1.9 * dt;
+    if (!_entBlocked(e.x + fdx, e.y, e.z)) e.x += fdx;
+    if (!_entBlocked(e.x, e.y, e.z + fdz)) e.z += fdz;
+  }
+
+  /* ---- hazards ---- */
+  if (e.hazCd > 0) e.hazCd -= dt;
+  const feetId = getBlock(Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)) & 255;
+  const headId = getBlock(Math.floor(e.x), Math.floor(e.y + 1.0), Math.floor(e.z)) & 255;
+  if (e.hazCd <= 0) {
+    let dmg = 0;
+    if (feetId === B.LAVA || headId === B.LAVA) dmg = ENT_LAVA_DMG;
+    else if (feetId === B.CACTUS) dmg = ENT_CACTUS_DMG;
+    if (dmg > 0) {
+      e.hazCd = ENT_HAZARD_CD; e.hurtT = 0.25; e.hp -= dmg;
+      if (e.hp <= 0) { if (!player.canFly) _entDropLoot(e); _removeEntity(i); return; }
+    }
+  }
+  if (headId === B.WATER) {
+    e.airT -= dt;
+    if (e.airT <= 0) {
+      e.airT = 1; e.hurtT = 0.25; e.hp -= ENT_DROWN_DMG;
+      if (e.hp <= 0) { if (!player.canFly) _entDropLoot(e); _removeEntity(i); return; }
+    }
+  } else e.airT = ENT_AIR_MAX;
+
+  /* ---- gravity ---- */
+  const standing = !inWater && e.vy <= 0 && _entBlocked(e.x, e.y - 0.02, e.z);
+  if (standing) {
+    e.y = Math.floor(e.y - 0.02) + 1; e.vy = 0; e.onGround = true;
+  } else {
+    e.vy -= ENT_GRAVITY * dt;
+    if (e.vy < -34) e.vy = -34;
+    const ny = e.y + e.vy * dt;
+    if (_entBlocked(e.x, ny, e.z)) {
+      if (e.vy < 0) { e.y = Math.floor(ny) + 1; e.onGround = true; }
+      e.vy = 0;
+    } else { e.y = ny; e.onGround = false; }
+  }
+  if (inWater) { e.vy = Math.min(e.vy + 40 * dt, 4.2); e.onGround = false; }
+
+  /* ---- visuals ---- */
+  const spd = moved / Math.max(dt, 1e-4);
+  let swing = Math.min(spd / 3.5, 1) * 0.7;
+  if (e.flailT > 0) { e.walk += 11 * dt; swing = Math.max(swing, 0.8); }
+  else e.walk += Math.min(spd, 9) * dt * 2.6;
+  const m = e.model;
+  m.root.position.set(e.x, e.y, e.z);
+  m.root.rotation.y = e.yaw;
+  // grazing dips the head toward the ground
+  const graze = (!e.woolly && e.regrowing && e.woolGrow < 0.08) ? 0.9 : 0;
+  animateSheep(m, e.walk, swing, graze);
+  // fleece visibility/scale IS the regrow animation
+  const g = e.woolly ? 1 : (e.regrowing ? Math.max(0.06, e.woolGrow) : 0);
+  for (const w of m.wool) {
+    w.visible = g > 0.02;
+    w.scale.setScalar(g);
+  }
+  shadeHumanoid(m, e.x, e.y, e.z, e.hurtT > 0);
 }
 
 function updateEntities(dt) {
   if (!playing || menuScene || !player.spawned) return;
   if (_atkCooldown > 0) _atkCooldown -= dt;
+  // swapping hotbar slot / item re-arms the full bare-hand delay
+  const heldNow = slotId(HOTBAR[hotbarSel]);
+  if (heldNow !== _lastHeldForAtk) {
+    if (_lastHeldForAtk !== undefined) _atkCooldown = Math.max(_atkCooldown, HAND_ATTACK_TIME);
+    _lastHeldForAtk = heldNow;
+  }
+  _updatePlayerKick(dt);
 
   _spawnTimer -= dt;
-  if (_spawnTimer <= 0) { _spawnTimer = 4 + Math.random() * 4; _trySpawnEntity(); }
+  if (_spawnTimer <= 0) {
+    _spawnTimer = 4 + Math.random() * 4;
+    if (Math.random() < 0.5) _trySpawnEntity(); else _trySpawnSheep();
+  }
 
   for (let i = ENTITIES.length - 1; i >= 0; i--) {
     const e = ENTITIES[i];
@@ -492,6 +917,7 @@ function updateEntities(dt) {
     if (e.hurtT > 0) e.hurtT -= dt;
     if (e.atkCd > 0) e.atkCd -= dt;
     if (e.jumpCd > 0) e.jumpCd -= dt;
+    if (e.kind === 'sheep') { _updateSheep(e, dt, pdx, pdz, distXZ, i); continue; }
     if (player.canFly && (e.aggroT > 0 || e.state === 'chase')) {
       e.aggroT = 0; e.thinkT = 0; e.state = 'wander';   // switching to creative calls off the fight
     }
@@ -539,13 +965,15 @@ function updateEntities(dt) {
       moveSpeed = ENT_CHASE_SPEED;
       if (distXZ < ENT_ATTACK_RANGE && Math.abs(pdy) < 2 && e.atkCd <= 0) {
         e.atkCd = ENT_ATTACK_CD;
+        e.atkAnimT = ENT_ATK_ANIM;                 // arm chops through on the hit
         moveSpeed = 0;
         player.hp -= ENT_ATTACK_DMG;
         player._dmgCause = `was slain by a ${e.name}`;
-        // shove the player back a little so a hit reads physically
+        // knock the player back with the same decaying-velocity model the mobs use
         const m = distXZ || 1;
-        player.pos.x -= pdx / m * 0.18;
-        player.pos.z -= pdz / m * 0.18;
+        _plyKick.x = pdx / m * PLY_KNOCK;
+        _plyKick.z = pdz / m * PLY_KNOCK;
+        if (!player.flying && Math.abs(player.vy) < 0.5) player.vy = PLY_KNOCK_HOP;
       }
     } else {
       e.wanderT -= dt;
@@ -635,18 +1063,27 @@ function updateEntities(dt) {
     } else e.airT = ENT_AIR_MAX;
 
     /* ---- gravity + ground ---- */
-    e.vy -= ENT_GRAVITY * dt;
-    if (e.vy < -34) e.vy = -34;
-    const ny = e.y + e.vy * dt;
-    if (_entBlocked(e.x, ny, e.z)) {
-      if (e.vy < 0) {
-        e.y = Math.floor(ny) + 1;                        // land on the block top
-        e.onGround = true;
-      }
+    // Resting on a floor is a hard stop: don't integrate gravity at all, or the mob spends every
+    // frame falling a hair and being snapped back up (the shake).
+    const standing = !inWater && e.vy <= 0 && _entBlocked(e.x, e.y - 0.02, e.z);
+    if (standing) {
+      e.y = Math.floor(e.y - 0.02) + 1;                  // seat exactly on the block top
       e.vy = 0;
+      e.onGround = true;
     } else {
-      e.y = ny;
-      e.onGround = false;
+      e.vy -= ENT_GRAVITY * dt;
+      if (e.vy < -34) e.vy = -34;
+      const ny = e.y + e.vy * dt;
+      if (_entBlocked(e.x, ny, e.z)) {
+        if (e.vy < 0) {
+          e.y = Math.floor(ny) + 1;                      // land on the block top
+          e.onGround = true;
+        }
+        e.vy = 0;
+      } else {
+        e.y = ny;
+        e.onGround = false;
+      }
     }
     // Swimming: buoyancy holds the mob at the surface. The rise is strong enough to actually
     // clear a shoreline block, otherwise it bobbed against the bank forever without getting out.
@@ -662,16 +1099,25 @@ function updateEntities(dt) {
     }
 
     /* ---- visuals ---- */
+    if (e.atkAnimT > 0) e.atkAnimT -= dt;
+    if (e.flailT > 0) e.flailT -= dt;
     const spd = moved / Math.max(dt, 1e-4);
-    e.walk += Math.min(spd, 9) * dt * 2.2;
-    const swing = Math.min(spd / 4.5, 1) * 0.75;
+    let swing = Math.min(spd / 4.5, 1) * 0.75;
+    // taking a hit thrashes the limbs through the walk cycle even when standing still
+    if (e.flailT > 0) {
+      e.walk += 11 * dt;
+      swing = Math.max(swing, 0.85);
+    } else {
+      e.walk += Math.min(spd, 9) * dt * 2.2;
+    }
     const m = e.model;
     m.root.position.set(e.x, e.y, e.z);
     m.root.rotation.y = e.yaw;                           // model faces +Z; yaw is measured the same way
     // aggroed mobs stare at the player
     const lookPitch = e.state === 'chase'
       ? Math.max(-0.7, Math.min(0.7, -Math.atan2(pdy + 1.2, Math.max(distXZ, 0.1)) * 0.8)) : 0;
-    animateHumanoid(m, e.walk, swing, lookPitch);
+    animateHumanoid(m, e.walk, swing, lookPitch, Math.max(0, e.atkAnimT) / ENT_ATK_ANIM);
     shadeHumanoid(m, e.x, e.y, e.z, e.hurtT > 0);
   }
+  _separateBodies(dt);
 }

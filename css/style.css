@@ -41,6 +41,16 @@
   #inv .title { color:#9ab; font-size:12px; text-align:center; }
   #inv .grid { display:flex; flex-direction:column-reverse; gap:4px; }   /* row 0 at the bottom */
   #inv .grid + .grid { padding-top:8px; border-top:1px solid rgba(255,255,255,.12); }  /* split 2nd/main grid */
+  /* creative overflow palette: fixed viewport height (3 rows) that scrolls, so extra rows never
+     grow the panel. 3 rows = 3*46px slots + 2*4px gaps. */
+  #inv .invScroll { max-height:146px; overflow-y:auto; overflow-x:hidden; pointer-events:auto;
+                    padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.12);
+                    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.30) transparent; }
+  #inv .invScroll::-webkit-scrollbar { width:8px; }
+  #inv .invScroll::-webkit-scrollbar-track { background:rgba(255,255,255,.05); border-radius:4px; }
+  #inv .invScroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,.28); border-radius:4px; }
+  #inv .invScroll::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,.42); }
+  #inv .invScroll .grid { padding-top:0; border-top:none; }
   #inv .row { display:flex; gap:4px; }
   #inv .slot { pointer-events:auto; }
   #inv .hint { color:#7d8ba0; font-size:11px; text-align:center; margin:-2px 0 2px; }

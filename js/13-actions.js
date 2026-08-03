@@ -28,11 +28,11 @@ function _defaultCreativeInventory() {
   const sorted = PLACEABLE.slice().sort((a, b) => a - b).concat([ITEM.WATER_BUCKET, ITEM.LAVA_BUCKET]);
   const hot = new Array(9).fill(null);
   const inv = new Array(27).fill(null);
-  const inv2 = new Array(27).fill(null);            // second grid: overflow palette for future blocks
+  const inv2 = new Array(36).fill(null);            // overflow palette — 4 rows, scrolls in the UI
   for (let i = 0; i < sorted.length; i++) {
     if (i < 9) hot[i] = mkSlot(sorted[i]);
     else if (i - 9 < 27) inv[i - 9] = mkSlot(sorted[i]);
-    else if (i - 36 < 27) inv2[i - 36] = mkSlot(sorted[i]);
+    else if (i - 36 < inv2.length) inv2[i - 36] = mkSlot(sorted[i]);
   }
   return { hot, inv, inv2 };
 }
@@ -199,6 +199,8 @@ function useBucket(heldId, hit) {
   }
 }
 function doPlace() {
+  // shears on a woolly sheep: take the fleece instead of placing anything
+  if (tryShearSheep()) { handPlaceSwing = true; return; }
   // empty bucket: fill from open water even when nothing solid is behind it (no block hit needed)
   if (slotId(HOTBAR[hotbarSel]) === ITEM.BUCKET) { useBucket(ITEM.BUCKET, null); return; }
   const hit = currentRay();
