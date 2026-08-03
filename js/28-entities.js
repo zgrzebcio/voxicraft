@@ -307,11 +307,11 @@ const ENTITIES = [];
 const ENT_MAX = 3;                       // population cap around the player
 const ENT_R = 0.3, ENT_H = 1.8;
 const ENT_HP = 20;
-const ENT_SPEED = 2.9, ENT_CHASE_SPEED = 4.4;
+const ENT_SPEED = 2.2, ENT_CHASE_SPEED = 4.0;
 const ENT_GRAVITY = 26, ENT_JUMP = 7.6;
 const ENT_ATTACK_DMG = 3, ENT_ATTACK_CD = 1.0, ENT_ATTACK_RANGE = 2.2;
 const ENT_AGGRO_TIME = 12, ENT_AGGRO_RANGE = 18;
-const ENT_DESPAWN_DIST = 96;
+const ENT_DESPAWN_DIST = 256;
 const ENT_NAMES = ['Wanderer', 'Drifter', 'Stray', 'Nomad', 'Traveller'];
 const ENT_THINK_TIME = 0.3;              // beat between being provoked and starting to fight back
 const ENT_KNOCK = 0.5, ENT_KNOCK_HOP = 6.2;
@@ -328,23 +328,24 @@ const ENT_HOME_RANGE = 200;              // never wanders further than this from
 const ENT_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
 
 // Guaranteed loot — every NPC always leaves this behind, independent of its inventory.
-const ENT_LOOT = [{ id: () => ITEM.STICK, min: 1, max: 3 }];
+const ENT_LOOT = [{ id: () => ITEM.FEATHER, min: 1, max: 3 },{ id: () => ITEM.BREAD, min: 1, max: 3 }];
 // Pool the random carried inventory is rolled from: only things obtainable in survival.
 const ENT_CARRY_POOL = [
-  { id: () => B.COBBLE,           min: 3, max: 12 },
-  { id: () => B.PLANKS,           min: 2, max: 8  },
+  { id: () => B.COBBLE,           min: 2, max: 7  },
+  { id: () => B.PLANKS,           min: 1, max: 5  },
   { id: () => B.DIRT,             min: 2, max: 9  },
   { id: () => B.TORCH,            min: 1, max: 4  },
-  { id: () => B.SAND,             min: 2, max: 6  },
+  { id: () => B.SAND,             min: 1, max: 5  },
   { id: () => ITEM.COAL,          min: 1, max: 3  },
   { id: () => ITEM.COAL_CHUNK,    min: 1, max: 5  },
   { id: () => ITEM.IRON_INGOT,    min: 1, max: 2  },
   { id: () => ITEM.APPLE,         min: 1, max: 2  },
+  { id: () => ITEM.GLOW_DUST,     min: 1, max: 2  },
   { id: () => ITEM.STICK,         min: 1, max: 4  },
   { id: () => ITEM.WOODEN_PICKAXE, min: 1, max: 1 },
   { id: () => ITEM.STONE_PICKAXE,  min: 1, max: 1 },
   { id: () => ITEM.STONE_SHOVEL,   min: 1, max: 1 },
-  { id: () => ITEM.STONE_HATCHET,  min: 1, max: 1 },
+  { id: () => ITEM.WOODEN_HATCHET,  min: 1, max: 1 },
   { id: () => ITEM.IRON_PICKAXE,   min: 1, max: 1 },
 ];
 const _ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
@@ -352,12 +353,12 @@ const _ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 /* ---- sheep: passive grazers. They never attack; being hit makes them bolt. ---- */
 const SHEEP_MAX = 4;
 const SHEEP_HP = 8;
-const SHEEP_SPEED = 1.9, SHEEP_FLEE_SPEED = 5.2;
+const SHEEP_SPEED = 2.0, SHEEP_FLEE_SPEED = 5.2;
 const SHEEP_FLEE_TIME = 6;
 const SHEEP_H = 1.3;                     // shorter than a humanoid
-const SHEEP_REGROW = 12;                 // seconds for the fleece to grow back once it starts
-const SHEEP_GRAZE_CD = 4;                // how often a shorn sheep looks for grass to eat
-const SHEEP_GRAZE_CHANCE = 0.35;
+const SHEEP_REGROW = 10;                 // seconds for the fleece to grow back once it starts
+const SHEEP_GRAZE_CD = 5;                // how often a shorn sheep looks for grass to eat
+const SHEEP_GRAZE_CHANCE = 0.25;
 const SHEEP_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
 
 function _rollInventory() {
