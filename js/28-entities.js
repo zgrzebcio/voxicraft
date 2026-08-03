@@ -124,7 +124,7 @@ function shadeHumanoid(m, x, y, z, hurt) {
    Separate skin (textures/Entity/sheep.png) painted BARE — the fleece is not part of it.
    Wool is drawn as two oversized boxes wrapped around the body and head, textured from the
    wool block tile, so shearing/regrowing is just a visibility + scale change on those boxes. */
-const _sheepTex = new THREE.TextureLoader().load('/textures/Entity/sheep.png');
+const _sheepTex = new THREE.TextureLoader().load('textures/Entity/sheep.png');
 _sheepTex.colorSpace = THREE.SRGBColorSpace;
 _sheepTex.magFilter = THREE.NearestFilter;
 _sheepTex.minFilter = THREE.NearestFilter;
