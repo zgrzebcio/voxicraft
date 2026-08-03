@@ -14,7 +14,7 @@ const SKIN_PX = 64;                                  // skin is 64x64
 const MODEL_PX = 32;                                 // model is 32px tall (head 8 + body 12 + legs 12)
 const PX = 1.8 / MODEL_PX;                           // world units per skin pixel (player.H = 1.8)
 
-const _skinTex = new THREE.TextureLoader().load('/textures/Entity/player.png');
+const _skinTex = new THREE.TextureLoader().load('textures/Entity/player.png');
 _skinTex.colorSpace = THREE.SRGBColorSpace;
 _skinTex.magFilter = THREE.NearestFilter;
 _skinTex.minFilter = THREE.NearestFilter;
