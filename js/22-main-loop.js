@@ -241,20 +241,11 @@ function _waterFed(x, y, z, level) {
   }
   return false;
 }
-// after a source is removed, dry up every flowing cell it used to feed (BFS outward)
+// A source was removed: seed the scheduler at the hole. The per-cell tick drops every cell that
+// has lost its feed and re-seeds its own neighbours, so the flow recedes one ring per dry step
+// instead of vanishing in a single frame.
 function dryWaterFrom(sx, sy, sz) {
-  const work = [];
-  const push = (x, y, z) => { for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,-1,0],[0,1,0]]) work.push([x+dx, y+dy, z+dz]); };
-  push(sx, sy, sz);
-  let guard = 0;
-  while (work.length && guard++ < 50000) {
-    const [x, y, z] = work.pop();
-    const val = getBlock(x, y, z);
-    if ((val & 255) !== B.WATER) continue;
-    if (_waterFed(x, y, z, (val >> 8) & 15)) continue;
-    setBlock(x, y, z, B.AIR);
-    push(x, y, z);
-  }
+  queueWaterAround(sx, sy, sz, waterDry());
 }
 const WATER_MAX_PER_TICK = 256;           // safety valve only; timing comes from per-cell schedule
 // Water must always tick before lava in a frame: lava is the slower fluid and its
@@ -295,15 +286,16 @@ function updateWaterFlow() {
       }
       if (retract) { setBlock(x, y, z, B.AIR); queueWaterAround(x, y, z, waterDry()); continue; }
     }
-    // water touching lava → this water cell turns to cobblestone, but ONLY if it is resting on a
-    // floor. A falling column is just passing through: it must not weld itself into the wall it
-    // slides past — only the lava side reacts there (see the lava tick).
-    if (_hasFluidFloor(B.WATER, x, y, z)) {
+    // Fluid reactions are owned by whichever fluid is MOVING — the new block lands on the cell
+    // that was standing still. Here that means only FLOWING water reacts on its own cell (it
+    // runs into lava and freezes to stone). A resting source is left alone: the lava tick
+    // handles that pairing so the cobblestone appears on the water, not on the lava.
+    if (level > 0 && _hasFluidFloor(B.WATER, x, y, z)) {
       let touched = false;
       for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
         if ((getBlock(x + dx, y + dy, z + dz) & 255) === B.LAVA) { touched = true; break; }
       }
-      if (touched) { setBlock(x, y, z, B.COBBLE); continue; }
+      if (touched) { setBlock(x, y, z, B.STONE); continue; }
     }
     // ALWAYS flow down before considering sideways. A cell whose own floor is open (or holds
     // thinner water it can top up) drops and does nothing else this tick. When it drops it also
@@ -403,20 +395,9 @@ function _lavaFed(x, y, z, level) {
   }
   return false;
 }
-// mirror of dryWaterFrom for lava: remove every flowing lava cell that was fed by this source
+// mirror of dryWaterFrom: seed the scheduler so lava recedes at its own (slower) dry rate
 function dryLavaFrom(sx, sy, sz) {
-  const work = [];
-  const push = (x, y, z) => { for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,-1,0],[0,1,0]]) work.push([x+dx, y+dy, z+dz]); };
-  push(sx, sy, sz);
-  let guard = 0;
-  while (work.length && guard++ < 50000) {
-    const [x, y, z] = work.pop();
-    const val = getBlock(x, y, z);
-    if ((val & 255) !== B.LAVA) continue;
-    if (_lavaFed(x, y, z, (val >> 8) & 15)) continue;
-    setBlock(x, y, z, B.AIR);
-    push(x, y, z);
-  }
+  queueLavaAround(sx, sy, sz, lavaDry());
 }
 const LAVA_MAX_PER_TICK = 128;            // safety valve only; timing comes from per-cell schedule
 function updateLavaFlow() {
@@ -446,13 +427,24 @@ function updateLavaFlow() {
       }
       if (retract) { setBlock(x, y, z, B.AIR); queueLavaAround(x, y, z, lavaDry()); continue; }
     }
-    // lava touching water: source → obsidian, flowing → stone
+    // Lava meets water. A lava SOURCE quenches into obsidian in place. FLOWING lava is the
+    // moving side, so the reaction lands on the standing water instead: every water cell it has
+    // reached chills into cobblestone and the lava itself keeps going.
     {
-      let touched = false;
+      const hits = [];
       for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
-        if ((getBlock(x + dx, y + dy, z + dz) & 255) === B.WATER) { touched = true; break; }
+        const wx = x + dx, wy = y + dy, wz = z + dz;
+        if ((getBlock(wx, wy, wz) & 255) === B.WATER) hits.push([wx, wy, wz]);
       }
-      if (touched) { setBlock(x, y, z, level === 0 ? B.OBSIDIAN : B.STONE); continue; }
+      if (hits.length) {
+        if (level === 0) { setBlock(x, y, z, B.OBSIDIAN); continue; }
+        for (const [wx, wy, wz] of hits) {
+          setBlock(wx, wy, wz, B.COBBLE);
+          queueWaterAround(wx, wy, wz, waterDry());
+        }
+        queueLavaAt(x, y, z);
+        continue;
+      }
     }
     if (!_lavaFed(x, y, z, level)) { setBlock(x, y, z, B.AIR); queueLavaAround(x, y, z, lavaDry()); continue; }
     // ALWAYS flow down before sideways (see the water version for the rationale + retract rule)
@@ -778,6 +770,7 @@ function frame(now) {
           hotbarSel = pr.hotSel; buildHotbar();
         }
         restoreDrops(pr.drops);
+        restoreEntities(pr.entities);
         player.spawned = true;
       }
     } else {
@@ -803,10 +796,14 @@ function frame(now) {
     camShake.t -= dt;
   }
   camera.rotation.set(player.pitch + shP, player.yaw, shR);
+  applyCameraView(dt);            // F5 third-person: moves the camera back + shows the body
 
   /* ---- break / place (mouse + gamepad share repeat timing) ---- */
   const wantBreak = (mouseBreak && pointerLocked) || act.padBreak;
   const wantPlace = (mousePlace && pointerLocked) || act.padPlace;
+  // swinging at a mob takes priority over the block behind it — wantMine drives the block code,
+  // wantBreak still drives the hand swing so the attack animates
+  const wantMine = wantBreak && !((playing && !invOpen) && tryAttackEntity());
 
   // selection highlight
   updateInvCursorVisual(dt);                 // virtual cursor / drag ghost / slot hover
@@ -833,7 +830,7 @@ function frame(now) {
   // Creative: instant break with 240ms repeat. Survival: progressive mining vs. hardness.
   const survivalMining = !player.canFly;
   if (survivalMining) {
-    if (wantBreak && hit && PROPS[hit.id].hardness === 0 && PROPS[hit.id].raycast) {
+    if (wantMine && hit && PROPS[hit.id].hardness === 0 && PROPS[hit.id].raycast) {
       resetMining();
       if (!act.break || now - act.lastBreak > 240) {
         if (isTNTFuseActive(hit.x, hit.y, hit.z)) { act.lastBreak = now; }
@@ -847,7 +844,7 @@ function frame(now) {
         act.lastBreak = now;
         }
       }
-    } else if (wantBreak && hit && Number.isFinite(PROPS[hit.id].hardness) && PROPS[hit.id].hardness > 0) {
+    } else if (wantMine && hit && Number.isFinite(PROPS[hit.id].hardness) && PROPS[hit.id].hardness > 0) {
       if (isTNTFuseActive(hit.x, hit.y, hit.z)) { resetMining(); }
       else
       if (!mining.active || mining.x !== hit.x || mining.y !== hit.y || mining.z !== hit.z
@@ -912,7 +909,7 @@ function frame(now) {
     if (wantPlace && !_didThrow) { if (!act.place || now - act.lastPlace > 240) { doPlace(); act.lastPlace = now; } }
   } else {
     resetMining();
-    if (wantBreak) { if (!act.break || now - act.lastBreak > 240) { doBreak(); act.lastBreak = now; } }
+    if (wantMine) { if (!act.break || now - act.lastBreak > 240) { doBreak(); act.lastBreak = now; } }
     if (wantPlace && !_didThrow) { if (!act.place || now - act.lastPlace > 240) { doPlace(); act.lastPlace = now; } }
   }
   act.break = wantBreak; act.place = wantPlace;
@@ -967,6 +964,7 @@ function frame(now) {
   processFalling(dt);
   if (!player.canFly) { updateDrops(dt); updateProjectiles(dt); processLeavesDecay(dt); }
   updateFluids(dt);
+  updateEntities(dt);
   updateTNTs(dt);
   updateSaplings();
   processGrassSpread(dt);
@@ -1002,18 +1000,21 @@ function frame(now) {
   renderer.render(scene, camera);
   /* ---- first-person hand (own depth buffer, always on top) ---- */
   updateHands(dt, wantBreak, wantPlace, eatProg);
-  renderer.autoClear = false;
-  renderer.clearDepth();
-  /* hand scene: force neutral-bright uniforms so held items are never dark at night or in caves.
-     Shadow coords (vSC) are in world space and meaningless for hand geometry, so disable shadow. */
-  const _hsa = sharedUniforms.uAmbient.value, _hsd = sharedUniforms.uDirect.value, _hss = sharedUniforms.uShadowOn.value;
-  _handSaveLC.copy(sharedUniforms.uLightColor.value);
-  sharedUniforms.uAmbient.value = 1.0; sharedUniforms.uDirect.value = 0.0; sharedUniforms.uShadowOn.value = 0.0;
-  sharedUniforms.uLightColor.value.set(1, 1, 1);
-  renderer.render(handScene, handCam);
-  sharedUniforms.uAmbient.value = _hsa; sharedUniforms.uDirect.value = _hsd; sharedUniforms.uShadowOn.value = _hss;
-  sharedUniforms.uLightColor.value.copy(_handSaveLC);
-  renderer.autoClear = true;
+  // third person shows the actual body, so the first-person arm is skipped entirely
+  if (camView === 0) {
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    /* hand scene: force neutral-bright uniforms so held items are never dark at night or in caves.
+       Shadow coords (vSC) are in world space and meaningless for hand geometry, so disable shadow. */
+    const _hsa = sharedUniforms.uAmbient.value, _hsd = sharedUniforms.uDirect.value, _hss = sharedUniforms.uShadowOn.value;
+    _handSaveLC.copy(sharedUniforms.uLightColor.value);
+    sharedUniforms.uAmbient.value = 1.0; sharedUniforms.uDirect.value = 0.0; sharedUniforms.uShadowOn.value = 0.0;
+    sharedUniforms.uLightColor.value.set(1, 1, 1);
+    renderer.render(handScene, handCam);
+    sharedUniforms.uAmbient.value = _hsa; sharedUniforms.uDirect.value = _hsd; sharedUniforms.uShadowOn.value = _hss;
+    sharedUniforms.uLightColor.value.copy(_handSaveLC);
+    renderer.autoClear = true;
+  }
 
   /* ---- HUD (after the render so draw/tri stats reflect the main pass) ---- */
   hudT += dt;

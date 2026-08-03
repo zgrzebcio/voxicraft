@@ -129,6 +129,7 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'F1') { e.preventDefault(); toggleFullscreen(); return; }
+  if (e.code === 'F2') { e.preventDefault(); if (playing) cycleCameraView(); return; }
   // block all browser defaults while game has input focus; F1 handled above, Escape handled below
   if (playing && e.code !== 'Escape') e.preventDefault();
   if (e.code === 'Backquote' && playing && currentWorld) {  // ~ toggles pause without releasing mouse

@@ -89,7 +89,8 @@ function saveWorld(syncToLS = false) {
     [k, f.slots, +f.burn.toFixed(2), +f.burnMax.toFixed(2), +f.progress.toFixed(3)]);
   const data = {
     savedAt: Date.now(),
-    edits, drops, furnaces, time: worldTime, worldDay, curMode: currentInvMode,
+    edits, drops, furnaces, entities: serializeEntities(),
+    time: worldTime, worldDay, curMode: currentInvMode,
     survHot: survStash.hot, survInv: survStash.inv, survInv2: survStash.inv2,
     player: { pos: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw, pitch: player.pitch,
               hp: player.hp, food: player.food, saturation: player.saturation, flying: player.flying,
@@ -174,7 +175,7 @@ async function loadWorld(w) {
   loadInventoryForMode(modeSel.value === 'survival' ? 'survival' : 'creative');
   hotbarSel = 0; buildHotbar(); buildInventory();
   pendingRestore = (data && data.player && Array.isArray(data.player.pos))
-    ? { ...data.player, drops: data.drops } : null;
+    ? { ...data.player, drops: data.drops, entities: data.entities } : null;
   if (pendingRestore) player.pos.set(pendingRestore.pos[0], 96, pendingRestore.pos[2]); // stream the right chunks
   refreshMenu();
   // capture first thumbnail after chunks settle (~4s)

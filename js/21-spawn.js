@@ -13,6 +13,7 @@ function resetWorld(seed) {
   glowLights.clear();
   _plyGlow = null;
   clearDrops();
+  clearEntities();
   player.spawnPos = null;
   initWorkers(seed);
   player.spawned = false;
