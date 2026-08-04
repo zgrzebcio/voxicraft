@@ -2,9 +2,10 @@
 /* voxiCraft — world reset, surface scan, valid spawn search */
 
 /* ---------------------------------- world reset (new seed) ---------------------------------- */
-function resetWorld(seed) {
+function resetWorld(seed, terrainType) {
   SEED = seed;
-  mainGen = CORE.makeGen(seed);
+  TERRAIN_TYPE = terrainType || 'default';
+  mainGen = CORE.makeGen(seed, TERRAIN_TYPE);
   history.replaceState(null, '', '?seed=' + encodeURIComponent(seed));
   genQueue.length = 0; meshQueue.length = 0; meshResults.length = 0;
   for (const [, c] of chunks) disposeChunkMeshes(c);
@@ -17,7 +18,7 @@ function resetWorld(seed) {
   clearBeds();
   clearChests();
   player.spawnPos = null;
-  initWorkers(seed);
+  initWorkers(seed, TERRAIN_TYPE);
   player.spawned = false;
   player.pos.set(8.5, 96, 8.5);
   playerCX = 1e9; playerCZ = 1e9;           // force queue rebuild

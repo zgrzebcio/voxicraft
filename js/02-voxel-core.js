@@ -275,7 +275,15 @@ function VOXEL_CORE() {
     if (p.model === 'stairs' && !p.boxesByVar) { p.boxesByVar = STAIR_BOXES; p.boxes = STAIR_BOXES[0]; }
     if (p.model === 'slab') SLAB_IDS.push(id);   // registry order = ascending id; index used as mixed-double partner key
   }
-  const CX = 16, CY = 200, CZ = 16, WATER_LEVEL = 99;
+  const CX = 16, CY = 200, CZ = 16;
+  /* Flat ("superflat") worlds: a 25-block slab — 1 bedrock, 19 stone, 4 dirt, 1 grass — with a
+     matching low water level so lakes and ponds still carve into it. Everything else about the
+     world (biome = Plains, trees, surface plants) works exactly as it does at normal altitude. */
+  const FLAT_TOP = 24;                     // y of the grass layer
+  // Water sits 4 below the surface, not 1. Every decorator (trees, plants, melons, cacti) skips
+  // columns at h <= WATER_LEVEL + 1 or + 3 to keep shorelines clear — parking the flat surface
+  // just above water level would have tripped all of those and left a completely barren world.
+  const FLAT_WATER_LEVEL = FLAT_TOP - 4;
   const idx = (x, y, z) => x + (z << 4) + (y << 8);   // voxel index inside a chunk
 
   /* ---------- seeded PRNG + 2D simplex noise ---------- */
@@ -333,7 +341,9 @@ function VOXEL_CORE() {
   }
 
   /* ---------- terrain generator ---------- */
-  function makeGen(seedStr) {
+  function makeGen(seedStr, terrainType) {
+    const FLAT = terrainType === 'flat';
+    const WATER_LEVEL = FLAT ? FLAT_WATER_LEVEL : 99;
     const seedFn = xmur3(String(seedStr));
     const seedInt = seedFn();
     const noise2 = makeNoise(sfc32(seedFn(), seedFn(), seedFn(), seedFn()));
@@ -356,6 +366,26 @@ function VOXEL_CORE() {
     // plains and desert (it flattens hills/mountains and fades out trees), while fDesert
     // separates desert from plains. Both factors are smooth 0..1 so borders blend seamlessly.
     function terrainInfo(x, z) {
+      /* Flat world: no continents, hills or mountains — just the slab top, with the SAME
+         river/lake carving the normal generator uses so ponds still appear. Reporting
+         fPlains = 1 makes every column read as Plains to the biome label, the decorators and
+         the mob spawner, so nothing downstream needs a flat-world special case. */
+      if (FLAT) {
+        let h = FLAT_TOP;
+        const rn = 1 - Math.abs(fbm(x * 0.0014 + 1223.7, z * 0.0014 - 817.3, 2));
+        const ln = fbm(x * 0.0042 - 313.7, z * 0.0042 + 991.1, 2);
+        const valley = Math.max(smooth01(ln, 0.18, 0.74), smooth01(rn, 0.34, 0.95));
+        const core   = Math.max(smooth01(ln, 0.64, 0.84), smooth01(rn, 0.88, 0.965));
+        if (valley > 0.001) {
+          const rim = WATER_LEVEL + 1, floor = WATER_LEVEL - 3;
+          let target = h + (rim - h) * valley;
+          target += (floor - rim) * core;
+          if (target < h) h = target;
+        }
+        return { h: Math.max(4, Math.floor(h)), fPlains: 1, fDesert: 0, fSnow: 0,
+                 dh: 0, fRed: 0, rdh: 0,
+                 rT: smooth01(rn, 0.88, 0.965), lk: smooth01(ln, 0.64, 0.84), deep: 0 };
+      }
       const cont   = fbm(x * 0.0016, z * 0.0016, 3);
       const hills  = fbm(x * 0.009 + 37.3, z * 0.009 - 11.7, 4);
       const ridge  = 1 - Math.abs(fbm(x * 0.004 + 91.1, z * 0.004 + 57.9, 3));
@@ -601,12 +631,22 @@ function VOXEL_CORE() {
           } else {
             topB = B.GRASS; underB = B.DIRT;
           }
+          if (FLAT) {
+            // 1 bedrock / 19 stone / 4 dirt / 1 grass. A pond column has h below FLAT_TOP, so
+            // its dirt loop shortens (or empties) and the surface material logic above has
+            // already picked sand/gravel/clay for the bed.
+            data[idx(x, 0, z)] = B.BEDROCK;
+            for (let y = 1; y <= 19; y++) data[idx(x, y, z)] = B.STONE;
+            for (let y = 20; y < h; y++) data[idx(x, y, z)] = underB;
+            data[idx(x, h, z)] = topB;
+          } else {
           data[idx(x, 0, z)] = B.BEDROCK;
           data[idx(x, 1, z)] = B.BEDROCK;
           const dirtFrom = Math.max(2, h - 5);
           for (let y = 2; y < dirtFrom; y++) data[idx(x, y, z)] = B.STONE;
           for (let y = dirtFrom; y < h; y++) data[idx(x, y, z)] = underB;
           if (h >= 2) data[idx(x, h, z)] = topB;
+          }
           if (snowCap && h + 1 <= 199) {
             // Pattern-driven snow cover:
             //  - biome edge (non-SNO neighbor): thin 1-layer carpet, keeps a crisp biome seam
@@ -639,6 +679,11 @@ function VOXEL_CORE() {
           for (let y = h + 1; y <= WATER_LEVEL; y++) data[idx(x, y, z)] = B.WATER;
         }
       }
+
+      /* Everything from here to the tree pass carves or fills UNDERGROUND: ore, gravel, caves,
+         cave entrances, lava pools and sulfur. A flat world is a 25-block slab meant as a clean
+         testbed, so the whole region is skipped rather than left to riddle it with holes. */
+      if (!FLAT) {
 
       /* ---- ore veins (before caves so cave walls naturally expose ore faces) ---- */
       {
@@ -1080,6 +1125,8 @@ function VOXEL_CORE() {
         }
       }
 
+      }   // end !FLAT underground section
+
       // trees — evaluated over the margin so neighbours get the overlapping leaves
       const put = (x, y, z, id, force) => {
         if (x < 0 || x > 15 || z < 0 || z > 15 || y < 2 || y > 199) return;
@@ -1120,7 +1167,9 @@ function VOXEL_CORE() {
           const birchRegion = !isPlains && !isSnow && fbm(wx * 0.004 + 1234, wz * 0.004 - 987, 2) > 0.35;
           const isBirch = birchRegion || (!isPlains && !isSnow && hash2(gcx * 211 + 5, gcz * 197 + 3) < 0.01);
           // plains/meadow: flat 0.1% chance. forest/other: original density-scaled odds. birch forest: dense.
-          let baseProb = isPlains ? 0.001 : (forestNoise ? 0.55 : 0.08) * treeF;
+          // flat worlds are entirely Plains, and plains odds (0.1%) would leave a testbed with
+          // almost no trees at all — lift it enough that a few are always in sight
+          let baseProb = isPlains ? (FLAT ? 0.03 : 0.001) : (forestNoise ? 0.55 : 0.08) * treeF;
           if (birchRegion) baseProb = Math.max(baseProb, 0.5);
           if (r > baseProb) continue;
           // flatness check
@@ -1347,7 +1396,9 @@ function VOXEL_CORE() {
       /* ---- canyons: rare winding ravines. A low-freq region mask gates them (deserts get a
          much higher chance); inside a region, a ridge line |noise|≈0 cuts a V-shaped gorge up
          to ~32 deep. Normal-biome canyons are 50/50 filled with water (per 128-block cell);
-         desert canyons are always dry. Runs after decoration so the cut clears trees/plants. */
+         desert canyons are always dry. Runs after decoration so the cut clears trees/plants.
+         Skipped in flat worlds — a 32-deep gorge would punch clean through the slab. */
+      if (!FLAT)
       for (let z = 0; z < CZ; z++)
         for (let x = 0; x < CX; x++) {
           const gi = (x + 2) + (z + 2) * 20;
@@ -1921,7 +1972,7 @@ function WORKER_MAIN() {
     const m = e.data;
     try {
       if (m.type === 'init') {
-        gen = CORE.makeGen(m.seed);
+        gen = CORE.makeGen(m.seed, m.terrainType);
       } else if (m.type === 'gen') {
         const buf = gen.genChunk(m.cx, m.cz);
         self.postMessage({ type: 'gen', cx: m.cx, cz: m.cz, data: buf }, [buf]);
@@ -1956,7 +2007,12 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                RAW_TIN: 307, TIN_INGOT: 308, TIN_NUGGET: 309, RAW_GOLD: 310, GOLD_INGOT: 311, GOLD_NUGGET: 312,
                GLOW_DUST: 313, BRICK: 314, GOLDEN_APPLE: 315, BREAD: 316, WOODEN_SWORD: 317, STONE_SWORD: 318,
                IRON_SWORD: 319, GOLDEN_SWORD: 320, DIAMOND_SWORD: 321, STRING: 322, IRON_SHEARS: 323, FEATHER: 324,
-               MUTTON: 325, COOKED_MUTTON: 326 };
+               MUTTON: 325, COOKED_MUTTON: 326,
+               LEATHER_HELMET: 327, LEATHER_CHESTPLATE: 328, LEATHER_LEGGINGS: 329, LEATHER_BOOTS: 330,
+               IRON_HELMET: 331, IRON_CHESTPLATE: 332, IRON_LEGGINGS: 333, IRON_BOOTS: 334,
+               GOLDEN_HELMET: 335, GOLDEN_CHESTPLATE: 336, GOLDEN_LEGGINGS: 337, GOLDEN_BOOTS: 338,
+               DIAMOND_HELMET: 339, DIAMOND_CHESTPLATE: 340, DIAMOND_LEGGINGS: 341, DIAMOND_BOOTS: 342,
+               IRON_GLOVES: 343, BELT: 344 };
 const ITEM_PROPS = {
   [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: '' },
   [ITEM.FLINT]:         { name: 'Flint',         stack: 99, icon: 'flint', desc: '' },
@@ -2037,6 +2093,33 @@ const ITEM_PROPS = {
   [ITEM.GOLDEN_APPLE]:  { name: 'Golden apple',   stack: 30, icon: 'golden_apple',  foodSatFull: 8, food: 5,  foodSat: 15,  eatTime: 2.0, desc: '' },
   [ITEM.MUTTON]:        { name: 'Mutton',         stack: 99, icon: 'mutton',        foodSatFull: 1, food: 2,  foodSat: 4,  eatTime: 1.8, desc: '' },
   [ITEM.COOKED_MUTTON]: { name: 'Cooked mutton',  stack: 99, icon: 'cooked_mutton', foodSatFull: 4, food: 6,  foodSat: 7,  eatTime: 2.1, desc: '' },
+// Armor. `equip` names the equipment slot the piece goes into; `armor` is its point value.
+// 20 armor points = a full 10-icon bar. `armorMat` picks both the armor-bar sprite theme and the
+// overlay sheet on the preview (<mat>_tophalf.png / <mat>_downhalf.png).
+// Optional stat modifiers, all additive across worn pieces:
+//   moveSpeed   fraction of walk speed, e.g. -0.025 = the 2.5% slow each iron plate costs
+//   strength    flat bonus damage added to whatever the held weapon deals
+//   atkSpeed    fraction added to the attack-speed multiplier
+  [ITEM.LEATHER_HELMET]:     { name: 'Leather cap',        stack: 1, icon: 'leather_helmet',     equip: 'helmet',     armor: 1, tier: 1, durability: 55,  armorMat: 'leather', desc: '' },
+  [ITEM.LEATHER_CHESTPLATE]: { name: 'Leather tunic',      stack: 1, icon: 'leather_chestplate', equip: 'chestplate', armor: 3, tier: 1, durability: 80,  armorMat: 'leather', desc: '' },
+  [ITEM.LEATHER_LEGGINGS]:   { name: 'Leather trousers',   stack: 1, icon: 'leather_leggings',   equip: 'leggings',   armor: 2, tier: 1, durability: 75,  armorMat: 'leather', desc: '' },
+  [ITEM.LEATHER_BOOTS]:      { name: 'Leather boots',      stack: 1, icon: 'leather_boots',      equip: 'boots',      armor: 1, tier: 1, durability: 65,  armorMat: 'leather', desc: '' },
+  [ITEM.IRON_HELMET]:        { name: 'Iron helmet',        stack: 1, icon: 'iron_helmet',        equip: 'helmet',     armor: 2, tier: 3, durability: 165, armorMat: 'iron',    moveSpeed: -0.025, desc: '' },
+  [ITEM.IRON_CHESTPLATE]:    { name: 'Iron chestplate',    stack: 1, icon: 'iron_chestplate',    equip: 'chestplate', armor: 6, tier: 3, durability: 240, armorMat: 'iron',    moveSpeed: -0.025, desc: '' },
+  [ITEM.IRON_LEGGINGS]:      { name: 'Iron leggings',      stack: 1, icon: 'iron_leggings',      equip: 'leggings',   armor: 5, tier: 3, durability: 225, armorMat: 'iron',    moveSpeed: -0.025, desc: '' },
+  [ITEM.IRON_BOOTS]:         { name: 'Iron boots',         stack: 1, icon: 'iron_boots',         equip: 'boots',      armor: 2, tier: 3, durability: 195, armorMat: 'iron',    moveSpeed: -0.025, desc: '' },
+  // gloves have no preview overlay sheet yet — the preview only draws the four body pieces
+  [ITEM.IRON_GLOVES]:        { name: 'Iron gloves',        stack: 1, icon: 'iron_gloves',        equip: 'gloves',     armor: 1, tier: 3, durability: 150, armorMat: 'iron',    moveSpeed: -0.025, strength: 0.75, desc: '' },
+  // `beltSlots` opens that many quick-access slots above the equipment panel while worn
+  [ITEM.BELT]:               { name: 'Belt',               stack: 1, icon: 'belt',               equip: 'belt',       beltSlots: 5, desc: '' },
+  [ITEM.GOLDEN_HELMET]:      { name: 'Golden helmet',      stack: 1, icon: 'golden_helmet',      equip: 'helmet',     armor: 2, tier: 3, durability: 77,  armorMat: 'golden',  desc: '' },
+  [ITEM.GOLDEN_CHESTPLATE]:  { name: 'Golden chestplate',  stack: 1, icon: 'golden_chestplate',  equip: 'chestplate', armor: 5, tier: 3, durability: 112, armorMat: 'golden',  desc: '' },
+  [ITEM.GOLDEN_LEGGINGS]:    { name: 'Golden leggings',    stack: 1, icon: 'golden_leggings',    equip: 'leggings',   armor: 3, tier: 3, durability: 105, armorMat: 'golden',  desc: '' },
+  [ITEM.GOLDEN_BOOTS]:       { name: 'Golden boots',       stack: 1, icon: 'golden_boots',       equip: 'boots',      armor: 2, tier: 3, durability: 91,  armorMat: 'golden',  desc: '' },
+  [ITEM.DIAMOND_HELMET]:     { name: 'Diamond helmet',     stack: 1, icon: 'diamond_helmet',     equip: 'helmet',     armor: 3, tier: 5, durability: 363, armorMat: 'diamond', desc: '' },
+  [ITEM.DIAMOND_CHESTPLATE]: { name: 'Diamond chestplate', stack: 1, icon: 'diamond_chestplate', equip: 'chestplate', armor: 8, tier: 5, durability: 528, armorMat: 'diamond', desc: '' },
+  [ITEM.DIAMOND_LEGGINGS]:   { name: 'Diamond leggings',   stack: 1, icon: 'diamond_leggings',   equip: 'leggings',   armor: 6, tier: 5, durability: 495, armorMat: 'diamond', desc: '' },
+  [ITEM.DIAMOND_BOOTS]:      { name: 'Diamond boots',      stack: 1, icon: 'diamond_boots',      equip: 'boots',      armor: 3, tier: 5, durability: 429, armorMat: 'diamond', desc: '' },
 };
 
 // blocks that only DROP when broken with the right tool type at (or above) a tier.

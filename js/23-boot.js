@@ -77,19 +77,4 @@ window.__vc = {
                      genQ: genQueue.length, meshQ: meshQueue.length, results: meshResults.length }; },
 };
 
-/* ---- background music: loops forever at low volume; starts on first user gesture
-   (browsers block autoplay until an interaction) ---- */
-{
-  const bgm = new Audio('Sound/Music/Sneaky.mp3');
-  bgm.loop = true;
-  bgm.volume = 0.1;
-  const startMusic = () => {
-    bgm.play().then(() => {
-      removeEventListener('pointerdown', startMusic);
-      removeEventListener('keydown', startMusic);
-    }).catch(() => {});     // still blocked — next gesture retries
-  };
-  startMusic();             // try immediately (works if autoplay is allowed)
-  addEventListener('pointerdown', startMusic);
-  addEventListener('keydown', startMusic);
-}
+/* background music lives in js/sound.js — it follows the menu/in-game state each frame */

@@ -26,6 +26,7 @@ const menuSub     = document.getElementById('menuSub');
 const worldListEl = document.getElementById('worldList');
 const worldNameIn = document.getElementById('worldName');
 const newModeSel  = document.getElementById('newModeSel');
+const newTerrainSel = document.getElementById('newTerrainSel');
 const tickInput   = document.getElementById('tickInput');
 const modeLabel   = document.getElementById('modeLabel');
 
@@ -92,6 +93,7 @@ function saveWorld(syncToLS = false) {
     edits, drops, furnaces, entities: serializeEntities(), chests: serializeChests(),
     time: worldTime, worldDay, curMode: currentInvMode,
     survHot: survStash.hot, survInv: survStash.inv, survInv2: survStash.inv2,
+    survEquip: serializeEquip(), survBelt: serializeBelt(),
     player: { pos: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw, pitch: player.pitch,
               hp: player.hp, food: player.food, saturation: player.saturation, flying: player.flying,
               hotSel: hotbarSel,
@@ -131,7 +133,7 @@ async function loadWorld(w) {
   let ls = null;
   try { ls = JSON.parse(localStorage.getItem('vc_world_' + w.id)); } catch {}
   if (ls && (!data || (ls.savedAt || 0) > (data.savedAt || 0))) data = ls;   // pick the newest copy
-  resetWorld(w.seed);
+  resetWorld(w.seed, w.terrain);      // worlds saved before 0.665 have no `terrain` -> 'default'
   if (data && data.edits)
     for (const k in data.edits) { const m = new Map(data.edits[k]); if (m.size) editStore.set(k, m); }
   FURNACES.clear();                          // restore per-block furnace state
@@ -175,6 +177,8 @@ async function loadWorld(w) {
     inv: _hasSurvSave ? _validArr(data.survInv, 27) : new Array(27).fill(null),
     inv2: _hasSurvSave ? _validArr(data.survInv2, 27) : new Array(27).fill(null),   // future backpack
   };
+  // worn gear (and anything on the belt) rides with the survival stash
+  restoreEquip(_hasSurvSave ? data.survEquip : null, _hasSurvSave ? data.survBelt : null);
   if (data && typeof data.time === 'number') { worldTime = ((data.time % 1) + 1) % 1; worldDay = typeof data.worldDay === 'number' ? data.worldDay : 0; }
   else { worldTime = 1 / 24; worldDay = 0; }  // new world: start at 07:00, day 0
   // survival-created worlds are locked to survival; creative worlds resume their last mode

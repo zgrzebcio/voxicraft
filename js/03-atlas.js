@@ -73,6 +73,8 @@ async function buildAtlas() {
   await Promise.all([
     ...Object.keys(TEXTURES).map(n => loadImage(n)),
     ...Object.entries(ITEM_TEXTURES).map(([n, u]) => loadImage(n, u)),
+    // armor-overlay sheets live in IMAGES too, but never enter the block atlas
+    ...Object.entries(EQUIP_TEXTURES).map(([n, u]) => loadImage(n, u).catch(() => {})),
   ]);
 
   // tall_grass.png is one 2-tall sprite (e.g. 60x120): split it into a top and bottom half so

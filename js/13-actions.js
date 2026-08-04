@@ -77,11 +77,14 @@ function loadInventoryForMode(mode) {
     if (!survStash.inv2) survStash.inv2 = new Array(27).fill(null);   // migrate older saves
     HOTBAR = survStash.hot; invSlots = survStash.inv; invSlots2 = survStash.inv2;   // live refs — world save persists them
   }
+  // equipment follows the same survival/creative split. Guarded: this runs once at script-load
+  // time, before 31-armor.js has been parsed.
+  if (typeof loadEquipForMode === 'function') loadEquipForMode(mode);
 }
 loadInventoryForMode(currentInvMode);
 const saveHotbar = () => { if (currentInvMode === 'survival') survStash.hot = HOTBAR; };
 const saveInv    = () => { if (currentInvMode === 'survival') { survStash.inv = invSlots; survStash.inv2 = invSlots2; } };
-const saveAll = () => { saveHotbar(); saveInv(); };
+const saveAll = () => { saveHotbar(); saveInv(); if (typeof saveEquip === 'function') saveEquip(); };
 let hotbarSel = 0;
 
 const _dir = new THREE.Vector3();
@@ -109,6 +112,7 @@ function doBreak() {
   if (!hit) return;
   if (isTNTFuseActive(hit.x, hit.y, hit.z)) return;             // armed TNT is unbreakable
   const inf = slabBreakInfo(getBlock(hit.x, hit.y, hit.z), hit.bi || 0);
+  playBlockSound(hit.id, 'break', hit.x, hit.y, hit.z);
   setBlock(hit.x, hit.y, hit.z, inf ? inf.remainVal : B.AIR);   // double slab: only the aimed half
 }
 let handPlaceSwing = false;   // set on a SUCCESSFUL place; 24-hands consumes it for the swing
@@ -127,6 +131,7 @@ function tryMergeSlab(x, y, z, baseId, v, heldId) {
   if (x + 1 > p.x - R && x < p.x + R && y + 1 > p.y && y < p.y + player.H &&
       z + 1 > p.z - R && z < p.z + R) return false;
   setBlock(x, y, z, baseId | (nv << 8));
+  playBlockSound(heldId, 'place', x, y, z);
   handPlaceSwing = true;
   if (!player.canFly) {
     const slot = HOTBAR[hotbarSel];
@@ -228,6 +233,7 @@ function doPlace() {
     if (cur !== B.AIR && cur !== B.WATER) return;
     const varb = hit.ny === 1 ? 0 : 1;
     setBlock(px, py, pz, B.SULFUR_UP_TIP | (varb << 8));
+    playBlockSound(B.SULFUR_UP_TIP, 'place', px, py, pz);
     handPlaceSwing = true;
     if (!player.canFly) {
       const s = HOTBAR[hotbarSel]; s.count--;
@@ -239,6 +245,7 @@ function doPlace() {
   // snow carpet placed onto a cross/billboard plant -> replaces the plant in the same cell
   if (heldId === B.SNOW_CARPET && PROPS[hit.id] && PROPS[hit.id].model === 'cross' && isSolid(hit.x, hit.y - 1, hit.z)) {
     setBlock(hit.x, hit.y, hit.z, B.SNOW_CARPET);
+    playBlockSound(B.SNOW_CARPET, 'place', hit.x, hit.y, hit.z);
     handPlaceSwing = true;
     if (!player.canFly) {
       const s = HOTBAR[hotbarSel]; s.count--;
@@ -253,6 +260,7 @@ function doPlace() {
     const hv = (getBlock(hit.x, hit.y, hit.z) >> 8) & 255;
     if (hv < 5) {
       setBlock(hit.x, hit.y, hit.z, B.SNOW_CARPET | ((hv + 1) << 8));
+      playBlockSound(B.SNOW_CARPET, 'place', hit.x, hit.y, hit.z);
       handPlaceSwing = true;
       if (!player.canFly) {
         const s = HOTBAR[hotbarSel]; s.count--;
@@ -266,6 +274,7 @@ function doPlace() {
   if (heldId === B.TALLGRASS && hit.id === B.TALLGRASS && (getBlock(hit.x, hit.y + 1, hit.z) & 255) === B.AIR) {
     setBlock(hit.x, hit.y, hit.z, B.TALL_LOWER);
     setBlock(hit.x, hit.y + 1, hit.z, B.TALL_UPPER);
+    playBlockSound(B.TALL_LOWER, 'place', hit.x, hit.y, hit.z);
     handPlaceSwing = true;
     if (!player.canFly) {
       const s = HOTBAR[hotbarSel]; s.count--;
@@ -352,6 +361,7 @@ function doPlace() {
     setBlock(px, py, pz, id | (facing << 8));
     setBlock(px, py + 1, pz, id | ((facing | 8) << 8));
     registerDoor(px, py, pz, facing, false);
+    playBlockSound(id, 'place', px, py, pz);
     handPlaceSwing = true;
     if (!player.canFly) {
       slot.count--;
@@ -393,7 +403,11 @@ function doPlace() {
            : hit.nz === 1 ? 4 : 5;                              // clicked wall
   }
   setBlock(px, py, pz, id | (varb << 8));
-  if (id === B.CHEST) registerChest(px, py, pz, varb & 3);   // spawn its animated mesh
+  playBlockSound(id, 'place', px, py, pz);
+  if (id === B.CHEST) {
+    tryPairChest(px, py, pz, varb & 3);       // link to a lone same-facing neighbour, if any
+    registerChest(px, py, pz, varb & 3);      // spawn its animated mesh
+  }
   if (id === B.TNT) armTNT(px, py, pz);          // start the fuse the moment TNT is placed
   if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING) armSapling(px, py, pz, id);
   // a real block placed on top of grass smothers it back to dirt (billboards/cross don't)

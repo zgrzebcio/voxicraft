@@ -80,6 +80,8 @@ function updateFurnaces(dt) {
       f.lit = lit;
       const facing = (getBlock(x, y, z) >> 8) & 3;           // keep the rotation bits
       setBlock(x, y, z, B.FURNACE | ((facing | (lit ? V.FURNACE_ON : 0)) << 8));
+      // fires on ignition only — going out is silent, same as the block texture swap
+      if (lit) playSound('furnaceOn', { gain: 0.7, pos: { x: x + 0.5, y: y + 0.5, z: z + 0.5 } });
     }
   }
   _updateFurnaceBars();

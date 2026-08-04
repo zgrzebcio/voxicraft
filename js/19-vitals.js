@@ -124,6 +124,24 @@ function paintVitals() {
     }
   }
 
+  /* armor row — sits directly above the hearts (the oxygen row shares this band on the right).
+     20 armor points = 10 full icons, so each icon is worth 2 points, same scale as hearts.
+     The sprite set is chosen per material so other tiers can theme their own row later; any
+     material without its own art falls back to the iron sprites. */
+  const armorPts = typeof playerArmorPoints === 'function' ? playerArmorPoints() : 0;
+  if (armorPts > 0) {
+    const mat = typeof playerArmorStyle === 'function' ? playerArmorStyle() : 'Iron';
+    const full = GUI_IMG['armor' + mat + 'Full'] || GUI_IMG.armorIronFull;
+    const half = GUI_IMG['armor' + mat + 'Half'] || GUI_IMG.armorIronHalf;
+    for (let i = 0; i < 10; i++) {
+      const ax = hpX + i * iconStep;
+      const frac = Math.ceil(Math.max(0, Math.min(2, armorPts - i * 2)));
+      if (GUI_IMG.armorEmpty) vctx.drawImage(GUI_IMG.armorEmpty, ax, 0, spriteW, spriteW);
+      if (frac >= 2 && full) vctx.drawImage(full, ax, 0, spriteW, spriteW);
+      else if (frac >= 1 && half) vctx.drawImage(half, ax, 0, spriteW, spriteW);
+    }
+  }
+
   for (let i = 0; i < 10; i++) {
     const hpFrac = Math.ceil(Math.max(0, Math.min(2, player.hp - i * 2)));   // ceil so tiny drain doesn't flip icon
     const hunFrac = Math.ceil(Math.max(0, Math.min(2, player.food - i * 2)));
@@ -191,6 +209,10 @@ const GUI_IMG = {};
     foodHalf:            'textures/Gui/Vitals/Food/food_half.png',
     foodSaturation:      'textures/Gui/Vitals/Food/food_Saturation.png',
     foodSaturationHalf:  'textures/Gui/Vitals/Food/food_Saturation_half.png',
+    // armor bar — one sprite set per material so future tiers can theme their own row
+    armorEmpty:          'textures/Gui/Vitals/Armor/armor_empty.png',
+    armorIronFull:       'textures/Gui/Vitals/Armor/iron_armor_full.png',
+    armorIronHalf:       'textures/Gui/Vitals/Armor/iron_armor_half.png',
   };
   for (const [k, src] of Object.entries(_p)) {
     const img = new Image();
@@ -331,14 +353,27 @@ function updateVitals(dt) {
   if (Math.ceil(player.air) !== Math.ceil(prevAir) ||
       (prevAir < MAX_AIR && player.air >= MAX_AIR)) vitalsDirty = true;
 
+  /* Armor soak. Damage arrives from many places (fall, cactus, lava, drowning, mobs) as direct
+     `player.hp -= n` writes, so rather than threading a helper through all of them the whole
+     frame's loss is reduced here — before the death check, so armor can actually save you.
+     The 0.5 floor keeps the slow starvation drip from counting as a hit. */
+  {
+    const lost = prevHp - player.hp;
+    if (lost >= 0.5 && !player.dead) {
+      const mult = armorDamageMultiplier();
+      if (mult < 1) player.hp = Math.min(MAX_HP, prevHp - lost * mult);
+      damageArmorDurability();
+    }
+  }
   // void death
   if (player.pos.y < -30) { player.hp = 0; player._dmgCause = 'fell into the void'; }
   // death: drop everything around the body, freeze input, show the death screen —
   // respawn happens when the player clicks Respawn (respawnPlayer below)
   if (player.hp <= 0 && !player.dead) {
     player.dead = true;
+    playSound('death', { gain: 1 });
     const dx0 = Math.floor(player.pos.x), dy0 = Math.floor(player.pos.y + 0.5), dz0 = Math.floor(player.pos.z);
-    for (const arr of [HOTBAR, invSlots])
+    for (const arr of [HOTBAR, invSlots, equipSlots])   // worn gear drops with everything else
       for (let i = 0; i < arr.length; i++) {
         const s = arr[i];
         if (!s) continue;
@@ -355,7 +390,11 @@ function updateVitals(dt) {
   // discrete hit this frame (fall / cactus / drown — slow starve drain stays below threshold):
   // red flash + camera kick, both scaled by how hard the hit was
   const lostHp = prevHp - player.hp;
-  if (lostHp >= 0.5 && !player.dead) hurtFlash(lostHp);
+  if (lostHp >= 0.5 && !player.dead) {
+    hurtFlash(lostHp);
+    // central hook: every damage source (fall, cactus, lava, drowning, mobs) lands here
+    playSound('hit', { gain: 0.9, rate: 0.95 + Math.random() * 0.1 });
+  }
   if (Math.floor(player.hp * 2) !== Math.floor(prevHp * 2)
       || Math.floor(player.food * 2) !== Math.floor(prevFood * 2)
       || Math.floor(player.saturation * 2) !== Math.floor(prevSat * 2)) vitalsDirty = true;

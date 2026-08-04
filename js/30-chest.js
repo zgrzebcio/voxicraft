@@ -106,17 +106,61 @@ function clearChests() {
   activeChest = activeChest2 = null;
 }
 
-/* Chests pair ACROSS their facing: two chests looking the same way, side by side. */
+/* Chests pair ACROSS their facing: two chests looking the same way, side by side.
+
+   The pairing is DECIDED ONCE, when the second chest is placed, and stored in the variant byte
+   rather than re-derived by scanning neighbours. Scanning made a row of three chests ambiguous —
+   the middle one answered "yes, I'm paired" to both of its neighbours, so it appeared as the
+   other half of two different double chests and its contents showed up in both GUIs.
+
+   variant bit 2 = paired, bit 3 = the partner sits in the NEGATIVE direction. */
+const CHEST_PAIRED  = 4;
+const CHEST_PAIR_NEG = 8;
+
+// the two cells a chest with this facing could pair with: [positive, negative]
+const chestPairDirs = (facing) =>
+  (facing === 0 || facing === 1) ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
+
 function chestPartner(x, y, z) {
   const val = getBlock(x, y, z);
   if ((val & 255) !== B.CHEST) return null;
-  const facing = (val >> 8) & 3;
-  const dirs = (facing === 0 || facing === 1) ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
-  for (const [dx, dz] of dirs) {
+  const va = (val >> 8) & 255;
+  if (!(va & CHEST_PAIRED)) return null;
+  const [dx, dz] = chestPairDirs(va & 3)[(va & CHEST_PAIR_NEG) ? 1 : 0];
+  const nv = getBlock(x + dx, y, z + dz);
+  if ((nv & 255) !== B.CHEST) return null;          // partner gone — fall back to a single chest
+  return { x: x + dx, y, z: z + dz };
+}
+
+/* Called right after a chest block is placed. Links it to ONE unpaired same-facing neighbour and
+   writes the link into both variant bytes. A neighbour that is already half of a double is
+   skipped, so a single chest can never be claimed twice. */
+function tryPairChest(x, y, z, facing) {
+  const dirs = chestPairDirs(facing);
+  for (let i = 0; i < 2; i++) {
+    const [dx, dz] = dirs[i];
     const nv = getBlock(x + dx, y, z + dz);
-    if ((nv & 255) === B.CHEST && ((nv >> 8) & 3) === facing) return { x: x + dx, y, z: z + dz };
+    if ((nv & 255) !== B.CHEST) continue;
+    const nva = (nv >> 8) & 255;
+    if ((nva & 3) !== facing || (nva & CHEST_PAIRED)) continue;
+    const mine  = facing | CHEST_PAIRED | (i === 1 ? CHEST_PAIR_NEG : 0);
+    const their = facing | CHEST_PAIRED | (i === 1 ? 0 : CHEST_PAIR_NEG);
+    setBlock(x, y, z, B.CHEST | (mine << 8));
+    setBlock(x + dx, y, z + dz, B.CHEST | (their << 8));
+    return true;
   }
-  return null;
+  return false;
+}
+
+/* A broken chest leaves its partner single again — otherwise the survivor keeps a paired bit
+   pointing at an empty cell and chestPartner has to keep guessing. */
+function unpairChestNeighbour(x, y, z, oldVal) {
+  const va = (oldVal >> 8) & 255;
+  if (!(va & CHEST_PAIRED)) return;
+  const [dx, dz] = chestPairDirs(va & 3)[(va & CHEST_PAIR_NEG) ? 1 : 0];
+  const nv = getBlock(x + dx, y, z + dz);
+  if ((nv & 255) !== B.CHEST) return;
+  setBlock(x + dx, y, z + dz, B.CHEST | (((nv >> 8) & 3) << 8));
 }
 // deterministic ordering so both halves agree which cell is "first"
 function chestPairOrdered(x, y, z) {
@@ -129,7 +173,8 @@ function chestPairOrdered(x, y, z) {
 }
 
 // spill contents and forget the chest when its block goes away
-function chestBroken(x, y, z) {
+function chestBroken(x, y, z, oldVal) {
+  unpairChestNeighbour(x, y, z, oldVal);
   const k = chestKey(x, y, z);
   const c = CHESTS.get(k);
   removeChestMesh(k);
@@ -151,7 +196,17 @@ function openChest(x, y, z) {
   if (b) registerChest(b.x, b.y, b.z, (getBlock(b.x, b.y, b.z) >> 8) & 3);
   activeChest = chestKey(a.x, a.y, a.z);
   activeChest2 = b ? chestKey(b.x, b.y, b.z) : null;
+  // ONE sound for the whole chest, single or double — it's one lid action either way
+  playSound('chestOpen', { gain: 0.8, pos: { x: a.x + 0.5, y: a.y + 0.5, z: a.z + 0.5 } });
   toggleInventory(true);
+}
+
+/* Closing is driven from toggleInventory (Esc, E, clicking away all land there), so the sound
+   lives in a helper it can call rather than being duplicated at each exit. */
+function chestClosedSound() {
+  const c = activeChest && CHESTS.get(activeChest);
+  if (!c) return;
+  playSound('chestClose', { gain: 0.8, pos: { x: c.x + 0.5, y: c.y + 0.5, z: c.z + 0.5 } });
 }
 
 /* ---------------------------------- per-frame ---------------------------------- */

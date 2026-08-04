@@ -9,6 +9,8 @@ let invOpen = false;
 // when count > 1. Future non-block items would branch on an item table for their flat icon.
 const slotArr = (r) => r === 'hot' ? HOTBAR
   : r === 'fur' ? ((activeFurnace && FURNACES.get(activeFurnace)) || mkFurnace()).slots
+  : r === 'equip' ? equipSlots
+  : r === 'belt'  ? beltSlots
   : r === 'chest'  ? ((activeChest  && CHESTS.get(activeChest))  || mkChest()).slots
   : r === 'chest2' ? ((activeChest2 && CHESTS.get(activeChest2)) || mkChest()).slots
   : r === 'inv2' ? invSlots2
@@ -31,6 +33,8 @@ function buildInventory() {
   if (fpEl) fpEl.style.display = 'none';
   const chpEl = document.getElementById('chestPanel');
   if (chpEl) chpEl.style.display = 'none';
+  const eqpEl = document.getElementById('equipPanel');
+  if (eqpEl) eqpEl.style.display = 'none';
 
   invEl.innerHTML =
     '<div class="title">Inventory</div>' +
@@ -68,6 +72,7 @@ function buildInventory() {
   if (!player.canFly) buildCraftPanel();
   if (activeFurnace) buildFurnacePanel();
   if (activeChest) buildChestPanel();
+  buildEquipPanel();                          // equipment sits on the right, always available
 }
 function refreshSlotsUI() { buildHotbar(); buildInventory(); saveAll(); }
 
@@ -91,6 +96,11 @@ function slotDescriptors() {
   const fp = document.getElementById('furnacePanel');
   if (fp && fp.style.display !== 'none')
     for (const el of fp.querySelectorAll('.slot')) out.push({ region: 'fur', i: +el.dataset.fi, el });
+  const eqp = document.getElementById('equipPanel');
+  if (eqp && eqp.style.display !== 'none') {
+    for (const el of eqp.querySelectorAll('.slot.eq')) out.push({ region: 'equip', i: +el.dataset.eq, el });
+    for (const el of eqp.querySelectorAll('.slot.belt')) out.push({ region: 'belt', i: +el.dataset.belt, el });
+  }
   const chp = document.getElementById('chestPanel');
   if (chp && chp.style.display !== 'none')
     for (const g of chp.querySelectorAll('.grid')) {        // 'chest' and, for a double, 'chest2'
@@ -141,6 +151,15 @@ function itemTooltipHTML(id, dur) {
     if (p.damage != null) rows.push(['damage', _tipNum(p.damage)]);
     if (p.attackSpeed != null) rows.push(['attack speed', _tipNum(p.attackSpeed)]);
     if (p.toolSpeed != null) rows.push(['mine speed', _tipNum(p.toolSpeed)]);
+  }
+  if (p.equip) {
+    const maxD = p.durability;
+    if (maxD) rows.push(['durability', `${dur != null ? dur : maxD}/${maxD}`]);
+    if (p.armor != null) rows.push(['armor', _tipNum(p.armor)]);
+    // stat modifiers only listed when the piece actually carries them
+    if (p.strength) rows.push(['strength', (p.strength > 0 ? '+' : '') + _tipNum(p.strength)]);
+    if (p.moveSpeed) rows.push(['move speed', (p.moveSpeed > 0 ? '+' : '') + _tipNum(p.moveSpeed * 100) + '%']);
+    if (p.atkSpeed) rows.push(['attack speed', (p.atkSpeed > 0 ? '+' : '') + _tipNum(p.atkSpeed * 100) + '%']);
   }
   if (p.food != null) {
     rows.push(['food', _tipNum(p.food)]);
@@ -208,6 +227,7 @@ function pickUp(region, i, take = 'all') {
   s.count -= n;
   if (s.count <= 0) arr[i] = null;
   dragFrom = { region, i };
+  if (region === 'equip') syncBeltCapacity();      // belt removed -> empty its row
   refreshSlotsUI();
 }
 // place from the hand into a slot. n: 'all' | 1. Different id + full place = swap (item stays in hand).
@@ -217,6 +237,9 @@ function placeInto(region, i, n = 'all') {
     if (i === 2) return;                                     // output: take-only
     if (i === 0 && !FUEL_SMELTS[dragHeld.id]) return;        // fuel slot: coal / coal chunk only
   }
+  // equipment: each slot only takes its own piece; the reserved slots take nothing yet
+  if (region === 'equip' && !equipAccepts(i, dragHeld.id)) return;
+  if (region === 'belt'  && !beltAccepts(i, dragHeld.id)) return;
   const arr = slotArr(region), dst = arr[i];
   const want = n === 'all' ? dragHeld.count : 1;
   if (dst == null) {
@@ -234,6 +257,7 @@ function placeInto(region, i, n = 'all') {
     refreshSlotsUI(); return;
   }
   if (dragHeld.count <= 0) { dragHeld = null; dragFrom = null; }
+  if (region === 'equip') syncBeltCapacity();      // belt swapped for a smaller one -> trim
   refreshSlotsUI();
 }
 /* Middle-click sort: tidies just the grid under the cursor (hotbar, inventory, or an open
@@ -392,6 +416,7 @@ function toggleInventory(open, mode) {
   } else {
     cancelDrag();
     activeFurnace = null;                       // closing always detaches the furnace GUI
+    chestClosedSound();                         // must run BEFORE the key is cleared
     activeChest = activeChest2 = null;          // ...and the chest, which also shuts its lid
     if (lastHoverEl) { lastHoverEl.classList.remove('hover'); lastHoverEl = null; }
     vcurEl.style.display = vdragEl.style.display = 'none';

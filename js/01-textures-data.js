@@ -162,4 +162,29 @@ const ITEM_TEXTURES = {
   feather:         'textures/Items/Materials/feather.png',
   mutton:          'textures/Items/Consumables/mutton.png',
   cooked_mutton:   'textures/Items/Consumables/cooked_mutton.png',
+  leather_helmet:     'textures/Items/Armor/leather_helmet.png',
+  leather_chestplate: 'textures/Items/Armor/leather_chestplate.png',
+  leather_leggings:   'textures/Items/Armor/leather_leggings.png',
+  leather_boots:      'textures/Items/Armor/leather_boots.png',
+  iron_helmet:        'textures/Items/Armor/iron_helmet.png',
+  iron_chestplate:    'textures/Items/Armor/iron_chestplate.png',
+  iron_leggings:      'textures/Items/Armor/iron_leggings.png',
+  iron_boots:         'textures/Items/Armor/iron_boots.png',
+  iron_gloves:        'textures/Items/Armor/iron_gloves.png',
+  belt:               'textures/Items/Armor/belt.png',
+  golden_helmet:      'textures/Items/Armor/golden_helmet.png',
+  golden_chestplate:  'textures/Items/Armor/golden_chestplate.png',
+  golden_leggings:    'textures/Items/Armor/golden_leggings.png',
+  golden_boots:       'textures/Items/Armor/golden_boots.png',
+  diamond_helmet:     'textures/Items/Armor/diamond_helmet.png',
+  diamond_chestplate: 'textures/Items/Armor/diamond_chestplate.png',
+  diamond_leggings:   'textures/Items/Armor/diamond_leggings.png',
+  diamond_boots:      'textures/Items/Armor/diamond_boots.png',
+};
+
+/* Armor overlay sheets drawn on the equipment preview. 64x32 skin-layer layout (at 4x here):
+   <mat>_tophalf = helmet + chestplate, <mat>_downhalf = leggings + boots. */
+const EQUIP_TEXTURES = {
+  iron_tophalf:  'textures/Entity/equipment/iron_tophalf.png',
+  iron_downhalf: 'textures/Entity/equipment/iron_downhalf.png',
 };

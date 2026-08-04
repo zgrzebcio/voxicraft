@@ -84,6 +84,7 @@ document.getElementById('createBtn').addEventListener('click', async () => {
   const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
               name, seed, mode: newModeSel.value === 'creative' ? 'creative' : 'survival',
               tickSpeed: clampi(+tickInput.value || 3, 0, 20),   // simulation speed for decay/flow/grass
+              terrain: newTerrainSel.value === 'flat' ? 'flat' : 'default',   // fixed at creation
               createdVersion: GAME_VERSION, lastVersion: GAME_VERSION,
               created: Date.now(), lastPlayed: Date.now() };
   WORLDS.unshift(w);

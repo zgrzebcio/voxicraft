@@ -646,6 +646,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   sharedUniforms.uTime.value += dt;
+  updateMusic();                            // menu track on/off follows menuScene
 
   // fps
   fpsFrames++;
@@ -706,7 +707,8 @@ function frame(now) {
       player.vy = Math.max(-58, player.vy - 27 * dt);           // gravity
     }
     dy = player.vy * dt;
-    hSpeed = player.walkSpeed * (player.sneaking ? 0.3 : fast ? (inWater ? 1.9 : 1.6) : 1) * (inWater ? 0.45 : 1);
+    hSpeed = player.walkSpeed * (player.sneaking ? 0.3 : fast ? (inWater ? 1.9 : 1.6) : 1) * (inWater ? 0.45 : 1)
+           * playerMoveSpeedMul();               // heavy armor slows you down
   }
   if (!player.spawned) { player.vy = 0; dy = 0; }   // hold still until the spawn chunk exists
   if (menuScene) { fwd = 0; str = 0; dy = 0; player.vy = 0; }   // title camera: rotation only
@@ -735,6 +737,7 @@ function frame(now) {
     if (waterFlowVec(Math.floor(player.pos.x), Math.floor(player.pos.y + 0.4), Math.floor(player.pos.z), _flowV))
       movePlayer(_flowV.x * 1.7 * dt, 0, _flowV.z * 1.7 * dt);
   }
+  updateFootsteps(grounded);
   // sprint also releases when movement input stops, and on any fly<->walk transition
   const movingNow = !!(fwd || str);
   player._movingH = movingNow ? 1 : 0;   // exposed for survival sprint-drain detection
@@ -801,13 +804,18 @@ function frame(now) {
   /* ---- break / place (mouse + gamepad share repeat timing) ---- */
   const wantBreak = (mouseBreak && pointerLocked) || act.padBreak;
   const wantPlace = (mousePlace && pointerLocked) || act.padPlace;
-  // swinging at a mob takes priority over the block behind it — wantMine drives the block code,
-  // wantBreak still drives the hand swing so the attack animates
-  const wantMine = wantBreak && !((playing && !invOpen) && tryAttackEntity());
-
   // selection highlight
   updateInvCursorVisual(dt);                 // virtual cursor / drag ghost / slot hover
   const hit = (playing && !invOpen) ? currentRay() : null;
+
+  // Swinging at a mob takes priority over the block behind it. Priority is decided by AIM alone,
+  // never by the attack cooldown — gating it on tryAttackEntity() meant every swing after the
+  // first (while still on cooldown) fell through to the block code and mined straight through
+  // the mob. wantBreak still drives the hand swing so the attack animates.
+  const _entAim = (playing && !invOpen) ? pickEntityHit() : null;
+  const _entPriority = entityBeatsBlock(_entAim, hit);
+  if (wantBreak && _entPriority) tryAttackEntity(_entAim.ent);
+  const wantMine = wantBreak && !_entPriority;
   selBox.visible = !!hit;
   if (hit) {
     const boxes = rayBoxesAt(hit.x, hit.y, hit.z);
@@ -836,6 +844,7 @@ function frame(now) {
         if (isTNTFuseActive(hit.x, hit.y, hit.z)) { act.lastBreak = now; }
         else {
         const minedId = getBlock(hit.x, hit.y, hit.z) & 255;
+        playBlockSound(minedId, 'break', hit.x, hit.y, hit.z);
         setBlock(hit.x, hit.y, hit.z, B.AIR);
         queueWaterAround(hit.x, hit.y, hit.z);
         queueLavaAround(hit.x, hit.y, hit.z);
@@ -862,7 +871,11 @@ function frame(now) {
       mining.elapsed += dt;
       const progress = Math.min(1, mining.elapsed / mining.needed);
       const stage = Math.min(9, Math.floor(progress * 10));
-      if (stage !== mining.stage) { mining.stage = stage; drawCrack(progress); }
+      if (stage !== mining.stage) {
+        mining.stage = stage;
+        drawCrack(progress);
+        if (stage & 1) playBlockSound(hit.id, 'hit', hit.x, hit.y, hit.z);   // every other stage
+      }
       const cboxes = rayBoxesAt(hit.x, hit.y, hit.z);
       if (cboxes && cboxes.length) {
         let x0=1,y0=1,z0=1,x1=0,y1=0,z1=0;
@@ -879,6 +892,7 @@ function frame(now) {
         const mval = getBlock(mining.x, mining.y, mining.z), minedId = mval & 255;
         const mx = mining.x, my = mining.y, mz = mining.z, mbi = mining.bi || 0;
         resetMining();
+        playBlockSound(minedId, 'break', mx, my, mz);
         // tier gate: wrong/too-weak tool still breaks the block but yields no drops
         const dropsOk = mineDropAllowed(slotId(HOTBAR[hotbarSel]), minedId);
         const inf = slabBreakInfo(mval, mbi);     // double slab: break only the mined half
@@ -972,6 +986,7 @@ function frame(now) {
   updateDoors(dt);
   updateBed(dt);
   updateChests(dt);
+  updateEquipPreview(dt);
 
   /* ---- sky, lighting & shadow maps, then the main render ---- */
   updateDayNight(dt);

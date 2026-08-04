@@ -78,7 +78,22 @@ function doorBroken(x, y, z, oldVal) {
   if ((getBlock(x, oy, z) & 255) === B.DOOR) setBlock(x, oy, z, B.AIR);
 }
 
-// right-click either half: flip the open bit on both halves (facing bits preserved)
+/* Double door: the bottom cell of a same-facing door standing directly beside this one, across
+   the facing. Unlike chests this needs no stored state — a door pair is symmetric, so both
+   halves find each other by the same rule and there is nothing to disambiguate. */
+function doorPartnerCell(x, by, z, facing) {
+  const dirs = (facing === 0 || facing === 1) ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
+  for (const [dx, dz] of dirs) {
+    const nv = getBlock(x + dx, by, z + dz);
+    if ((nv & 255) !== B.DOOR) continue;
+    const nva = (nv >> 8) & 255;
+    if ((nva & 3) === facing && !(nva & 8)) return { x: x + dx, z: z + dz };   // bottom half only
+  }
+  return null;
+}
+
+// right-click either half: flip the open bit on both halves (facing bits preserved), and on the
+// neighbouring door if this is a double. One sound for the whole action, however many panels move.
 function toggleDoor(x, y, z) {
   const val = getBlock(x, y, z);
   if ((val & 255) !== B.DOOR) return;
@@ -86,9 +101,18 @@ function toggleDoor(x, y, z) {
   const bval = getBlock(x, by, z);
   if ((bval & 255) !== B.DOOR) return;
   const bvar = (bval >> 8) & 255;
-  const nv = (bvar & 3) | ((bvar & 4) ? 0 : 4);
+  const facing = bvar & 3;
+  const opening = !(bvar & 4);
+  const nv = facing | (opening ? 4 : 0);
   setBlock(x, by, z, B.DOOR | (nv << 8));
   setBlock(x, by + 1, z, B.DOOR | ((nv | 8) << 8));
+  const p = doorPartnerCell(x, by, z, facing);
+  if (p) {
+    setBlock(p.x, by, p.z, B.DOOR | (nv << 8));
+    setBlock(p.x, by + 1, p.z, B.DOOR | ((nv | 8) << 8));
+  }
+  playSound(opening ? 'doorOpen' : 'doorClose',
+            { gain: 0.8, pos: { x: x + 0.5, y: by + 1, z: z + 0.5 } });
 }
 
 // per-frame: swing each door toward its block state's angle; hide while the chunk is unloaded

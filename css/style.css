@@ -55,6 +55,37 @@
   #inv .slot { pointer-events:auto; }
   #inv .hint { color:#7d8ba0; font-size:11px; text-align:center; margin:-2px 0 2px; }
 
+  /* ---- equipment (right of the inventory) ----
+     two columns of five slots flanking a live player preview, stats underneath */
+  #equipPanel { display:none; flex-direction:column; gap:6px;
+                background:rgba(16,18,30,.94); border:1px solid rgba(255,255,255,.15);
+                border-radius:10px; padding:12px; }
+  #equipPanel .ctitle { color:#9ab; font-size:12px; text-align:center; }
+  #equipPanel .stTitle { margin-top:2px; }
+  /* belt quick-access row — only rendered while a belt is worn */
+  #beltRow { display:flex; gap:4px; justify-content:center; padding-bottom:6px;
+             border-bottom:1px solid rgba(255,255,255,.14); }
+  #equipPanel .slot.belt { pointer-events:auto; opacity:.55; border-style:dashed; }
+  #equipBody { display:flex; gap:10px; align-items:flex-start; }
+  #equipPanel .eqCol { display:flex; flex-direction:column; gap:4px; }
+  #equipPanel .slot.eq { pointer-events:auto; }
+  /* reserved slots read as inactive until their items exist */
+  #equipPanel .slot.eq.ph { opacity:.42; border-style:dashed; }
+  #equipPanel .eqTag { position:absolute; bottom:1px; left:0; right:0; text-align:center;
+                       font-size:8px; letter-spacing:.02em; color:#7d8ba0; pointer-events:none; }
+  #equipPreview { width:132px; height:200px; border-radius:6px;
+                  background:linear-gradient(180deg, rgba(60,72,104,.55), rgba(18,22,36,.75));
+                  border:1px solid rgba(255,255,255,.12); overflow:hidden; flex:0 0 auto; }
+  #equipStats { display:flex; flex-direction:column; gap:2px;
+                border-top:1px solid rgba(255,255,255,.14); padding-top:5px; }
+  #equipStats .stRow { display:flex; justify-content:space-between; gap:12px; font-size:11px; }
+  #equipStats .stRow span { color:#8fa0b4; }
+  #equipStats .stRow b { color:#e8eef6; font-weight:600; }
+  #equipStats .stRow.eff span { color:#7fd6a0; }
+  #equipStats .stRow.good b { color:#7fd6a0; }     /* buff */
+  #equipStats .stRow.bad b  { color:#e8a06a; }     /* penalty, e.g. armor weight */
+  #equipStats .stRow.none span { color:#6b7789; font-style:italic; }
+
   /* ---- chest storage (right of the inventory) ----
      A single chest is 5 rows x 7 cols; a double stacks a second grid above it for 10 x 7, which
      still fits on screen, so there is no scroller. */

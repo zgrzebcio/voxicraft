@@ -81,6 +81,10 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.GUNPOWDER, 7], [B.SAND, 10]],                                 out: [B.TNT, 1] },
   { in: [[ITEM.SUGAR_CANE, 3]],                                              out: [ITEM.PAPER, 1] },
   { in: [[ITEM.GOLD_INGOT, 10], [ITEM.APPLE, 1]],                            out: [ITEM.GOLDEN_APPLE, 1] },
+  { in: [[ITEM.IRON_INGOT, 10]],                                             out: [ITEM.IRON_HELMET, 1] },
+  { in: [[ITEM.IRON_INGOT, 18]],                                             out: [ITEM.IRON_CHESTPLATE, 1] },
+  { in: [[ITEM.IRON_INGOT, 14]],                                             out: [ITEM.IRON_LEGGINGS, 1] },
+  { in: [[ITEM.IRON_INGOT, 8]],                                              out: [ITEM.IRON_BOOTS, 1] },
 ];
 
 // which list is shown: 'basic' (E / pocket) or 'advanced' (crafting bench = basic + advanced)
@@ -138,9 +142,12 @@ function doCraft(r) {
 function recipeCategory(r) {
   const oid = r.out[0];
   if (oid < 256) return 'blocks';
-  return ITEM_PROPS[oid]?.tool ? 'tools' : 'materials';
+  const p = ITEM_PROPS[oid];
+  if (p?.equip) return 'armor';               // anything worn in an equipment slot
+  if (p?.food != null) return 'food';
+  return p?.tool ? 'tools' : 'materials';
 }
-const CRAFT_CATS = ['all', 'blocks', 'materials', 'tools'];
+const CRAFT_CATS = ['all', 'blocks', 'materials', 'tools', 'armor', 'food'];
 let craftCat = 'all';                      // active tab; kept across rebuilds
 function cycleCraftCategory(dir) {         // dir = +1 (RB) / -1 (LB); wraps
   const i = CRAFT_CATS.indexOf(craftCat);
@@ -178,6 +185,8 @@ function buildCraftPanel() {
     { key: 'blocks',    label: 'Blocks',    icon: B.CRAFTING_BENCH },
     { key: 'materials', label: 'Materials', icon: ITEM.IRON_INGOT },
     { key: 'tools',     label: 'Tools',     icon: ITEM.IRON_PICKAXE },
+    { key: 'armor',     label: 'Armor',     icon: ITEM.IRON_CHESTPLATE },
+    { key: 'food',      label: 'Food',      icon: ITEM.APPLE },
   ];
   let tabsHtml = '<div id="craftTabs">';
   for (const c of CATS) {

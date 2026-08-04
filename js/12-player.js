@@ -153,23 +153,24 @@ function raycastVoxel(origin, dir, maxDist) {
   let tY = dir.y !== 0 ? Math.abs(((stepY > 0 ? y + 1 : y) - origin.y) / dir.y) : Infinity;
   let tZ = dir.z !== 0 ? Math.abs(((stepZ > 0 ? z + 1 : z) - origin.z) / dir.z) : Infinity;
   let nx = 0, ny = 0, nz = 0;
+  let tEnter = 0;                     // distance along the ray at which we entered the current cell
   for (let i = 0; i < 256; i++) {
     const b = getBlock(x, y, z), id = b & 255, prop = PROPS[id];
     if (b !== 0 && prop.raycast) {
       const boxes = rayBoxesAt(x, y, z);                     // neighbour-aware (stair corners) box list
-      if (!boxes) return { x, y, z, nx, ny, nz, id };        // full cube: cell hit is the face hit
+      if (!boxes) return { x, y, z, nx, ny, nz, id, t: tEnter };   // full cube: cell hit is the face hit
       let best = null, bestI = 0;                            // slab etc: refine against sub-boxes
       for (let bi = 0; bi < boxes.length; bi++) {
         const bb = boxes[bi];
         const hit = rayBox(origin, dir, x+bb[0], y+bb[1], z+bb[2], x+bb[3], y+bb[4], z+bb[5]);
         if (hit && hit.t <= maxDist && (!best || hit.t < best.t)) { best = hit; bestI = bi; }
       }
-      if (best) return { x, y, z, nx: best.nx, ny: best.ny, nz: best.nz, id, bi: bestI };
+      if (best) return { x, y, z, nx: best.nx, ny: best.ny, nz: best.nz, id, bi: bestI, t: best.t };
       // no box hit in this cell -> keep traversing
     }
-    if (tX < tY && tX < tZ) { if (tX > maxDist) return null; x += stepX; tX += dtX; nx = -stepX; ny = 0; nz = 0; }
-    else if (tY < tZ)       { if (tY > maxDist) return null; y += stepY; tY += dtY; nx = 0; ny = -stepY; nz = 0; }
-    else                    { if (tZ > maxDist) return null; z += stepZ; tZ += dtZ; nx = 0; ny = 0; nz = -stepZ; }
+    if (tX < tY && tX < tZ) { if (tX > maxDist) return null; tEnter = tX; x += stepX; tX += dtX; nx = -stepX; ny = 0; nz = 0; }
+    else if (tY < tZ)       { if (tY > maxDist) return null; tEnter = tY; y += stepY; tY += dtY; nx = 0; ny = -stepY; nz = 0; }
+    else                    { if (tZ > maxDist) return null; tEnter = tZ; z += stepZ; tZ += dtZ; nx = 0; ny = 0; nz = -stepZ; }
   }
   return null;
 }

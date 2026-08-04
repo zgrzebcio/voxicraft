@@ -10,7 +10,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="mono"></div>
-<div id="version">alpha 0.6471</div>
+<div id="version">alpha 0.665</div>
 <div id="crosshair"></div>
 <div id="blockname"></div>
 <div id="toast"></div>
@@ -36,6 +36,7 @@
   <div id="inv"></div>
   <div id="furnacePanel"></div>
   <div id="chestPanel"></div>
+  <div id="equipPanel"></div>
 </div>
 
  <div id="overlay"> 
@@ -63,6 +64,10 @@
         <select id="newModeSel" style="background:#0b0d16;color:#dfe;border:1px solid #445;border-radius:6px;padding:8px 10px;">
           <option value="survival">Survival</option>
           <option value="creative">Creative</option>
+        </select>
+        <select id="newTerrainSel" style="background:#0b0d16;color:#dfe;border:1px solid #445;border-radius:6px;padding:8px 10px;">
+          <option value="default">Default terrain</option>
+          <option value="flat">Flat</option>
         </select>
         <label style="color:#9ab;font-size:13px;display:flex;align-items:center;gap:6px;">random tick
           <input id="tickInput" type="number" min="0" max="20" step="1" value="3" style="width:56px;">
@@ -145,6 +150,7 @@ import * as THREE from 'three';
 window.THREE = THREE;
 </script>
 <script defer src="js/00-config.js"></script>
+<script defer src="js/32-sound.js"></script>
 <script defer src="js/01-textures-data.js"></script>
 <script defer src="js/02-voxel-core.js"></script>
 <script defer src="js/03-atlas.js"></script>
@@ -169,6 +175,7 @@ window.THREE = THREE;
 <script defer src="js/27-doors.js"></script>
 <script defer src="js/29-bed.js"></script>
 <script defer src="js/30-chest.js"></script>
+<script defer src="js/31-armor.js"></script>
 <script defer src="js/20-inventory-ui.js"></script>
 <script defer src="js/21-spawn.js"></script>
 <script defer src="js/22-main-loop.js"></script>

@@ -4,7 +4,7 @@
 function clampi(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 /* ---------------------------------- configuration ---------------------------------- */
-const GAME_VERSION = '0.6471';             // stamped onto worlds at create + each load
+const GAME_VERSION = '0.665';           // stamped onto worlds at create + each load
 const CHUNK_X = 16, CHUNK_Y = 200, CHUNK_Z = 16;
 const WATER_Y = 99;                       // top water surface fills up to this y
 const DEFAULT_VIEW_DIST = 10;             // in chunks (radius)

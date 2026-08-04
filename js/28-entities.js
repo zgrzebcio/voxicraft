@@ -547,7 +547,8 @@ function damageEntity(ent, dmg) {
    takes priority over mining the block behind it. Returns the nearest entity within reach. */
 const _atkDir = new THREE.Vector3();
 const _atkOrigin = new THREE.Vector3();
-function pickEntity(maxDist = 4.0) {
+const _blockDir = new THREE.Vector3();
+function pickEntityHit(maxDist = 4.0) {
   camera.getWorldDirection(_atkDir);
   if (camView === 2) _atkDir.negate();     // front view: the camera looks back at the player
   // Always swing from the EYE, never from camera.position — in third person the camera has been
@@ -574,7 +575,36 @@ function pickEntity(maxDist = 4.0) {
     }
     if (ok && t0 < bestT) { bestT = t0; best = e; }
   }
-  return best;
+  return best ? { ent: best, t: bestT } : null;
+}
+function pickEntity(maxDist = 4.0) {
+  const h = pickEntityHit(maxDist);
+  return h ? h.ent : null;
+}
+
+/* Blocks you can reach a mob through: billboards (tall grass, flowers, saplings) and leaves.
+   Standing in a bush must not make the bush eat your swing. Glass and other cutout blocks are
+   deliberately excluded — they're solid to a fist. */
+function _swingPassable(id) {
+  const p = PROPS[id & 255];
+  if (!p) return false;
+  return p.model === 'cross' || (id & 255) === B.LEAVES || (id & 255) === B.BIRCH_LEAVES;
+}
+
+/* Does the aimed entity take priority over the aimed block?
+   `hit.t` is measured from camera.position (which in third person sits metres behind the head)
+   while entity picking starts at the eye, so the block distance is re-measured from the eye
+   before the two are compared. */
+function entityBeatsBlock(entHit, hit) {
+  if (!entHit) return false;
+  if (!hit || hit.t == null) return true;
+  if (_swingPassable(hit.id)) return true;
+  camera.getWorldDirection(_blockDir);        // NOT _atkDir — that one is flipped in front view
+  const hx = camera.position.x + _blockDir.x * hit.t;
+  const hy = camera.position.y + _blockDir.y * hit.t;
+  const hz = camera.position.z + _blockDir.z * hit.t;
+  const dx = hx - _atkOrigin.x, dy = hy - _atkOrigin.y, dz = hz - _atkOrigin.z;
+  return entHit.t <= Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 /* Attack pacing. A bare hand needs HAND_ATTACK_TIME between swings; a weapon's attackSpeed is a
@@ -587,17 +617,22 @@ let _lastHeldForAtk;
 function attackCooldownFor(id) {
   const p = id != null && id >= 256 ? ITEM_PROPS[id] : null;
   const spd = p && p.attackSpeed > 0 ? p.attackSpeed : 1;
-  return HAND_ATTACK_TIME / spd;
+  // worn gear scales the swing rate on top of the weapon's own speed
+  const gear = typeof playerAtkSpeedMul === 'function' ? playerAtkSpeedMul() : 1;
+  return HAND_ATTACK_TIME / (spd * gear);
 }
 function attackDamageFor(id) {
   const p = id != null && id >= 256 ? ITEM_PROPS[id] : null;
-  return p && p.damage > 0 ? p.damage : HAND_DAMAGE;
+  const base = p && p.damage > 0 ? p.damage : HAND_DAMAGE;
+  // strength from equipment is flat bonus damage (diamond sword 7 + iron gloves 0.75 = 7.75)
+  return base + (typeof playerStrength === 'function' ? playerStrength() : 0);
 }
-function tryAttackEntity() {
+function tryAttackEntity(ent) {
   if (_atkCooldown > 0) return false;
-  const ent = pickEntity();
+  if (!ent) ent = pickEntity();
   if (!ent) return false;
   const held = slotId(HOTBAR[hotbarSel]);
+  playSound('hit', { gain: 0.9, rate: 0.95 + Math.random() * 0.1, pos: { x: ent.x, y: ent.y + 1, z: ent.z } });
   _atkCooldown = attackCooldownFor(held);
   const died = damageEntity(ent, attackDamageFor(held));
   // Knockback: push along player -> entity. When the two overlap that vector is ~zero and
@@ -789,6 +824,7 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
         const gx = Math.floor(e.x), gy = Math.floor(e.y - 0.02), gz = Math.floor(e.z);
         if (e.onGround && (getBlock(gx, gy, gz) & 255) === B.GRASS && Math.random() < SHEEP_GRAZE_CHANCE) {
           setBlock(gx, gy, gz, B.DIRT);        // eats the turf down to bare dirt
+          playBlockSound(B.GRASS, 'break', gx, gy, gz);
           e.regrowing = true;
           e.woolGrow = 0;
           e.state = 'idle';
@@ -897,6 +933,7 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
 
   /* ---- visuals ---- */
   const spd = moved / Math.max(dt, 1e-4);
+  entityStepSound(e, dt, spd);
   let swing = Math.min(spd / 3.5, 1) * 0.7;
   if (e.flailT > 0) { e.walk += 11 * dt; swing = Math.max(swing, 0.8); }
   else e.walk += Math.min(spd, 9) * dt * 2.6;
@@ -1129,6 +1166,7 @@ function updateEntities(dt) {
     if (e.atkAnimT > 0) e.atkAnimT -= dt;
     if (e.flailT > 0) e.flailT -= dt;
     const spd = moved / Math.max(dt, 1e-4);
+    entityStepSound(e, dt, spd);
     let swing = Math.min(spd / 4.5, 1) * 0.75;
     // taking a hit thrashes the limbs through the walk cycle even when standing still
     if (e.flailT > 0) {
