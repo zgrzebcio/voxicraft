@@ -365,6 +365,10 @@ function setBlock(x, y, z, val) {
   if (oldId === B.FURNACE && newId !== B.FURNACE) furnaceBroken(x, y, z);
   // door half removed: take the other half + the animated mesh with it
   if (oldId === B.DOOR && newId !== B.DOOR) doorBroken(x, y, z, oldVal);
+  // bed half removed: take the other half + the mesh with it
+  if (oldId === B.BED && newId !== B.BED) bedBroken(x, y, z, oldVal);
+  // chest removed/replaced: spill its contents and drop the mesh
+  if (oldId === B.CHEST && newId !== B.CHEST) chestBroken(x, y, z);
   // placing a solid block against a cactus's side snaps the cactus off (column chain-breaks up)
   if (PROPS[newId]?.solid)
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {

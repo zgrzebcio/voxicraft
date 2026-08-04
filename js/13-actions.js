@@ -211,6 +211,10 @@ function doPlace() {
   if (!player.canFly && hit.id === B.FURNACE) { openFurnace(hit.x, hit.y, hit.z); return; }
   // doors open/close in any mode
   if (hit.id === B.DOOR) { toggleDoor(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
+  // right-clicking a bed sleeps through the night
+  if (hit.id === B.BED) { trySleep(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
+  // right-clicking a chest opens its storage GUI (both halves if it is a double)
+  if (hit.id === B.CHEST) { openChest(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
   const heldId = slotId(HOTBAR[hotbarSel]);
   // buckets: fill empty bucket from a water source, or pour a water source from a full one
   if (heldId === ITEM.BUCKET || heldId === ITEM.WATER_BUCKET || heldId === ITEM.LAVA_BUCKET) { useBucket(heldId, hit); return; }
@@ -356,6 +360,17 @@ function doPlace() {
     }
     return;
   }
+  // bed: needs two free cells on solid ground, lays foot + head and spawns the mesh
+  if (id === B.BED) {
+    if (!tryPlaceBed(px, py, pz)) return;
+    handPlaceSwing = true;
+    if (!player.canFly) {
+      slot.count--;
+      if (slot.count <= 0) HOTBAR[hotbarSel] = null;
+      saveHotbar(); updateHotbar(); buildHotbar();
+    }
+    return;
+  }
   // rotation variant from placement context
   let varb = 0;
   const rot = PROPS[id].rot;
@@ -378,6 +393,7 @@ function doPlace() {
            : hit.nz === 1 ? 4 : 5;                              // clicked wall
   }
   setBlock(px, py, pz, id | (varb << 8));
+  if (id === B.CHEST) registerChest(px, py, pz, varb & 3);   // spawn its animated mesh
   if (id === B.TNT) armTNT(px, py, pz);          // start the fuse the moment TNT is placed
   if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING) armSapling(px, py, pz, id);
   // a real block placed on top of grass smothers it back to dirt (billboards/cross don't)

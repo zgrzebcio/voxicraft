@@ -41,7 +41,8 @@ function VOXEL_CORE() {
               STONESLAB:36, CACTUSSLAB:37, GLASSSLAB:38, WOOL:39, PUMPKIN:40, WHEAT:41,
               BIRCH_LOG:42, BIRCH_PLANKS:43, BIRCH_LEAVES:44, HAY:45, MARBLE:46, GRANITE:47, LIMESTONE:48,
               TALLGRASS:49, POPPY:50, ORCHID:51, TALL_LOWER:52, TALL_UPPER:53, TIN_ORE:54, GOLD_ORE:55, COPPER_ORE:56, LAVA:57, SNOW_CARPET:58, 
-              OBSIDIAN:59, SULFUR_BLOCK:60, SULFUR_DOWN_TIP:61, SULFUR_UP_TIP:62, OAK_SAPLING:63, BIRCH_SAPLING:64, SUGAR_CANE:65, TNT:66, };
+              OBSIDIAN:59, SULFUR_BLOCK:60, SULFUR_DOWN_TIP:61, SULFUR_UP_TIP:62, OAK_SAPLING:63, BIRCH_SAPLING:64, SUGAR_CANE:65, TNT:66,
+              BED:67, CHEST:68, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -54,26 +55,26 @@ function VOXEL_CORE() {
   // `light` = block-light emission level (0..15); glowstone lights up to 14 blocks around
   const PROPS = [];
   // `hardness` = seconds to break by hand in survival. Infinity = unbreakable (bedrock).
-  PROPS[B.AIR]     = { name:'Air', solid:false, opaque:false, raycast:false, pass:0, model:'cube', hardness:0,    faces:null };
-  PROPS[B.GRASS]   = { name:'Grass', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.0, type:'grass', faces:[T.GRASS_SIDE,T.GRASS_SIDE,T.GRASS_TOP,T.DIRT,T.GRASS_SIDE,T.GRASS_SIDE] };
-  PROPS[B.DIRT]    = { name:'Dirt', solid:true,  opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:1.8, type:'ground', faces:[T.DIRT,T.DIRT,T.DIRT,T.DIRT,T.DIRT,T.DIRT] };
-  PROPS[B.STONE]   = { name:'Stone', solid:true,  opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE] };
+  PROPS[B.AIR]     = { name:'Air', solid:false, opaque:false, raycast:false, pass:0, model:'cube', hardness:0,    faces:null, desc: '' };
+  PROPS[B.GRASS]   = { name:'Grass', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.0, type:'grass', faces:[T.GRASS_SIDE,T.GRASS_SIDE,T.GRASS_TOP,T.DIRT,T.GRASS_SIDE,T.GRASS_SIDE], desc: '' };
+  PROPS[B.DIRT]    = { name:'Dirt', solid:true,  opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:1.8, type:'ground', faces:[T.DIRT,T.DIRT,T.DIRT,T.DIRT,T.DIRT,T.DIRT], desc: '' };
+  PROPS[B.STONE]   = { name:'Stone', solid:true,  opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE], desc: '' };
   // slim log collision/raycast boxes per trunk axis (match the inset visual). opaque:false so a
   // log never culls its neighbours' faces (otherwise the 1/16 gap around it shows holes).
   const LOG_COLL = [ [[0.0625,0,0.0625, 0.9375,1,0.9375]],   // var 0: Y-axis
                      [[0,0.0625,0.0625, 1,0.9375,0.9375]],   // var 1: X-axis
                      [[0.0625,0.0625,0, 0.9375,0.9375,1]] ];  // var 2: Z-axis
-  PROPS[B.LOG]     = { name:'Oak log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.LOG,T.LOG,T.LOG_TOP,T.LOG_TOP,T.LOG,T.LOG] };
-  PROPS[B.PLANKS]  = { name:'Oak planks', solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:4.0, type:'wood', faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS] };
-  PROPS[B.LEAVES]  = { name:'Oak leaves',     solid:false, opaque:false, raycast:true,  pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES] };
-  PROPS[B.BIRCH_LOG]    = { name:'Birch log',    solid:true,  opaque:false,  raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.BIRCH_LOG,T.BIRCH_LOG,T.BIRCH_LOG_TOP,T.BIRCH_LOG_TOP,T.BIRCH_LOG,T.BIRCH_LOG] };
-  PROPS[B.BIRCH_PLANKS] = { name:'Birch planks', solid:true,  opaque:true,  raycast:true, pass:0, model:'cube', stack:60, hardness:3.0, type:'wood', faces:[T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS] };
-  PROPS[B.BIRCH_LEAVES] = { name:'Birch leaves', solid:false, opaque:false, raycast:true, pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES] };
-  PROPS[B.SAND]    = { name:'Sand',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:1.9, type:'ground', faces:[T.SAND,T.SAND,T.SAND,T.SAND,T.SAND,T.SAND] };
-  PROPS[B.GLASS]   = { name:'Glass',      solid:true,  opaque:false, raycast:true,  pass:1, model:'cube', stack:60, hardness:0.9, type:'glass', faces:[T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS] };
-  PROPS[B.BEDROCK] = { name:'Bedrock',    solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:Infinity, type:'stone', faces:[T.BEDROCK,T.BEDROCK,T.BEDROCK,T.BEDROCK,T.BEDROCK,T.BEDROCK] };
-  PROPS[B.WATER]   = { name:'Water',      solid:false, opaque:false, raycast:false, pass:2, model:'cube', hardness:0, faces:[T.WATER,T.WATER,T.WATER,T.WATER,T.WATER,T.WATER] };
-  PROPS[B.GLOWSTONE] = { name:'Glowstone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', light:20,handLight:10, stack:60, hardness:2.5, type:'glass', faces:[T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE] };
+  PROPS[B.LOG]     = { name:'Oak log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.LOG,T.LOG,T.LOG_TOP,T.LOG_TOP,T.LOG,T.LOG], desc: '' };
+  PROPS[B.PLANKS]  = { name:'Oak planks', solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:4.0, type:'wood', faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
+  PROPS[B.LEAVES]  = { name:'Oak leaves',     solid:false, opaque:false, raycast:true,  pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES], desc: '' };
+  PROPS[B.BIRCH_LOG]    = { name:'Birch log',    solid:true,  opaque:false,  raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.BIRCH_LOG,T.BIRCH_LOG,T.BIRCH_LOG_TOP,T.BIRCH_LOG_TOP,T.BIRCH_LOG,T.BIRCH_LOG], desc: '' };
+  PROPS[B.BIRCH_PLANKS] = { name:'Birch planks', solid:true,  opaque:true,  raycast:true, pass:0, model:'cube', stack:60, hardness:3.0, type:'wood', faces:[T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS], desc: '' };
+  PROPS[B.BIRCH_LEAVES] = { name:'Birch leaves', solid:false, opaque:false, raycast:true, pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES], desc: '' };
+  PROPS[B.SAND]    = { name:'Sand',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:1.9, type:'ground', faces:[T.SAND,T.SAND,T.SAND,T.SAND,T.SAND,T.SAND], desc: '' };
+  PROPS[B.GLASS]   = { name:'Glass',      solid:true,  opaque:false, raycast:true,  pass:1, model:'cube', stack:60, hardness:0.9, type:'glass', faces:[T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS], desc: '' };
+  PROPS[B.BEDROCK] = { name:'Bedrock',    solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:Infinity, type:'stone', faces:[T.BEDROCK,T.BEDROCK,T.BEDROCK,T.BEDROCK,T.BEDROCK,T.BEDROCK], desc: '' };
+  PROPS[B.WATER]   = { name:'Water',      solid:false, opaque:false, raycast:false, pass:2, model:'cube', hardness:0, faces:[T.WATER,T.WATER,T.WATER,T.WATER,T.WATER,T.WATER], desc: '' };
+  PROPS[B.GLOWSTONE] = { name:'Glowstone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', light:20,handLight:10, stack:60, hardness:2.5, type:'glass', faces:[T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE,T.GLOWSTONE], desc: '' };
   // first non-cube model: bottom-half slab. opaque:false so neighbours keep their faces
   // (no holes behind it); `boxes` = collision sub-boxes; variant byte reserved for top slabs.
   // slab variants — shared by both slab types (collision, raycast, mesher):
@@ -99,63 +100,63 @@ function VOXEL_CORE() {
   }));
   // slab registry (compact index <-> block id) — partner index for mixed doubles, fits 0..15
   const SLAB_IDS = [];
-  PROPS[B.OAKSLAB]    = { name:'Oak slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS] };
-  PROPS[B.CLAY]    = { name:'Clay',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:2.2, type:'ground', faces:[T.CLAY,T.CLAY,T.CLAY,T.CLAY,T.CLAY,T.CLAY] };
-  PROPS[B.SNOW]    = { name:'Snow',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:1.2, type:'snow', faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW] };
+  PROPS[B.OAKSLAB]    = { name:'Oak slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
+  PROPS[B.CLAY]    = { name:'Clay',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:2.2, type:'ground', faces:[T.CLAY,T.CLAY,T.CLAY,T.CLAY,T.CLAY,T.CLAY], desc: '' };
+  PROPS[B.SNOW]    = { name:'Snow',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:1.2, type:'snow', faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
   // snow carpet: 1..6 layer stack, variant 0..5 = layer count-1. 6 layers == full block visually.
   // Placed like a plant (topOnly, on any solid). Right-clicking one with a carpet adds a layer.
   // Break yields a single carpet regardless of stack height.
   const CARPET_VAR = [];
   for (let v = 0; v < 6; v++) CARPET_VAR[v] = [[0, 0, 0, 1, (v + 1) / 6, 1]];
-  PROPS[B.SNOW_CARPET] = { name:'Snow carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.3, type:'snow', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW] };
-  PROPS[B.COBBLE]      = { name:'Cobblestone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE] };
-  PROPS[B.COAL_ORE]    = { name:'Coal ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:9.0, type:'stone', faces:[T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE] };
-  PROPS[B.IRON_ORE]    = { name:'Iron ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:12.0, type:'stone', faces:[T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE] };
-  PROPS[B.DIAMOND_ORE] = { name:'Diamond ore', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:18.0, type:'stone', faces:[T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE] };
-  PROPS[B.COPPER_ORE]    = { name:'Copper ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:10.0, type:'stone', faces:[T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE] };
-  PROPS[B.TIN_ORE]    = { name:'Tin ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:13.0, type:'stone', faces:[T.TIN_ORE,T.TIN_ORE,T.TIN_ORE,T.TIN_ORE,T.TIN_ORE,T.TIN_ORE] };
-  PROPS[B.GOLD_ORE]    = { name:'Gold ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:15.0, type:'stone',  faces:[T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE] };
-  PROPS[B.MARBLE]      = { name:'Marble',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.MARBLE,T.MARBLE,T.MARBLE,T.MARBLE,T.MARBLE,T.MARBLE] };
-  PROPS[B.GRANITE]     = { name:'Granite',   solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.5, type:'stone', faces:[T.GRANITE,T.GRANITE,T.GRANITE,T.GRANITE,T.GRANITE,T.GRANITE] };
-  PROPS[B.LIMESTONE]   = { name:'Limestone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:7.5, type:'stone', faces:[T.LIMESTONE,T.LIMESTONE,T.LIMESTONE,T.LIMESTONE,T.LIMESTONE,T.LIMESTONE] };
-  PROPS[B.LAVA]        = { name:'Lava',      solid:false,opaque:false, raycast:false, pass:3, model:'cube', light:15, hardness:0, faces:[T.LAVA,T.LAVA,T.LAVA,T.LAVA,T.LAVA,T.LAVA] };
+  PROPS[B.SNOW_CARPET] = { name:'Snow carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.3, type:'snow', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
+  PROPS[B.COBBLE]      = { name:'Cobblestone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
+  PROPS[B.COAL_ORE]    = { name:'Coal ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:9.0, type:'stone', faces:[T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE], desc: '' };
+  PROPS[B.IRON_ORE]    = { name:'Iron ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:12.0, type:'stone', faces:[T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE], desc: '' };
+  PROPS[B.DIAMOND_ORE] = { name:'Diamond ore', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:18.0, type:'stone', faces:[T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE,T.DIAMOND_ORE], desc: '' };
+  PROPS[B.COPPER_ORE]    = { name:'Copper ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:10.0, type:'stone', faces:[T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE,T.COPPER_ORE], desc: '' };
+  PROPS[B.TIN_ORE]    = { name:'Tin ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:13.0, type:'stone', faces:[T.TIN_ORE,T.TIN_ORE,T.TIN_ORE,T.TIN_ORE,T.TIN_ORE,T.TIN_ORE], desc: '' };
+  PROPS[B.GOLD_ORE]    = { name:'Gold ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:15.0, type:'stone',  faces:[T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE,T.GOLD_ORE], desc: '' };
+  PROPS[B.MARBLE]      = { name:'Marble',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.MARBLE,T.MARBLE,T.MARBLE,T.MARBLE,T.MARBLE,T.MARBLE], desc: '' };
+  PROPS[B.GRANITE]     = { name:'Granite',   solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.5, type:'stone', faces:[T.GRANITE,T.GRANITE,T.GRANITE,T.GRANITE,T.GRANITE,T.GRANITE], desc: '' };
+  PROPS[B.LIMESTONE]   = { name:'Limestone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:7.5, type:'stone', faces:[T.LIMESTONE,T.LIMESTONE,T.LIMESTONE,T.LIMESTONE,T.LIMESTONE,T.LIMESTONE], desc: '' };
+  PROPS[B.LAVA]        = { name:'Lava',      solid:false,opaque:false, raycast:false, pass:3, model:'cube', light:15, hardness:0, faces:[T.LAVA,T.LAVA,T.LAVA,T.LAVA,T.LAVA,T.LAVA], desc: '' };
   // Sulfur crystal block: full opaque cube, drops itself. Common cave form.
-  PROPS[B.SULFUR_BLOCK] = { name:'Sulfur block', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'stone', faces:[T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK] };
+  PROPS[B.SULFUR_BLOCK] = { name:'Sulfur block', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'stone', faces:[T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK,T.SULFUR_BLOCK], desc: '' };
   // Sulfur tip billboards: cross model, two orientations. Down tip = stalactite (from ceiling),
   // up tip = stalagmite (from floor). Break drops ITEM.SULFUR only (handled in blockDrop).
   // Sulfur tip — single placeable block with rotation via variant (0 = up, 1 = down).
   // Legacy SULFUR_DOWN_TIP kept for storage compatibility, hidden from inventory, drops as SULFUR_UP_TIP.
-  PROPS[B.SULFUR_DOWN_TIP] = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', noInv:true, stack:60, hardness:0.6, type:'stone', boxes:[[0.2,0.2,0.2,0.8,1,0.8]], faces:[T.SULFUR_DOWN_TIP] };
-  PROPS[B.SULFUR_UP_TIP]   = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:60, hardness:0.6, type:'stone', boxes:[[0.2,0,0.2,0.8,0.8,0.8]], faces:[T.SULFUR_UP_TIP] };
+  PROPS[B.SULFUR_DOWN_TIP] = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', noInv:true, stack:60, hardness:0.6, type:'stone', boxes:[[0.2,0.2,0.2,0.8,1,0.8]], faces:[T.SULFUR_DOWN_TIP], desc: '' };
+  PROPS[B.SULFUR_UP_TIP]   = { name:'Sulfur tip', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:60, hardness:0.6, type:'stone', boxes:[[0.2,0,0.2,0.8,0.8,0.8]], faces:[T.SULFUR_UP_TIP], desc: '' };
   // TNT: full cube. Variant byte's low bit (0/1) is the "lit" blink flag — mesher swaps faces to
   // the snow (white) tile when set, so a ticking TNT visibly pulses. hardness 0.5 for a quick pre-arm
   // break; a separate map (TNTS in 22-main-loop.js) protects blocks with an active fuse.
-  PROPS[B.TNT] = { name:'TNT', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:0.5, type:'tnt', faces:[T.TNT_SIDE,T.TNT_SIDE,T.TNT_TOP,T.TNT_BOTTOM,T.TNT_SIDE,T.TNT_SIDE] };
+  PROPS[B.TNT] = { name:'TNT', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:0.5, type:'tnt', faces:[T.TNT_SIDE,T.TNT_SIDE,T.TNT_TOP,T.TNT_BOTTOM,T.TNT_SIDE,T.TNT_SIDE], desc: '' };
   // Obsidian: dark blast/lava-quench block. Very hard, pickaxe required (see MINE_REQ / TOOL_BLOCKS).
-  PROPS[B.OBSIDIAN] = { name:'Obsidian', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:30, type:'stone', faces:[T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN] };
+  PROPS[B.OBSIDIAN] = { name:'Obsidian', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:30, type:'stone', faces:[T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN,T.OBSIDIAN], desc: '' };
   // Saplings — placed on grass, grow into a tree after 7..14 in-game days (tracked in SAPLINGS map)
-  PROPS[B.OAK_SAPLING]   = { name:'Oak sapling',   solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.OAK_SAPLING] };
-  PROPS[B.BIRCH_SAPLING] = { name:'Birch sapling', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.BIRCH_SAPLING] };
+  PROPS[B.OAK_SAPLING]   = { name:'Oak sapling',   solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.OAK_SAPLING], desc: '' };
+  PROPS[B.BIRCH_SAPLING] = { name:'Birch sapling', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.BIRCH_SAPLING], desc: '' };
   // Sugar cane — cross billboard; only placeable on sand/grass/dirt next to water, or stacked on
   // an existing cane. Column capped at 5 blocks tall. Break drops one sugar cane per broken block.
-  PROPS[B.SUGAR_CANE]    = { name:'Sugar cane',    solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:64, hardness:0, type:'grass', boxes:[[0.1,0,0.1,0.9,1,0.9]], faces:[T.SUGAR_CANE] };
-  PROPS[B.GRAVEL]      = { name:'Gravel',      solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'ground',  faces:[T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL] };
-  PROPS[B.RED_MUSHROOM]  = { name:'Red mushroom',  solid:false,opaque:false,raycast:true, pass:1, model:'cross',stack:99, hardness:0, type:'grass', boxes:[[0.3,0,0.3,0.7,0.8,0.7]], faces:[T.RED_MUSHROOM] };
-  PROPS[B.BROWN_MUSHROOM]= { name:'Brown mushroom',solid:false,opaque:false,raycast:true, pass:1, model:'cross',stack:99, hardness:0, type:'grass', boxes:[[0.3,0,0.3,0.7,0.8,0.7]], faces:[T.BROWN_MUSHROOM] };
-  PROPS[B.TALLGRASS]     = { name:'Grass',   solid:false,opaque:false,raycast:true, pass:1, model:'cross',rot:'all',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.GRASS_PLANT] };
-  PROPS[B.POPPY]         = { name:'Poppy',   solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.85,0.75]], faces:[T.POPPY] };
-  PROPS[B.ORCHID]        = { name:'Blue orchid',solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.85,0.75]], faces:[T.ORCHID] };
-  PROPS[B.TALL_LOWER]    = { name:'Tall grass', solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, noInv:true, stack:99, type:'grass', hardness:0, boxes:[[0.05,0,0.05,0.95,1,0.95]], faces:[T.TALL_BOT] };
-  PROPS[B.TALL_UPPER]    = { name:'Tall grass', solid:false,opaque:false,raycast:true, pass:1, model:'cross',noInv:true, stack:99, hardness:0, type:'grass', boxes:[[0.05,0,0.05,0.95,1,0.95]], faces:[T.TALL_TOP] };
+  PROPS[B.SUGAR_CANE]    = { name:'Sugar cane',    solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:64, hardness:0, type:'grass', boxes:[[0.1,0,0.1,0.9,1,0.9]], faces:[T.SUGAR_CANE], desc: '' };
+  PROPS[B.GRAVEL]      = { name:'Gravel',      solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'ground',  faces:[T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL], desc: '' };
+  PROPS[B.RED_MUSHROOM]  = { name:'Red mushroom',  solid:false,opaque:false,raycast:true, pass:1, model:'cross',stack:99, hardness:0, type:'grass', boxes:[[0.3,0,0.3,0.7,0.8,0.7]], faces:[T.RED_MUSHROOM], desc: '' };
+  PROPS[B.BROWN_MUSHROOM]= { name:'Brown mushroom',solid:false,opaque:false,raycast:true, pass:1, model:'cross',stack:99, hardness:0, type:'grass', boxes:[[0.3,0,0.3,0.7,0.8,0.7]], faces:[T.BROWN_MUSHROOM], desc: '' };
+  PROPS[B.TALLGRASS]     = { name:'Grass',   solid:false,opaque:false,raycast:true, pass:1, model:'cross',rot:'all',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.GRASS_PLANT], desc: '' };
+  PROPS[B.POPPY]         = { name:'Poppy',   solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.85,0.75]], faces:[T.POPPY], desc: '' };
+  PROPS[B.ORCHID]        = { name:'Blue orchid',solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.85,0.75]], faces:[T.ORCHID], desc: '' };
+  PROPS[B.TALL_LOWER]    = { name:'Tall grass', solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, noInv:true, stack:99, type:'grass', hardness:0, boxes:[[0.05,0,0.05,0.95,1,0.95]], faces:[T.TALL_BOT], desc: '' };
+  PROPS[B.TALL_UPPER]    = { name:'Tall grass', solid:false,opaque:false,raycast:true, pass:1, model:'cross',noInv:true, stack:99, hardness:0, type:'grass', boxes:[[0.05,0,0.05,0.95,1,0.95]], faces:[T.TALL_TOP], desc: '' };
   // faces [+X,-X,top,bottom,+Z,-Z]; front picked per variant (rot:'side') in the mesher
-  PROPS[B.CRAFTING_BENCH] = { name:'Crafting bench', solid:true, opaque:true, raycast:true, pass:0, model:'cube', rot:'side', stack:30, hardness:4.5, type:'wood', faces:[T.CRAFT_SIDE,T.CRAFT_SIDE,T.CRAFT_TOP,T.PLANKS,T.CRAFT_FRONT,T.CRAFT_FRONT] };
+  PROPS[B.CRAFTING_BENCH] = { name:'Crafting bench', solid:true, opaque:true, raycast:true, pass:0, model:'cube', rot:'side', stack:30, hardness:4.5, type:'wood', faces:[T.CRAFT_SIDE,T.CRAFT_SIDE,T.CRAFT_TOP,T.PLANKS,T.CRAFT_FRONT,T.CRAFT_FRONT], desc: '' };
   // torch: cross model (texture has transparent margins so it reads as a small stick),
   // light 10 placed / 5 in hand (handLight overrides the default held-light scaling),
   // topOnly = placeable only when clicking a block's top face
-  PROPS[B.TORCH] = { name:'Torch', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:99, hardness:0, light:15, handLight:8, topOnly:true, type:'wood', boxes:[[0.4,0,0.4,0.6,0.7,0.6]], faces:[T.TORCH] };
+  PROPS[B.TORCH] = { name:'Torch', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:99, hardness:0, light:15, handLight:8, topOnly:true, type:'wood', boxes:[[0.4,0,0.4,0.6,0.7,0.6]], faces:[T.TORCH], desc: '' };
   // furnace: front picked per variant facing (rot:'side'); lit bit swaps the front tile
-  PROPS[B.FURNACE] = { name:'Furnace', solid:true, opaque:true, raycast:true, pass:0, model:'cube', rot:'side', stack:30, hardness:8.5, type:'stone',  faces:[T.FURNACE_SIDE,T.FURNACE_SIDE,T.FURNACE_TOP,T.FURNACE_TOP,T.FURNACE_FRONT,T.FURNACE_SIDE] };
-  PROPS[B.RED_SAND] = { name:'Red Sand', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.1, type:'ground', faces:[T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND] };
+  PROPS[B.FURNACE] = { name:'Furnace', solid:true, opaque:true, raycast:true, pass:0, model:'cube', rot:'side', stack:30, hardness:8.5, type:'stone',  faces:[T.FURNACE_SIDE,T.FURNACE_SIDE,T.FURNACE_TOP,T.FURNACE_TOP,T.FURNACE_FRONT,T.FURNACE_SIDE], desc: '' };
+  PROPS[B.RED_SAND] = { name:'Red Sand', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.1, type:'ground', faces:[T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND], desc: '' };
   // oak door: 2-cell (bottom + upper half), 1/8 thick. Rendered as an animated standalone mesh
   // (27-doors.js) — the chunk mesher emits nothing for it. Collision boxes swap with the open
   // bit so an open door is passable. variant: bits 0-1 facing, bit 2 open, bit 3 upper half.
@@ -172,8 +173,19 @@ function VOXEL_CORE() {
       bv[v] = (v & 4) ? opened[v & 3] : closed[v & 3];   // open door now has a thin panel hitbox
       rv[v] = bv[v];                                      // raycast == collision (both match the visual)
     }
-    PROPS[B.DOOR] = { name:'Oak door', solid:true, opaque:false, raycast:true, pass:1, model:'door', rot:'side', stack:20, hardness:3.5, type:'wood', boxes:closed[0], boxesByVar:bv, rayBoxesByVar:rv, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS] };
+    PROPS[B.DOOR] = { name:'Oak door', solid:true, opaque:false, raycast:true, pass:1, model:'door', rot:'side', stack:20, hardness:3.5, type:'wood', boxes:closed[0], boxesByVar:bv, rayBoxesByVar:rv, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
   }
+  // Bed: 2 cells long (1 wide x 9/16 tall). Like the door the mesher emits nothing for it —
+  // 29-bed.js draws one textured mesh per bed. The cells stay for collision + raycast.
+  // variant byte: bits 0-1 facing (0:+Z 1:-Z 2:+X 3:-X), bit 3 (8) = HEAD half.
+  // Chest: storage with an animated lid, drawn by 30-chest.js (mesher emits nothing).
+  // variant byte: bits 0-1 facing. Two chests facing the same way, side by side, form a double.
+  PROPS[B.CHEST] = { name:'Chest', solid:true, opaque:false, raycast:true, pass:1, model:'chest', rot:'side',
+                     stack:60, hardness:4.0, type:'wood', boxes:[[0.0625, 0, 0.0625, 0.9375, 0.9375, 0.9375]],
+                     faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
+  PROPS[B.BED] = { name:'Bed', solid:true, opaque:false, raycast:true, pass:1, model:'bed', rot:'side',
+                   stack:1, hardness:1.0, type:'wood', boxes:[[0, 0, 0, 1, 0.5625, 1]],
+                   faces:[T.WOOL,T.WOOL,T.WOOL,T.PLANKS,T.WOOL,T.WOOL], desc: '' };
   // oak stairs: base half-slab + back step. variant: bits 0-1 facing (full side toward player),
   // bit 2 (4) = upside-down (ceiling placement). Two boxes per variant, shared by collision,
   // raycast and the mesher.
@@ -237,23 +249,23 @@ function VOXEL_CORE() {
     const q = c.axisZ ? mkQ(sIdx, c.front) : mkQ(c.front, sIdx);   // inner: back strip + front-side quarter
     return [base, strip, q];
   }
-  PROPS[B.STAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:3, type:'wood', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS] };
+  PROPS[B.STAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:3, type:'wood', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
   // cactus: own model — side faces inset 1/16 so the column reads thin; touching it hurts (19-vitals)
-  PROPS[B.CACTUS] = { name:'Cactus', solid:true, opaque:false, raycast:true, pass:1, model:'cactus', stack:60, hardness:1.4, type:'grass', boxes:[[0.0625,0,0.0625,0.9375,1,0.9375]], faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE] };
-  PROPS[B.COBBLESLAB]    = { name:'Cobblestone slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:8, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE] };
-  PROPS[B.BRICKS]    = { name:'Bricks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:6.5, type:'stone', faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS] };
-  PROPS[B.BRICKSSLAB]    = { name:'Brick slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS] };
-  PROPS[B.BRICKSSTAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS] };
-  PROPS[B.MELON]    = { name:'Watermelon', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.MELON_SIDE,T.MELON_SIDE,T.MELON_TOP,T.MELON_TOP,T.MELON_SIDE,T.MELON_SIDE] };
-  PROPS[B.PUMPKIN]  = { name:'Pumpkin', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.PUMPKIN_SIDE,T.PUMPKIN_SIDE,T.PUMPKIN_TOP,T.PUMPKIN_TOP,T.PUMPKIN_SIDE,T.PUMPKIN_SIDE] };
-  PROPS[B.WHEAT]    = { name:'Wheat', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:99, hardness:0, type:'grass', boxes:[[0.15,0,0.15,0.85,0.9,0.85]], faces:[T.WHEAT] };
-  PROPS[B.STONE_BRICK]    = { name:'Stone brick', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60,  hardness:8.5, type:'stone', faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK] };
-  PROPS[B.STONE_BRICKSLAB]    = { name:'Stone brick slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK] };
-  PROPS[B.STONESLAB]    = { name:'Stone slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.0, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE] };
-  PROPS[B.CACTUSSLAB]    = { name:'Cactus slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:1.0, type:'grass', boxes:CACTUS_SLAB_VAR[0], boxesByVar: CACTUS_SLAB_VAR, faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE] };
-  PROPS[B.GLASSSLAB]    = { name:'Glass slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:0.9, type:'glass', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS] };
-  PROPS[B.WOOL]    = { name:'Wool', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wool', faces:[T.WOOL,T.WOOL,T.WOOL,T.WOOL,T.WOOL,T.WOOL] };
-  PROPS[B.HAY]     = { name:'Hay bale', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:1.0, type:'grass', faces:[T.HAY_SIDE,T.HAY_SIDE,T.HAY_TOP,T.HAY_TOP,T.HAY_SIDE,T.HAY_SIDE] };
+  PROPS[B.CACTUS] = { name:'Cactus', solid:true, opaque:false, raycast:true, pass:1, model:'cactus', stack:60, hardness:1.4, type:'grass', boxes:[[0.0625,0,0.0625,0.9375,1,0.9375]], faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
+  PROPS[B.COBBLESLAB]    = { name:'Cobblestone slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:8, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
+  PROPS[B.BRICKS]    = { name:'Bricks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:6.5, type:'stone', faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
+  PROPS[B.BRICKSSLAB]    = { name:'Brick slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
+  PROPS[B.BRICKSSTAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
+  PROPS[B.MELON]    = { name:'Watermelon', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.MELON_SIDE,T.MELON_SIDE,T.MELON_TOP,T.MELON_TOP,T.MELON_SIDE,T.MELON_SIDE], desc: '' };
+  PROPS[B.PUMPKIN]  = { name:'Pumpkin', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.PUMPKIN_SIDE,T.PUMPKIN_SIDE,T.PUMPKIN_TOP,T.PUMPKIN_TOP,T.PUMPKIN_SIDE,T.PUMPKIN_SIDE], desc: '' };
+  PROPS[B.WHEAT]    = { name:'Wheat', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:99, hardness:0, type:'grass', boxes:[[0.15,0,0.15,0.85,0.9,0.85]], faces:[T.WHEAT], desc: '' };
+  PROPS[B.STONE_BRICK]    = { name:'Stone brick', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60,  hardness:8.5, type:'stone', faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
+  PROPS[B.STONE_BRICKSLAB]    = { name:'Stone brick slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
+  PROPS[B.STONESLAB]    = { name:'Stone slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.0, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE], desc: '' };
+  PROPS[B.CACTUSSLAB]    = { name:'Cactus slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:1.0, type:'grass', boxes:CACTUS_SLAB_VAR[0], boxesByVar: CACTUS_SLAB_VAR, faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
+  PROPS[B.GLASSSLAB]    = { name:'Glass slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:0.9, type:'glass', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS], desc: '' };
+  PROPS[B.WOOL]    = { name:'Wool', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wool', faces:[T.WOOL,T.WOOL,T.WOOL,T.WOOL,T.WOOL,T.WOOL], desc: '' };
+  PROPS[B.HAY]     = { name:'Hay bale', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:1.0, type:'grass', faces:[T.HAY_SIDE,T.HAY_SIDE,T.HAY_TOP,T.HAY_TOP,T.HAY_SIDE,T.HAY_SIDE], desc: '' };
   // auto-wire geometry: any block declared model 'slab'/'stairs' inherits the shared collision/
   // raycast/mesh box tables, so a new one needs only { model, faces } — no per-block box wiring.
   for (let id = 0; id < PROPS.length; id++) {
@@ -1946,85 +1958,85 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                IRON_SWORD: 319, GOLDEN_SWORD: 320, DIAMOND_SWORD: 321, STRING: 322, IRON_SHEARS: 323, FEATHER: 324,
                MUTTON: 325, COOKED_MUTTON: 326 };
 const ITEM_PROPS = {
-  [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick'         },
-  [ITEM.FLINT]:         { name: 'Flint',         stack: 99, icon: 'flint'         },
-  [ITEM.CLAY_BALL]:     { name: 'Clay ball',     stack: 99, icon: 'clay_ball'     },
-  [ITEM.BOWL]:          { name: 'Bowl',          stack: 30, icon: 'bowl'          },
-  [ITEM.GLASS_SHARD]:   { name: 'Glass shard',   stack: 99, icon: 'glass_shard'   },
-  [ITEM.SULFUR]:        { name: 'Sulfur',        stack: 99, icon: 'sulfur'        },
-  [ITEM.CHARCOAL]:      { name: 'Charcoal',      stack: 99, icon: 'charcoal'      },
-  [ITEM.GUNPOWDER]:     { name: 'Gunpowder',     stack: 99, icon: 'gunpowder'     },
-  [ITEM.SUGAR]:         { name: 'Sugar',         stack: 99, icon: 'sugar'         },
-  [ITEM.PAPER]:         { name: 'Paper',         stack: 99, icon: 'paper'         },
-  [ITEM.FLOUR]:         { name: 'Flour',         stack: 99, icon: 'flour'         },
-  [ITEM.BRICK]:         { name: 'Brick',         stack: 99, icon: 'brick'         },
-  [ITEM.GLOW_DUST]:     { name: 'Glow dust',     stack: 99, icon: 'glow_dust'     },
-  [ITEM.STRING]:        { name: 'String',        stack: 99, icon: 'string'        },
-  [ITEM.FEATHER]:       { name: 'Feather',       stack: 99, icon: 'feather'       },
+  [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: '' },
+  [ITEM.FLINT]:         { name: 'Flint',         stack: 99, icon: 'flint', desc: '' },
+  [ITEM.CLAY_BALL]:     { name: 'Clay ball',     stack: 99, icon: 'clay_ball', desc: '' },
+  [ITEM.BOWL]:          { name: 'Bowl',          stack: 30, icon: 'bowl', desc: '' },
+  [ITEM.GLASS_SHARD]:   { name: 'Glass shard',   stack: 99, icon: 'glass_shard', desc: '' },
+  [ITEM.SULFUR]:        { name: 'Sulfur',        stack: 99, icon: 'sulfur', desc: '' },
+  [ITEM.CHARCOAL]:      { name: 'Charcoal',      stack: 99, icon: 'charcoal', desc: '' },
+  [ITEM.GUNPOWDER]:     { name: 'Gunpowder',     stack: 99, icon: 'gunpowder', desc: '' },
+  [ITEM.SUGAR]:         { name: 'Sugar',         stack: 99, icon: 'sugar', desc: '' },
+  [ITEM.PAPER]:         { name: 'Paper',         stack: 99, icon: 'paper', desc: '' },
+  [ITEM.FLOUR]:         { name: 'Flour',         stack: 99, icon: 'flour', desc: '' },
+  [ITEM.BRICK]:         { name: 'Brick',         stack: 99, icon: 'brick', desc: '' },
+  [ITEM.GLOW_DUST]:     { name: 'Glow dust',     stack: 99, icon: 'glow_dust', desc: '' },
+  [ITEM.STRING]:        { name: 'String',        stack: 99, icon: 'string', desc: '' },
+  [ITEM.FEATHER]:       { name: 'Feather',       stack: 99, icon: 'feather', desc: '' },
 // ores
-  [ITEM.COAL]:          { name: 'Coal',          stack: 99, icon: 'coal'          },
-  [ITEM.COAL_CHUNK]:    { name: 'Coal chunk',    stack: 99, icon: 'coal_chunk'    },
-  [ITEM.RAW_IRON]:      { name: 'Raw iron',      stack: 99, icon: 'raw_iron'      },
-  [ITEM.IRON_INGOT]:    { name: 'Iron ingot',    stack: 99, icon: 'iron_ingot'    },
-  [ITEM.IRON_NUGGET]:   { name: 'Iron nugget',   stack: 99, icon: 'iron_nugget'   },
-  [ITEM.RAW_COPPER]:    { name: 'Raw copper',    stack: 99, icon: 'raw_copper'    },
-  [ITEM.COPPER_INGOT]:  { name: 'Copper ingot',  stack: 99, icon: 'copper_ingot'  },
-  [ITEM.COPPER_NUGGET]: { name: 'Copper nugget', stack: 99, icon: 'copper_nugget' },
-  [ITEM.RAW_TIN]:       { name: 'Raw tin',       stack: 99, icon: 'raw_tin'       },
-  [ITEM.TIN_INGOT]:     { name: 'Tin ingot',     stack: 99, icon: 'tin_ingot'     },
-  [ITEM.TIN_NUGGET]:    { name: 'Tin nugget',    stack: 99, icon: 'tin_nugget'    },
-  [ITEM.RAW_IRON]:      { name: 'Raw iron',      stack: 99, icon: 'raw_iron'      },
-  [ITEM.IRON_INGOT]:    { name: 'Iron ingot',    stack: 99, icon: 'iron_ingot'    },
-  [ITEM.IRON_NUGGET]:   { name: 'Iron nugget',   stack: 99, icon: 'iron_nugget'   },
-  [ITEM.RAW_GOLD]:      { name: 'Raw gold',      stack: 99, icon: 'raw_gold'      },
-  [ITEM.GOLD_INGOT]:    { name: 'Gold ingot',    stack: 99, icon: 'gold_ingot'    },
-  [ITEM.GOLD_NUGGET]:   { name: 'Gold nugget',   stack: 99, icon: 'gold_nugget'   },
-  [ITEM.DIAMOND]:       { name: 'Diamond',       stack: 99, icon: 'diamond'       },
+  [ITEM.COAL]:          { name: 'Coal',          stack: 99, icon: 'coal', desc: '' },
+  [ITEM.COAL_CHUNK]:    { name: 'Coal chunk',    stack: 99, icon: 'coal_chunk', desc: '' },
+  [ITEM.RAW_IRON]:      { name: 'Raw iron',      stack: 99, icon: 'raw_iron', desc: '' },
+  [ITEM.IRON_INGOT]:    { name: 'Iron ingot',    stack: 99, icon: 'iron_ingot', desc: '' },
+  [ITEM.IRON_NUGGET]:   { name: 'Iron nugget',   stack: 99, icon: 'iron_nugget', desc: '' },
+  [ITEM.RAW_COPPER]:    { name: 'Raw copper',    stack: 99, icon: 'raw_copper', desc: '' },
+  [ITEM.COPPER_INGOT]:  { name: 'Copper ingot',  stack: 99, icon: 'copper_ingot', desc: '' },
+  [ITEM.COPPER_NUGGET]: { name: 'Copper nugget', stack: 99, icon: 'copper_nugget', desc: '' },
+  [ITEM.RAW_TIN]:       { name: 'Raw tin',       stack: 99, icon: 'raw_tin', desc: '' },
+  [ITEM.TIN_INGOT]:     { name: 'Tin ingot',     stack: 99, icon: 'tin_ingot', desc: '' },
+  [ITEM.TIN_NUGGET]:    { name: 'Tin nugget',    stack: 99, icon: 'tin_nugget', desc: '' },
+  [ITEM.RAW_IRON]:      { name: 'Raw iron',      stack: 99, icon: 'raw_iron', desc: '' },
+  [ITEM.IRON_INGOT]:    { name: 'Iron ingot',    stack: 99, icon: 'iron_ingot', desc: '' },
+  [ITEM.IRON_NUGGET]:   { name: 'Iron nugget',   stack: 99, icon: 'iron_nugget', desc: '' },
+  [ITEM.RAW_GOLD]:      { name: 'Raw gold',      stack: 99, icon: 'raw_gold', desc: '' },
+  [ITEM.GOLD_INGOT]:    { name: 'Gold ingot',    stack: 99, icon: 'gold_ingot', desc: '' },
+  [ITEM.GOLD_NUGGET]:   { name: 'Gold nugget',   stack: 99, icon: 'gold_nugget', desc: '' },
+  [ITEM.DIAMOND]:       { name: 'Diamond',       stack: 99, icon: 'diamond', desc: '' },
   // tools: stack 1, own durability (breaks at 0), toolSpeed = mining-time divisor on matching
   // blocks. tier: 0 = bare hand, 1 wooden, 2 stone, 3 iron, 4 steel, 5 diamond — gates drops (MINE_REQ).
-  [ITEM.WOODEN_SWORD]:   { name: 'Wooden sword',    stack: 1, icon: 'wooden_sword',   tool: 'sword',   tier: 1, toolSpeed: 1,    damage: 4,   attackSpeed: 1.8,   durability: 20 },
-  [ITEM.WOODEN_SHOVEL]:  { name: 'Wooden shovel',   stack: 1, icon: 'wooden_shovel',  tool: 'shovel',  tier: 1, toolSpeed: 2,    damage: 2,   attackSpeed: 1.0,   durability: 40 },
-  [ITEM.WOODEN_PICKAXE]: { name: 'Wooden pickaxe',  stack: 1, icon: 'wooden_pickaxe', tool: 'pick',    tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.0,   durability: 40 },
-  [ITEM.WOODEN_HATCHET]: { name: 'Wooden hatchet',  stack: 1, icon: 'wooden_hatchet', tool: 'hatchet', tier: 1, toolSpeed: 2,    damage: 5,   attackSpeed: 0.8,   durability: 40 },
-  [ITEM.WOODEN_HOE]:     { name: 'Wooden hoe',      stack: 1, icon: 'wooden_hoe',     tool: 'hoe',     tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.2,   durability: 30 },
-  [ITEM.STONE_SWORD]:    { name: 'Stone sword',     stack: 1, icon: 'stone_sword',    tool: 'sword',   tier: 2, toolSpeed: 2,    damage: 5,   attackSpeed: 1.7,   durability: 50 },
-  [ITEM.STONE_SHOVEL]:   { name: 'Stone shovel',    stack: 1, icon: 'stone_shovel',   tool: 'shovel',  tier: 2, toolSpeed: 4,    damage: 3,   attackSpeed: 0.8,   durability: 100 },
-  [ITEM.STONE_PICKAXE]:  { name: 'Stone pickaxe',   stack: 1, icon: 'stone_pickaxe',  tool: 'pick',    tier: 2, toolSpeed: 4,    damage: 4,   attackSpeed: 0.8,   durability: 100 },
-  [ITEM.STONE_HATCHET]:  { name: 'Stone hatchet',   stack: 1, icon: 'stone_hatchet',  tool: 'hatchet', tier: 2, toolSpeed: 4,    damage: 6,   attackSpeed: 0.6,   durability: 100 },
-  [ITEM.STONE_HOE]:      { name: 'Stone hoe',       stack: 1, icon: 'stone_hoe',      tool: 'hoe',     tier: 2, toolSpeed: 4,    damage: 4,   attackSpeed: 1.1,   durability: 80 },
-  [ITEM.IRON_SHEARS]:    { name: 'Iron shears',     stack: 1, icon: 'iron_shears',    tool: 'shears',  tier: 3, toolSpeed: 6,    damage: 3,   attackSpeed: 1.2,   durability: 150 },
-  [ITEM.IRON_SWORD]:     { name: 'Iron sword',      stack: 1, icon: 'iron_sword',     tool: 'sword',   tier: 3, toolSpeed: 3,    damage: 6,   attackSpeed: 1.9,   durability: 150 },
-  [ITEM.IRON_SHOVEL]:    { name: 'Iron shovel',     stack: 1, icon: 'iron_shovel',    tool: 'shovel',  tier: 3, toolSpeed: 6,    damage: 4,   attackSpeed: 1.1,   durability: 300 },
-  [ITEM.IRON_PICKAXE]:   { name: 'Iron pickaxe',    stack: 1, icon: 'iron_pickaxe',   tool: 'pick',    tier: 3, toolSpeed: 6,    damage: 5,   attackSpeed: 1.1,   durability: 300 },
-  [ITEM.IRON_HATCHET]:   { name: 'Iron hatchet',    stack: 1, icon: 'iron_hatchet',   tool: 'hatchet', tier: 3, toolSpeed: 6,    damage: 7,   attackSpeed: 0.8,   durability: 300 },
-  [ITEM.IRON_HOE]:       { name: 'Iron hoe',        stack: 1, icon: 'iron_hoe',       tool: 'hoe',     tier: 3, toolSpeed: 6,    damage: 5,   attackSpeed: 1.2,   durability: 200 },
-  [ITEM.GOLDEN_SWORD]:   { name: 'Golden sword',    stack: 1, icon: 'golden_sword',   tool: 'sword',   tier: 3, toolSpeed: 8,    damage: 5,   attackSpeed: 2.8,   durability: 30 },
-  [ITEM.GOLDEN_SHOVEL]:  { name: 'Golden shovel',   stack: 1, icon: 'golden_shovel',  tool: 'shovel',  tier: 3, toolSpeed: 14,   damage: 3,   attackSpeed: 1.6,   durability: 60 },
-  [ITEM.GOLDEN_PICKAXE]: { name: 'Golden pickaxe',  stack: 1, icon: 'golden_pickaxe', tool: 'pick',    tier: 3, toolSpeed: 14,   damage: 4,   attackSpeed: 1.6,   durability: 60 },
-  [ITEM.GOLDEN_HATCHET]: { name: 'Golden hatchet',  stack: 1, icon: 'golden_hatchet', tool: 'hatchet', tier: 3, toolSpeed: 14,   damage: 5,   attackSpeed: 1.4,   durability: 60 },
-  [ITEM.GOLDEN_HOE]:     { name: 'Golden hoe',      stack: 1, icon: 'golden_hoe',     tool: 'hoe',     tier: 3, toolSpeed: 14,   damage: 3,   attackSpeed: 2.4,   durability: 45 },
-  [ITEM.DIAMOND_SWORD]:  { name: 'Diamond sword',   stack: 1, icon: 'diamond_sword',  tool: 'sword',   tier: 5, toolSpeed: 5,    damage: 7,   attackSpeed: 2.0,   durability: 500 },
-  [ITEM.DIAMOND_SHOVEL]: { name: 'Diamond shovel',  stack: 1, icon: 'diamond_shovel', tool: 'shovel',  tier: 5, toolSpeed: 10,   damage: 2,   attackSpeed: 1.2,   durability: 1000 },
-  [ITEM.DIAMOND_PICKAXE]:{ name: 'Diamond pickaxe', stack: 1, icon: 'diamond_pickaxe',tool: 'pick',    tier: 5, toolSpeed: 10,   damage: 2,   attackSpeed: 1.2,   durability: 1000 },
-  [ITEM.DIAMOND_HATCHET]:{ name: 'Diamond hatchet', stack: 1, icon: 'diamond_hatchet',tool: 'hatchet', tier: 5, toolSpeed: 10,   damage: 8,   attackSpeed: 0.9,   durability: 1000 },
-  [ITEM.DIAMOND_HOE]:    { name: 'Diamond hoe',     stack: 1, icon: 'diamond_hoe',    tool: 'hoe',     tier: 5, toolSpeed: 10,   damage: 2,   attackSpeed: 1.3,   durability: 750 },
+  [ITEM.WOODEN_SWORD]:   { name: 'Wooden sword',    stack: 1, icon: 'wooden_sword',   tool: 'sword',   tier: 1, toolSpeed: 1,    damage: 4,   attackSpeed: 1.8,   durability: 20, desc: '' },
+  [ITEM.WOODEN_SHOVEL]:  { name: 'Wooden shovel',   stack: 1, icon: 'wooden_shovel',  tool: 'shovel',  tier: 1, toolSpeed: 2,    damage: 2,   attackSpeed: 1.0,   durability: 40, desc: '' },
+  [ITEM.WOODEN_PICKAXE]: { name: 'Wooden pickaxe',  stack: 1, icon: 'wooden_pickaxe', tool: 'pick',    tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.0,   durability: 40, desc: '' },
+  [ITEM.WOODEN_HATCHET]: { name: 'Wooden hatchet',  stack: 1, icon: 'wooden_hatchet', tool: 'hatchet', tier: 1, toolSpeed: 2,    damage: 5,   attackSpeed: 0.8,   durability: 40, desc: '' },
+  [ITEM.WOODEN_HOE]:     { name: 'Wooden hoe',      stack: 1, icon: 'wooden_hoe',     tool: 'hoe',     tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.2,   durability: 30, desc: '' },
+  [ITEM.STONE_SWORD]:    { name: 'Stone sword',     stack: 1, icon: 'stone_sword',    tool: 'sword',   tier: 2, toolSpeed: 2,    damage: 5,   attackSpeed: 1.7,   durability: 50, desc: '' },
+  [ITEM.STONE_SHOVEL]:   { name: 'Stone shovel',    stack: 1, icon: 'stone_shovel',   tool: 'shovel',  tier: 2, toolSpeed: 4,    damage: 3,   attackSpeed: 0.8,   durability: 100, desc: '' },
+  [ITEM.STONE_PICKAXE]:  { name: 'Stone pickaxe',   stack: 1, icon: 'stone_pickaxe',  tool: 'pick',    tier: 2, toolSpeed: 4,    damage: 4,   attackSpeed: 0.8,   durability: 100, desc: '' },
+  [ITEM.STONE_HATCHET]:  { name: 'Stone hatchet',   stack: 1, icon: 'stone_hatchet',  tool: 'hatchet', tier: 2, toolSpeed: 4,    damage: 6,   attackSpeed: 0.6,   durability: 100, desc: '' },
+  [ITEM.STONE_HOE]:      { name: 'Stone hoe',       stack: 1, icon: 'stone_hoe',      tool: 'hoe',     tier: 2, toolSpeed: 4,    damage: 4,   attackSpeed: 1.1,   durability: 80, desc: '' },
+  [ITEM.IRON_SHEARS]:    { name: 'Iron shears',     stack: 1, icon: 'iron_shears',    tool: 'shears',  tier: 3, toolSpeed: 6,    damage: 3,   attackSpeed: 1.2,   durability: 150, desc: '' },
+  [ITEM.IRON_SWORD]:     { name: 'Iron sword',      stack: 1, icon: 'iron_sword',     tool: 'sword',   tier: 3, toolSpeed: 3,    damage: 6,   attackSpeed: 1.9,   durability: 150, desc: '' },
+  [ITEM.IRON_SHOVEL]:    { name: 'Iron shovel',     stack: 1, icon: 'iron_shovel',    tool: 'shovel',  tier: 3, toolSpeed: 6,    damage: 4,   attackSpeed: 1.1,   durability: 300, desc: '' },
+  [ITEM.IRON_PICKAXE]:   { name: 'Iron pickaxe',    stack: 1, icon: 'iron_pickaxe',   tool: 'pick',    tier: 3, toolSpeed: 6,    damage: 5,   attackSpeed: 1.1,   durability: 300, desc: '' },
+  [ITEM.IRON_HATCHET]:   { name: 'Iron hatchet',    stack: 1, icon: 'iron_hatchet',   tool: 'hatchet', tier: 3, toolSpeed: 6,    damage: 7,   attackSpeed: 0.8,   durability: 300, desc: '' },
+  [ITEM.IRON_HOE]:       { name: 'Iron hoe',        stack: 1, icon: 'iron_hoe',       tool: 'hoe',     tier: 3, toolSpeed: 6,    damage: 5,   attackSpeed: 1.2,   durability: 200, desc: '' },
+  [ITEM.GOLDEN_SWORD]:   { name: 'Golden sword',    stack: 1, icon: 'golden_sword',   tool: 'sword',   tier: 3, toolSpeed: 8,    damage: 5,   attackSpeed: 2.8,   durability: 30, desc: '' },
+  [ITEM.GOLDEN_SHOVEL]:  { name: 'Golden shovel',   stack: 1, icon: 'golden_shovel',  tool: 'shovel',  tier: 3, toolSpeed: 14,   damage: 3,   attackSpeed: 1.6,   durability: 60, desc: '' },
+  [ITEM.GOLDEN_PICKAXE]: { name: 'Golden pickaxe',  stack: 1, icon: 'golden_pickaxe', tool: 'pick',    tier: 3, toolSpeed: 14,   damage: 4,   attackSpeed: 1.6,   durability: 60, desc: '' },
+  [ITEM.GOLDEN_HATCHET]: { name: 'Golden hatchet',  stack: 1, icon: 'golden_hatchet', tool: 'hatchet', tier: 3, toolSpeed: 14,   damage: 5,   attackSpeed: 1.4,   durability: 60, desc: '' },
+  [ITEM.GOLDEN_HOE]:     { name: 'Golden hoe',      stack: 1, icon: 'golden_hoe',     tool: 'hoe',     tier: 3, toolSpeed: 14,   damage: 3,   attackSpeed: 2.4,   durability: 45, desc: '' },
+  [ITEM.DIAMOND_SWORD]:  { name: 'Diamond sword',   stack: 1, icon: 'diamond_sword',  tool: 'sword',   tier: 5, toolSpeed: 5,    damage: 7,   attackSpeed: 2.0,   durability: 500, desc: '' },
+  [ITEM.DIAMOND_SHOVEL]: { name: 'Diamond shovel',  stack: 1, icon: 'diamond_shovel', tool: 'shovel',  tier: 5, toolSpeed: 10,   damage: 2,   attackSpeed: 1.2,   durability: 1000, desc: '' },
+  [ITEM.DIAMOND_PICKAXE]:{ name: 'Diamond pickaxe', stack: 1, icon: 'diamond_pickaxe',tool: 'pick',    tier: 5, toolSpeed: 10,   damage: 2,   attackSpeed: 1.2,   durability: 1000, desc: '' },
+  [ITEM.DIAMOND_HATCHET]:{ name: 'Diamond hatchet', stack: 1, icon: 'diamond_hatchet',tool: 'hatchet', tier: 5, toolSpeed: 10,   damage: 8,   attackSpeed: 0.9,   durability: 1000, desc: '' },
+  [ITEM.DIAMOND_HOE]:    { name: 'Diamond hoe',     stack: 1, icon: 'diamond_hoe',    tool: 'hoe',     tier: 5, toolSpeed: 10,   damage: 2,   attackSpeed: 1.3,   durability: 750, desc: '' },
 // Useable
-  [ITEM.BUCKET]:        { name: 'Bucket',        stack: 20, icon: 'bucket' },
-  [ITEM.WATER_BUCKET]:  { name: 'Water Bucket',  stack: 1,  icon: 'water_bucket' },
-  [ITEM.LAVA_BUCKET]:   { name: 'Lava Bucket',   stack: 1,  icon: 'lava_bucket'  },
-  [ITEM.SNOWBALL]:      { name: 'Snowball',      stack: 30, icon: 'snowball', throwable: true },
+  [ITEM.BUCKET]:        { name: 'Bucket',        stack: 20, icon: 'bucket', desc: '' },
+  [ITEM.WATER_BUCKET]:  { name: 'Water Bucket',  stack: 1,  icon: 'water_bucket', desc: '' },
+  [ITEM.LAVA_BUCKET]:   { name: 'Lava Bucket',   stack: 1,  icon: 'lava_bucket', desc: '' },
+  [ITEM.SNOWBALL]:      { name: 'Snowball',      stack: 30, icon: 'snowball', throwable: true, desc: '' },
  //plants
-  [ITEM.SUGAR_CANE]:    { name: 'Sugar cane',    stack: 99, icon: 'sugarcane' },
-  [ITEM.WHEAT]:         { name: 'Wheat',         stack: 99, icon: 'wheat' },
+  [ITEM.SUGAR_CANE]:    { name: 'Sugar cane',    stack: 99, icon: 'sugarcane', desc: '' },
+  [ITEM.WHEAT]:         { name: 'Wheat',         stack: 99, icon: 'wheat', desc: '' },
 // Consumables
-  [ITEM.APPLE]:         { name: 'Apple',          stack: 99, icon: 'apple',         foodSatFull: 3, food: 5,  foodSat: 8,  eatTime: 1.4 },
-  [ITEM.MELON_SLICE]:   { name: 'Melon slice',    stack: 40, icon: 'melon_slice',   foodSatFull: 1, food: 1,  foodSat: 2,  eatTime: 1.0 },
-  [ITEM.PUMPKIN_PIE]:   { name: 'Pumpkin Pie',    stack: 10, icon: 'pumpkin_pie',   foodSatFull: 6, food: 10, foodSat: 12, eatTime: 4 },
-  [ITEM.MUSHROOM_STEW]: { name: 'Mushroom stew',  stack: 20, icon: 'mushroom_stew', foodSatFull: 5, food: 8,  foodSat: 10, eatTime: 2.2, foodReturn: 265 },
-  [ITEM.BREAD]:         { name: 'Bread',          stack: 99, icon: 'bread',         foodSatFull: 4, food: 7,  foodSat: 8,  eatTime: 1.7 },
-  [ITEM.GOLDEN_APPLE]:  { name: 'Golden apple',   stack: 30, icon: 'golden_apple',  foodSatFull: 8, food: 5,  foodSat: 15,  eatTime: 2.0 },
-  [ITEM.MUTTON]:        { name: 'Mutton',         stack: 99, icon: 'mutton',        foodSatFull: 1, food: 2,  foodSat: 4,  eatTime: 1.8 },
-  [ITEM.COOKED_MUTTON]: { name: 'Cooked mutton',  stack: 99, icon: 'cooked_mutton', foodSatFull: 4, food: 6,  foodSat: 7,  eatTime: 2.1 },
+  [ITEM.APPLE]:         { name: 'Apple',          stack: 99, icon: 'apple',         foodSatFull: 3, food: 5,  foodSat: 8,  eatTime: 1.4, desc: '' },
+  [ITEM.MELON_SLICE]:   { name: 'Melon slice',    stack: 40, icon: 'melon_slice',   foodSatFull: 1, food: 1,  foodSat: 2,  eatTime: 1.0, desc: '' },
+  [ITEM.PUMPKIN_PIE]:   { name: 'Pumpkin Pie',    stack: 10, icon: 'pumpkin_pie',   foodSatFull: 6, food: 10, foodSat: 12, eatTime: 4, desc: '' },
+  [ITEM.MUSHROOM_STEW]: { name: 'Mushroom stew',  stack: 20, icon: 'mushroom_stew', foodSatFull: 5, food: 8,  foodSat: 10, eatTime: 2.2, foodReturn: 265, desc: '' },
+  [ITEM.BREAD]:         { name: 'Bread',          stack: 99, icon: 'bread',         foodSatFull: 4, food: 7,  foodSat: 8,  eatTime: 1.7, desc: '' },
+  [ITEM.GOLDEN_APPLE]:  { name: 'Golden apple',   stack: 30, icon: 'golden_apple',  foodSatFull: 8, food: 5,  foodSat: 15,  eatTime: 2.0, desc: '' },
+  [ITEM.MUTTON]:        { name: 'Mutton',         stack: 99, icon: 'mutton',        foodSatFull: 1, food: 2,  foodSat: 4,  eatTime: 1.8, desc: '' },
+  [ITEM.COOKED_MUTTON]: { name: 'Cooked mutton',  stack: 99, icon: 'cooked_mutton', foodSatFull: 4, food: 6,  foodSat: 7,  eatTime: 2.1, desc: '' },
 };
 
 // blocks that only DROP when broken with the right tool type at (or above) a tier.

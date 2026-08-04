@@ -48,6 +48,40 @@ function renderBlockIcon(id, variant = 0) {
   if (id >= 256) return renderItemIcon(id);
   const key = id + ':' + variant;
   if (ICON3D[key]) return ICON3D[key];
+  if (id === B.CHEST) {                   // chest has no chunk-mesh model — render its real mesh
+    const scene = new THREE.Scene();
+    const m = buildChestMesh();
+    m.group.position.set(-0.5, -0.5, -0.5);   // centre the cell on the origin
+    scene.add(m.group);
+    const cam = new THREE.OrthographicCamera(-0.95, 0.95, 0.95, -0.95, 0.1, 10);
+    cam.position.set(1.4, 1.15, 1.8);
+    cam.lookAt(0, -0.05, 0);
+    const url = _renderIconScene(scene, cam);
+    m.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    for (const mt of m.mats) mt.dispose();
+    ICON3D[key] = url;
+    const im = new Image(); im.src = url; ICON_IMG[key] = im;
+    return url;
+  }
+  if (id === B.BED) {                     // bed has no chunk-mesh model — render its real mesh
+    const scene = new THREE.Scene();
+    const m = bedMattressMesh();
+    const legs = bedUndersideMesh();
+    const g = new THREE.Group();
+    g.add(m.mesh);
+    g.add(legs.mesh);
+    g.position.set(-0.5, -0.3, -1);       // centre the 1x2 footprint on the origin
+    scene.add(g);
+    const cam = new THREE.OrthographicCamera(-1.5, 1.5, 1.5, -1.5, 0.1, 12);
+    cam.position.set(2.0, 1.9, 2.2);
+    cam.lookAt(0, 0, 0);
+    const url = _renderIconScene(scene, cam);
+    for (const c of g.children) c.geometry.dispose();
+    for (const mt of [...m.mats, ...legs.mats]) mt.dispose();
+    ICON3D[key] = url;
+    const im = new Image(); im.src = url; ICON_IMG[key] = im;
+    return url;
+  }
   if (id === B.DOOR) {                    // door has no chunk-mesh model — render its panel mesh
     const scene = new THREE.Scene();
     const m = doorMaterials();

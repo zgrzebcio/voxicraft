@@ -9,6 +9,8 @@ let invOpen = false;
 // when count > 1. Future non-block items would branch on an item table for their flat icon.
 const slotArr = (r) => r === 'hot' ? HOTBAR
   : r === 'fur' ? ((activeFurnace && FURNACES.get(activeFurnace)) || mkFurnace()).slots
+  : r === 'chest'  ? ((activeChest  && CHESTS.get(activeChest))  || mkChest()).slots
+  : r === 'chest2' ? ((activeChest2 && CHESTS.get(activeChest2)) || mkChest()).slots
   : r === 'inv2' ? invSlots2
   : invSlots;
 // tools render a durability bar (hidden while still full, MC-style): green -> red as it wears
@@ -27,10 +29,12 @@ function buildInventory() {
   if (cpEl) cpEl.style.display = 'none';
   const fpEl = document.getElementById('furnacePanel');
   if (fpEl) fpEl.style.display = 'none';
+  const chpEl = document.getElementById('chestPanel');
+  if (chpEl) chpEl.style.display = 'none';
 
   invEl.innerHTML =
     '<div class="title">Inventory</div>' +
-    '<div class="hint">drag: hold <b>LMB</b>/<b>A</b> &middot; quick-move: <b>Shift+LMB</b>/<b>Y</b> &middot; close: <b>E</b>/<b>B</b></div>';
+    '<div class="hint">drag: hold <b>LMB</b>/<b>A</b> &middot; quick-move: <b>Shift+LMB</b>/<b>Y</b> &middot; sort: <b>MMB</b> &middot; close: <b>E</b>/<b>B</b></div>';
   // one N×9 grid bound to a slot array + region; DOM order == slot index (slot 0 = bottom-left)
   const mkGrid = (arr, region) => {
     const grid = document.createElement('div');
@@ -63,6 +67,7 @@ function buildInventory() {
   // survival: crafting list on the left, plus the furnace GUI on the right when one is open
   if (!player.canFly) buildCraftPanel();
   if (activeFurnace) buildFurnacePanel();
+  if (activeChest) buildChestPanel();
 }
 function refreshSlotsUI() { buildHotbar(); buildInventory(); saveAll(); }
 
@@ -86,6 +91,12 @@ function slotDescriptors() {
   const fp = document.getElementById('furnacePanel');
   if (fp && fp.style.display !== 'none')
     for (const el of fp.querySelectorAll('.slot')) out.push({ region: 'fur', i: +el.dataset.fi, el });
+  const chp = document.getElementById('chestPanel');
+  if (chp && chp.style.display !== 'none')
+    for (const g of chp.querySelectorAll('.grid')) {        // 'chest' and, for a double, 'chest2'
+      const region = g.dataset.region, gs = g.querySelectorAll('.slot');
+      for (let i = 0; i < gs.length; i++) out.push({ region, i, el: gs[i] });
+    }
   return out;
 }
 function slotAtPoint(x, y) {
@@ -110,14 +121,63 @@ function hoveredSlot() {                         // slot under the cursor, else 
   })();
 }
 
+/* ---- item tooltip ----
+   One fixed-width panel: name, then the (author-supplied) description, then a stat block that
+   depends on what the thing is. Tools list wear + combat + mining numbers, food lists what it
+   restores. Blocks and plain materials show just the name and description. */
+const _tipNum = (n) => Number.isInteger(n) ? String(n) : (+n).toFixed(2).replace(/\.?0+$/, '');
+const _tipEsc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+function itemTooltipHTML(id, dur) {
+  if (id == null) return '';
+  const isItem = id >= 256;
+  const p = isItem ? ITEM_PROPS[id] : PROPS[id];
+  if (!p) return '';
+  let html = `<div class="tipName">${_tipEsc(p.name || '')}</div>`;
+  if (p.desc) html += `<div class="tipDesc">${_tipEsc(p.desc)}</div>`;
+  const rows = [];
+  if (p.tool) {
+    const maxD = p.durability;
+    if (maxD) rows.push(['durability', `${dur != null ? dur : maxD}/${maxD}`]);
+    if (p.damage != null) rows.push(['damage', _tipNum(p.damage)]);
+    if (p.attackSpeed != null) rows.push(['attack speed', _tipNum(p.attackSpeed)]);
+    if (p.toolSpeed != null) rows.push(['mine speed', _tipNum(p.toolSpeed)]);
+  }
+  if (p.food != null) {
+    rows.push(['food', _tipNum(p.food)]);
+    if (p.foodSat != null) rows.push(['sat', _tipNum(p.foodSat)]);
+    if (p.foodSatFull != null) rows.push(['satAtFull', _tipNum(p.foodSatFull)]);
+    rows.push(['consume time', _tipNum(p.eatTime ?? EAT_TIME) + 's']);
+  }
+  if (rows.length) {
+    html += '<div class="tipStats">';
+    for (const [k, v] of rows) html += `<div class="tipRow"><span>${k}</span><b>${v}</b></div>`;
+    html += '</div>';
+  }
+  return html;
+}
+// place the panel near the cursor but always fully on screen
+function showTooltip(html) {
+  ctipEl.innerHTML = html;
+  ctipEl.style.display = 'block';
+  const r = ctipEl.getBoundingClientRect();
+  let x = invCursor.x + 16, y = invCursor.y + 18;
+  if (x + r.width > window.innerWidth - 6) x = invCursor.x - r.width - 12;
+  if (y + r.height > window.innerHeight - 6) y = invCursor.y - r.height - 12;
+  ctipEl.style.left = Math.max(6, x) + 'px';
+  ctipEl.style.top = Math.max(6, y) + 'px';
+}
+
 // crafting icons: get all .cing (ingredients) and .cbtn (output) with title attributes for tooltips
 function getCraftingElements() {
   const out = [];
   const cp = document.getElementById('craftPanel');
   if (!cp || cp.style.display === 'none') return out;
+  // data-id carries the real block/item so the tooltip can show the full stat panel, not just a name
   const ings = cp.querySelectorAll('.cing');
-  for (const el of ings) out.push({ el, title: el.dataset.name || '', type: 'craft' });
-  for (const btn of cp.querySelectorAll('.cbtn')) out.push({ el: btn, title: btn.dataset.name || '', type: 'craft' });
+  for (const el of ings)
+    out.push({ el, title: el.dataset.name || '', id: +el.dataset.id, type: 'craft' });
+  for (const btn of cp.querySelectorAll('.cbtn'))
+    out.push({ el: btn, title: btn.dataset.name || '', id: +btn.dataset.id, type: 'craft' });
   return out;
 }
 
@@ -132,7 +192,7 @@ function nearestElement(x, y) {
   for (const d of getCraftingElements()) {
     const r = d.el.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2, dist = Math.hypot(x - cx, y - cy);
-    if (dist < bd) { bd = dist; best = { el: d.el, cx, cy, dist, type: 'craft', title: d.title }; }
+    if (dist < bd) { bd = dist; best = { el: d.el, cx, cy, dist, type: 'craft', title: d.title, id: d.id }; }
   }
   return best;
 }
@@ -162,16 +222,52 @@ function placeInto(region, i, n = 'all') {
   if (dst == null) {
     arr[i] = carrySlot(dragHeld, want);
     dragHeld.count -= want;
-  } else if (dst.id === dragHeld.id) {
+  } else if (dst.id === dragHeld.id && dst.count < stackSize(dst.id)) {
+    // same id with room to spare: top the target stack up
     const moved = Math.min(stackSize(dst.id) - dst.count, want);
     dst.count += moved; dragHeld.count -= moved;
   } else if (n === 'all') {                       // swap: target stack goes into the hand
+    // Also the path for two of the SAME stack-1 item (tools). Merging there always moves zero,
+    // so without the `dst.count < cap` guard above the click silently did nothing — you could
+    // never trade a worn pickaxe for a fresh one.
     const tmp = dst; arr[i] = dragHeld; dragHeld = tmp; dragFrom = { region, i };
     refreshSlotsUI(); return;
   }
   if (dragHeld.count <= 0) { dragHeld = null; dragFrom = null; }
   refreshSlotsUI();
 }
+/* Middle-click sort: tidies just the grid under the cursor (hotbar, inventory, or an open
+   chest). Stacks of the same item merge up to their cap first, then everything orders by name
+   and empty slots fall to the end. Worn tools keep their own entry so wear is never averaged.
+   The creative palette is deliberately excluded — it is a fixed layout, not storage. */
+function sortRegion(region) {
+  if (region === 'fur') return;                      // furnace slots are positional, not storage
+  if (player.canFly && (region === 'hot' || region === 'inv' || region === 'inv2')) {
+    toast('sorting is off in creative');
+    return;
+  }
+  const arr = slotArr(region);
+  if (!arr || !arr.length) return;
+  const out = [];
+  for (const s of arr) {
+    if (!s) continue;
+    if (s.dur != null) { out.push(carrySlot(s, s.count)); continue; }   // tool: keep its wear
+    const cap = stackSize(s.id);
+    let left = s.count;
+    for (const o of out) {                           // top up any partial stack of the same id
+      if (o.id !== s.id || o.dur != null || o.count >= cap) continue;
+      const m = Math.min(cap - o.count, left);
+      o.count += m; left -= m;
+      if (left <= 0) break;
+    }
+    while (left > 0) { const t = Math.min(cap, left); out.push(mkSlot(s.id, t)); left -= t; }
+  }
+  const nameOf = (s) => (s.id >= 256 ? ITEM_PROPS[s.id]?.name : PROPS[s.id]?.name) || '';
+  out.sort((a, b) => nameOf(a).localeCompare(nameOf(b)) || b.count - a.count);
+  for (let i = 0; i < arr.length; i++) arr[i] = out[i] || null;
+  refreshSlotsUI();
+}
+
 // legacy pad entry points — same click-carry model
 function beginDrag(region, i) { pickUp(region, i, 'all'); }
 function endDrag(region, i)   { placeInto(region, i, 'all'); }
@@ -220,6 +316,15 @@ function _pushFurnace(id, want) {
 // otherwise a full first grid wrongly reports "full" while inv2 sits empty.
 function destGrids(region) {
   const useInv2 = player.canFly;
+  // an open chest is the natural quick-move target: player grids feed it, and its own slots
+  // feed back into the player
+  const chestArrs = [];
+  if (activeChest && CHESTS.get(activeChest)) chestArrs.push(CHESTS.get(activeChest).slots);
+  if (activeChest2 && CHESTS.get(activeChest2)) chestArrs.push(CHESTS.get(activeChest2).slots);
+  if (region === 'chest' || region === 'chest2')
+    return useInv2 ? [HOTBAR, invSlots, invSlots2] : [HOTBAR, invSlots];
+  if (chestArrs.length && (region === 'hot' || region === 'inv' || region === 'inv2'))
+    return chestArrs;
   if (region === 'hot')  return useInv2 ? [invSlots, invSlots2] : [invSlots];
   if (region === 'inv')  return useInv2 ? [HOTBAR, invSlots2]   : [HOTBAR];
   if (region === 'inv2') return [HOTBAR, invSlots];
@@ -287,6 +392,7 @@ function toggleInventory(open, mode) {
   } else {
     cancelDrag();
     activeFurnace = null;                       // closing always detaches the furnace GUI
+    activeChest = activeChest2 = null;          // ...and the chest, which also shuts its lid
     if (lastHoverEl) { lastHoverEl.classList.remove('hover'); lastHoverEl = null; }
     vcurEl.style.display = vdragEl.style.display = 'none';
     if (playing) { lockTries = 0; tryPointerLock(); }
@@ -329,14 +435,19 @@ function updateInvCursorVisual(dt) {
     if (hovEl) hovEl.classList.add('hover');
     lastHoverEl = hovEl;
   }
-  // floating item-name tooltip that follows the cursor over crafting icons
+  // Tooltip: full item panel over any occupied slot, name-only over crafting icons. Suppressed
+  // while dragging, since the cursor is already carrying a visible stack.
   const ne = nearestElement(invCursor.x, invCursor.y);
   const tipR = invCursor.mode === 'pad' ? 60 : 24;
-  if (ne && ne.type === 'craft' && ne.dist < tipR && ne.title) {
-    ctipEl.textContent = ne.title;
-    ctipEl.style.display = 'block';
-    ctipEl.style.left = (invCursor.x + 14) + 'px';
-    ctipEl.style.top  = (invCursor.y + 16) + 'px';
+  const hovSlot = hov && slotArr(hov.region)[hov.i];
+  if (dragHeld) {
+    ctipEl.style.display = 'none';
+  } else if (hovSlot) {
+    showTooltip(itemTooltipHTML(hovSlot.id, hovSlot.dur));
+  } else if (ne && ne.type === 'craft' && ne.dist < tipR && ne.title) {
+    // recipe icons get the same full panel as a real slot (no durability — it isn't an instance)
+    showTooltip(Number.isFinite(ne.id) ? itemTooltipHTML(ne.id, null)
+                                       : `<div class="tipName">${_tipEsc(ne.title)}</div>`);
   } else {
     ctipEl.style.display = 'none';
   }

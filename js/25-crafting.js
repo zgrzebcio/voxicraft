@@ -24,6 +24,7 @@ const RECIPES_BASIC = [
   { in: [[ITEM.CLAY_BALL, 4]],                                               out: [B.CLAY, 1] },
   { in: [[ITEM.COAL, 1]],                                                    out: [ITEM.COAL_CHUNK, 8] },
   { in: [[V_PLANKS, 4]],                                                     out: [B.CRAFTING_BENCH, 1] },
+  { in: [[V_PLANKS, 8]],                                                     out: [B.CHEST, 1] },
   { in: [[ITEM.BOWL, 1], [B.RED_MUSHROOM, 1], [B.BROWN_MUSHROOM, 1]],        out: [ITEM.MUSHROOM_STEW, 1] },
   { in: [[ITEM.COAL, 1], [ITEM.STICK, 1]],                                   out: [B.TORCH, 4] },
   { in: [[ITEM.GLASS_SHARD, 4]],                                             out: [B.GLASS, 1] },
@@ -45,6 +46,7 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.TIN_NUGGET, 9]],                                              out: [ITEM.TIN_INGOT, 1] },
   { in: [[ITEM.COPPER_INGOT, 1]],                                            out: [ITEM.COPPER_NUGGET, 9] },
   { in: [[ITEM.COPPER_NUGGET, 9]],                                           out: [ITEM.COPPER_INGOT, 1] },
+  { in: [[B.WOOL, 4], [V_PLANKS, 4]],                                        out: [B.BED, 1] },
   { in: [[V_PLANKS, 6]],                                                     out: [B.DOOR, 1] },
   { in: [[V_PLANKS, 3]],                                                     out: [B.STAIRS, 2] },
   { in: [[ITEM.DIAMOND, 3], [ITEM.STICK, 2]],                                out: [ITEM.DIAMOND_SWORD, 1] },
@@ -206,11 +208,11 @@ function buildCraftPanel() {
       // variant groups carry their whole id list so the cycler can swap icon + tooltip in place
       const shown = ids[_variantPhase % ids.length];
       const attr = ids.length > 1 ? ` data-ids="${ids.join(',')}"` : '';
-      html += `<span class="cing${have ? '' : ' miss'}" data-name="${idName(shown)}"${attr}>` +
+      html += `<span class="cing${have ? '' : ' miss'}" data-name="${idName(shown)}" data-id="${shown}"${attr}>` +
               `<img src="${renderBlockIcon(shown)}" alt="">${n > 1 ? `<b>${n}</b>` : ''}</span>`;
     }
     const [oid, on] = r.out;
-    html += `<button class="cbtn" data-name="${idName(oid)}">` +
+    html += `<button class="cbtn" data-name="${idName(oid)}" data-id="${oid}">` +
             `<img src="${renderBlockIcon(oid)}" alt="">${on > 1 ? `<b>${on}</b>` : ''}</button>`;
     row.innerHTML = html;
     row.querySelector('.cbtn').addEventListener('click', () => doCraft(r));

@@ -14,6 +14,8 @@ function resetWorld(seed) {
   _plyGlow = null;
   clearDrops();
   clearEntities();
+  clearBeds();
+  clearChests();
   player.spawnPos = null;
   initWorkers(seed);
   player.spawned = false;

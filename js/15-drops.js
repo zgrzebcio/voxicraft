@@ -85,6 +85,8 @@ function buildItemDropGeom(id, iconName) {
 function buildDropGeom(id, variant = 0) {
   if (id >= 256) return buildItemDropGeom(id);
   if (id === B.DOOR) return buildItemDropGeom(id, 'oak_door');   // no chunk-mesh model — sprite drop
+  if (id === B.BED)  return buildItemDropGeom(id, 'bed_long');   // ditto for the bed
+  if (id === B.CHEST) return buildItemDropGeom(id, 'chest_front');
   const key = id + ':' + variant;
   if (DROP_GEOM[key]) return DROP_GEOM[key];
   const data = new Uint16Array(CHUNK_X * CHUNK_Y * CHUNK_Z);

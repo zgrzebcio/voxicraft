@@ -443,6 +443,21 @@ function _entBlocked(x, y, z) {
   return false;
 }
 
+/* Lowest Y at or above the feet where the body actually FITS at (nx,nz), or null.
+   The old climb test just probed `e.y + 1`, which fails at a shoreline: a mob floating at
+   y≈99.4 probes 100.4, and floor(100.4) IS the solid shore block, so the step never looked
+   possible and it bobbed against the bank forever. Probing candidate STANDING heights instead
+   finds y=101 (on top of the shore) correctly. */
+function _stepUpTarget(e, nx, nz, maxRise = 1.7) {
+  const base = Math.floor(e.y);
+  for (let k = 1; k <= 2; k++) {
+    const ty = base + k;
+    if (ty - e.y > maxRise) break;
+    if (!_entBlocked(nx, ty, nz)) return ty;
+  }
+  return null;
+}
+
 // Cells a mob refuses to walk into. Lava and cactus hurt; deep-ish water is avoided so they
 // don't wander out to sea and drown. Checked against the two cells the body occupies.
 function _entHazard(x, y, z) {
@@ -815,7 +830,11 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
     let blocked = false;
     if (!bad(e.x + sx, e.z)) { e.x += sx; moved += Math.abs(sx); } else blocked = true;
     if (!bad(e.x, e.z + sz)) { e.z += sz; moved += Math.abs(sz); } else blocked = true;
-    if (blocked && (e.onGround || inWater) && e.jumpCd <= 0 && !_entBlocked(e.x + sx, e.y + 1, e.z + sz)) {
+    const climbY = blocked ? _stepUpTarget(e, e.x + sx, e.z + sz) : null;
+    if (blocked && inWater && climbY !== null) {
+      // wading ashore: lift straight onto the ledge, swimming has no real jump arc
+      e.y = climbY; e.x += sx; e.z += sz; e.vy = 1.5; e.onGround = false; e.jumpCd = 0.3;
+    } else if (blocked && (e.onGround || inWater) && e.jumpCd <= 0 && climbY !== null) {
       e.vy = ENT_JUMP; e.jumpCd = 0.6; e.onGround = false;
     } else if (blocked && e.turnCd <= 0 && !inWater) {
       e.yaw = Math.random() * Math.PI * 2; e.turnCd = 0.5;
@@ -869,7 +888,12 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
       e.vy = 0;
     } else { e.y = ny; e.onGround = false; }
   }
-  if (inWater) { e.vy = Math.min(e.vy + 40 * dt, 4.2); e.onGround = false; }
+  // Buoyancy, but never CLAMP an active climb/jump: the old unconditional Math.min pulled a
+  // fresh 7.6 hop straight back down to 4.2, which is the other half of the shoreline trap.
+  if (inWater) {
+    if (e.vy < 4.2) e.vy = Math.min(e.vy + 40 * dt, 4.2);
+    e.onGround = false;
+  }
 
   /* ---- visuals ---- */
   const spd = moved / Math.max(dt, 1e-4);
@@ -1086,16 +1110,18 @@ function updateEntities(dt) {
         e.onGround = false;
       }
     }
-    // Swimming: buoyancy holds the mob at the surface. The rise is strong enough to actually
-    // clear a shoreline block, otherwise it bobbed against the bank forever without getting out.
+    // Swimming: buoyancy holds the mob at the surface, but it must never CLAMP an active climb
+    // — the old unconditional Math.min pulled a fresh hop straight back down to 4.2.
     if (inWater) {
-      e.vy = Math.min(e.vy + 40 * dt, 4.2);
+      if (e.vy < 4.2) e.vy = Math.min(e.vy + 40 * dt, 4.2);
       e.onGround = false;
-      // right at the edge of land, hop up onto it
+      // Right at the edge of land, climb straight onto the ledge. Probing a real standing
+      // height (not just y+1) is what makes this work at a shoreline.
       const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
-      if (e.jumpCd <= 0 && _entBlocked(e.x + fx * 0.6, e.y, e.z + fz * 0.6)
-          && !_entBlocked(e.x + fx * 0.6, e.y + 1, e.z + fz * 0.6)) {
-        e.vy = ENT_JUMP; e.jumpCd = 0.5;
+      const ax = e.x + fx * 0.6, az = e.z + fz * 0.6;
+      if (e.jumpCd <= 0 && _entBlocked(ax, e.y, az)) {
+        const ty = _stepUpTarget(e, ax, az);
+        if (ty !== null) { e.y = ty; e.x = ax; e.z = az; e.vy = 1.5; e.jumpCd = 0.3; }
       }
     }
 

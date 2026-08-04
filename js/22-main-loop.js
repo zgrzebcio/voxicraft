@@ -970,6 +970,8 @@ function frame(now) {
   processGrassSpread(dt);
   updateFurnaces(dt);
   updateDoors(dt);
+  updateBed(dt);
+  updateChests(dt);
 
   /* ---- sky, lighting & shadow maps, then the main render ---- */
   updateDayNight(dt);

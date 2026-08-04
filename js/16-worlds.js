@@ -89,7 +89,7 @@ function saveWorld(syncToLS = false) {
     [k, f.slots, +f.burn.toFixed(2), +f.burnMax.toFixed(2), +f.progress.toFixed(3)]);
   const data = {
     savedAt: Date.now(),
-    edits, drops, furnaces, entities: serializeEntities(),
+    edits, drops, furnaces, entities: serializeEntities(), chests: serializeChests(),
     time: worldTime, worldDay, curMode: currentInvMode,
     survHot: survStash.hot, survInv: survStash.inv, survInv2: survStash.inv2,
     player: { pos: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw, pitch: player.pitch,
@@ -151,6 +151,9 @@ async function loadWorld(w) {
     }
   glowLights.clear();                        // re-derive glowstone lights from the saved edits
   clearDoors();                              // + rebuild door meshes from saved bottom halves
+  clearBeds();                               // and bed meshes from saved FOOT cells
+  clearChests();
+  if (data && Array.isArray(data.chests)) restoreChests(data.chests);   // contents before meshes
   for (const [k, m] of editStore) {
     const cxz = k.split(','), gx = cxz[0] * 16, gz = cxz[1] * 16;
     for (const [i, v] of m) {
@@ -158,6 +161,10 @@ async function loadWorld(w) {
         glowLights.add((gx + (i & 15)) + ',' + (i >> 8) + ',' + (gz + ((i >> 4) & 15)));
       if ((v & 255) === B.DOOR && !((v >> 8) & 8))
         registerDoor(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3, ((v >> 8) & 4) !== 0);
+      if ((v & 255) === B.BED && !((v >> 8) & 8))     // only the foot half owns a mesh
+        registerBed(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3);
+      if ((v & 255) === B.CHEST)
+        registerChest(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3);
     }
   }
   // only restore survival inventory when the world has a real player save (proves they played it).
@@ -290,6 +297,8 @@ function setHudVisible(v) {
 function startMenuBackdrop() {
   menuScene = true;
   clearDoors();
+  clearBeds();
+  clearChests();
   resetWorld('voxicraft');
   viewDist = 4; applyViewDist(false);       // backdrop only — never persist the 4-chunk distance
   worldTime = 0.15;                         // late morning: bright, long shadows

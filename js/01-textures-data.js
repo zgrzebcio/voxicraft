@@ -38,6 +38,17 @@ const TEXTURES = {
   cactus_top:           'textures/Blocks/Plants/cactus_top.png',
   cactus_bottom:        'textures/Blocks/Plants/cactus_bottom.png',
   oak_door:             'textures/Blocks/Interactables/Oak_door.png',   // not in the atlas — used by the door mesh + icon
+  // bed: also outside the atlas, sampled directly by the bed mesh in 29-bed.js
+  bed_top:              'textures/Blocks/Interactables/white_bed_top.png',    // 128x64, spans both halves
+  bed_long:             'textures/Blocks/Interactables/white_bed_front.png',  // 128x64, the long side
+  bed_end:              'textures/Blocks/Interactables/white_bed_side.png',   // 64x64, head/foot cap
+  bed_leg:              'textures/Blocks/Interactables/bed_leg.png',
+  bed_down:             'textures/Blocks/Interactables/bed_down.png',         // underside of the legs
+  // chest: also outside the atlas, sampled directly by the chest mesh in 30-chest.js
+  chest_top:            'textures/Blocks/Interactables/chest_top.png',
+  chest_bottom:         'textures/Blocks/Interactables/chest_bottom.png',
+  chest_side:           'textures/Blocks/Interactables/chest_side.png',
+  chest_front:          'textures/Blocks/Interactables/chest_front.png',
   melon_top:            'textures/Blocks/Plants/melon_top.png',
   melon_side:           'textures/Blocks/Plants/melon_side.png',
   bricks:               'textures/Blocks/Decorations/bricks.png',

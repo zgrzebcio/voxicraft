@@ -158,6 +158,11 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'BracketRight') { viewDist = clampi(viewDist + 1, 4, 32); distInput.value = viewDist; applyViewDist(); rebuildQueues(); }
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+// ctrl+wheel is the browser page-zoom gesture; swallow it so scrolling near the game never
+// rescales the whole page. Needs passive:false or preventDefault is ignored.
+document.addEventListener('wheel', (e) => {
+  if (e.ctrlKey) e.preventDefault();
+}, { passive: false });
 document.addEventListener('wheel', (e) => {
   if (!playing || invOpen) return;
   hotbarSel = (hotbarSel + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length;
@@ -209,6 +214,14 @@ document.addEventListener('mousedown', (e) => {
   }
 });
 document.addEventListener('mouseup', (e) => { if (e.button === 0) shiftSweep = false; });
+// middle-click sorts whichever grid the cursor is over (hotbar / inventory / chest)
+document.addEventListener('mousedown', (e) => {
+  if (!invOpen || e.button !== 1 || dragHeld) return;
+  e.preventDefault();                                // also kills the browser autoscroll cursor
+  const s = slotAtPoint(e.clientX, e.clientY);
+  if (s) sortRegion(s.region);
+});
+document.addEventListener('auxclick', (e) => { if (invOpen && e.button === 1) e.preventDefault(); });
 document.addEventListener('mousemove', (e) => {   // shift+LMB sweep: quick-move everything hovered
   if (!invOpen || !shiftSweep || !e.shiftKey) return;
   const s = slotAtPoint(e.clientX, e.clientY);
