@@ -14,6 +14,8 @@ function resetWorld(seed, terrainType) {
   glowLights.clear();
   _plyGlow = null;
   clearDrops();
+  clearFallingLeaves();
+  clearFelling();
   clearEntities();
   clearBeds();
   clearChests();

@@ -32,7 +32,8 @@ function VOXEL_CORE() {
               HAY_TOP:47, HAY_SIDE:48, MARBLE:49, GRANITE:50, LIMESTONE:51,
               GRASS_PLANT:52, POPPY:53, ORCHID:54, TALL_BOT:55, TALL_TOP:56, LAVA:57, TIN_ORE:58, GOLD_ORE:59, COPPER_ORE:60,
               OBSIDIAN:61, TNT_TOP:62, TNT_SIDE:63, TNT_BOTTOM:64, SULFUR_BLOCK:65, SULFUR_DOWN_TIP:66,
-              SULFUR_UP_TIP:67, TNT_LIT:68, OAK_SAPLING:69, BIRCH_SAPLING:70, SUGAR_CANE:71 };
+              SULFUR_UP_TIP:67, TNT_LIT:68, OAK_SAPLING:69, BIRCH_SAPLING:70, SUGAR_CANE:71,
+              STRIPPED_LOG:72, STRIPPED_LOG_TOP:73, STRIPPED_BIRCH_LOG:74, STRIPPED_BIRCH_LOG_TOP:75 };
   const B = { AIR:0, GRASS:1, DIRT:2, STONE:3, LOG:4, PLANKS:5, LEAVES:6, SAND:7,
               GLASS:8, BEDROCK:9, WATER:10, GLOWSTONE:11, OAKSLAB:12, CLAY:13, SNOW:14, COBBLE:15,
               COAL_ORE:16, IRON_ORE:17, DIAMOND_ORE:18, GRAVEL:19, RED_MUSHROOM:20, BROWN_MUSHROOM:21,
@@ -42,7 +43,9 @@ function VOXEL_CORE() {
               BIRCH_LOG:42, BIRCH_PLANKS:43, BIRCH_LEAVES:44, HAY:45, MARBLE:46, GRANITE:47, LIMESTONE:48,
               TALLGRASS:49, POPPY:50, ORCHID:51, TALL_LOWER:52, TALL_UPPER:53, TIN_ORE:54, GOLD_ORE:55, COPPER_ORE:56, LAVA:57, SNOW_CARPET:58, 
               OBSIDIAN:59, SULFUR_BLOCK:60, SULFUR_DOWN_TIP:61, SULFUR_UP_TIP:62, OAK_SAPLING:63, BIRCH_SAPLING:64, SUGAR_CANE:65, TNT:66,
-              BED:67, CHEST:68, };
+              BED:67, CHEST:68,
+              // felling: a log is stripped before it can be cut through; leaves land as carpet
+              STRIPPED_LOG:69, STRIPPED_BIRCH_LOG:70, LEAF_CARPET:71, BIRCH_LEAF_CARPET:72, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -64,6 +67,21 @@ function VOXEL_CORE() {
   const LOG_COLL = [ [[0.0625,0,0.0625, 0.9375,1,0.9375]],   // var 0: Y-axis
                      [[0,0.0625,0.0625, 1,0.9375,0.9375]],   // var 1: X-axis
                      [[0.0625,0.0625,0, 0.9375,0.9375,1]] ];  // var 2: Z-axis
+
+  /* Stripped-log variant byte:  bits 0-1 axis | bits 2-3 CUT SIZE (0..3) | bits 4-6 cut stage.
+     The axe bites a notch out of the log, so a partly-cut trunk is visibly thinner on its two
+     non-axis sides. Size is stored separately from the stage because the mesher only knows the
+     variant — it cannot see how many stages this particular tree needs. */
+  const LOG_CUT_INSET = [0.0625, 0.1875, 0.3125, 0.4375];    // 1/16, 3/16, 5/16, 7/16
+  function logCutBox(axis, size) {
+    const t = LOG_CUT_INSET[size & 3];
+    return axis === 1 ? [0, t, t, 1, 1 - t, 1 - t]           // X-axis: inset Y,Z
+         : axis === 2 ? [t, t, 0, 1 - t, 1 - t, 1]           // Z-axis: inset X,Y
+         :              [t, 0, t, 1 - t, 1, 1 - t];          // Y-axis: inset X,Z
+  }
+  // indexed by the whole variant byte, so the stage bits don't fall through to prop.boxes
+  const LOG_CUT_COLL = [];
+  for (let v = 0; v < 256; v++) LOG_CUT_COLL[v] = [logCutBox(v & 3, (v >> 2) & 3)];
   PROPS[B.LOG]     = { name:'Oak log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.LOG,T.LOG,T.LOG_TOP,T.LOG_TOP,T.LOG,T.LOG], desc: '' };
   PROPS[B.PLANKS]  = { name:'Oak planks', solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:4.0, type:'wood', faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
   PROPS[B.LEAVES]  = { name:'Oak leaves',     solid:false, opaque:false, raycast:true,  pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES], desc: '' };
@@ -109,6 +127,16 @@ function VOXEL_CORE() {
   const CARPET_VAR = [];
   for (let v = 0; v < 6; v++) CARPET_VAR[v] = [[0, 0, 0, 1, (v + 1) / 6, 1]];
   PROPS[B.SNOW_CARPET] = { name:'Snow carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.3, type:'snow', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
+  /* Stripped logs: what a log becomes after the first axe hit. Same 'log' model so the 0.6692
+     gap-fill still welds them to their neighbours, and softer than a live log because the bark
+     is already off. */
+  PROPS[B.STRIPPED_LOG]       = { name:'Stripped oak log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:3.0, type:'wood', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.STRIPPED_LOG,T.STRIPPED_LOG,T.STRIPPED_LOG_TOP,T.STRIPPED_LOG_TOP,T.STRIPPED_LOG,T.STRIPPED_LOG], desc: '' };
+  PROPS[B.STRIPPED_BIRCH_LOG] = { name:'Stripped birch log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:3.0, type:'wood', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.STRIPPED_BIRCH_LOG,T.STRIPPED_BIRCH_LOG,T.STRIPPED_BIRCH_LOG_TOP,T.STRIPPED_BIRCH_LOG_TOP,T.STRIPPED_BIRCH_LOG,T.STRIPPED_BIRCH_LOG], desc: '' };
+  /* Leaf litter — a fallen leaf block lying flat. Not solid: you walk straight through a drift
+     of leaves. Each fallen leaf is its OWN block, so a pile is several carpets stacked in
+     separate cells rather than one cell counting layers. */
+  PROPS[B.LEAF_CARPET]        = { name:'Leaf litter', solid:false, opaque:false, raycast:true, pass:1, model:'carpet', topOnly:true, stack:60, hardness:0.1, type:'grass', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES], desc: '' };
+  PROPS[B.BIRCH_LEAF_CARPET]  = { name:'Birch leaf litter', solid:false, opaque:false, raycast:true, pass:1, model:'carpet', topOnly:true, stack:60, hardness:0.1, type:'grass', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES], desc: '' };
   PROPS[B.COBBLE]      = { name:'Cobblestone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
   PROPS[B.COAL_ORE]    = { name:'Coal ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:9.0, type:'stone', faces:[T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE,T.COAL_ORE], desc: '' };
   PROPS[B.IRON_ORE]    = { name:'Iron ore',    solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:12.0, type:'stone', faces:[T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE,T.IRON_ORE], desc: '' };
@@ -1214,7 +1242,9 @@ function VOXEL_CORE() {
 
           if (isBig) {
             // procedural big tree: tall trunk, 3-5 branches with leaf clusters, wide top canopy
-            const trunkH = 9 + ((r * 1e6) | 0) % 4;            // 9..12
+            // same independent-hash rule as the small tree — `r` is too small to derive from
+            const bRand = (a, b) => hash2(gcx * 29 + a, gcz * 61 + b);
+            const trunkH = 9 + ((bRand(3, 5) * 4) | 0);        // 9..12
             put(tx, h, tz, B.DIRT, true);
             for (let y = h + 1; y <= h + trunkH; y++) put(tx, y, tz, B.LOG, true);
             // top canopy: 7x7 base spanning 3 layers, then 5x5, 3x3, tip
@@ -1239,12 +1269,12 @@ function VOXEL_CORE() {
                 if (Math.abs(ox) + Math.abs(oz) < 2) put(tx + ox, cap + 1, tz + oz, B.LEAVES, false);
             put(tx, cap + 2, tz, B.LEAVES, false);
             // 5..8 branches, angled outward from mid-upper trunk with fatter leaf blobs
-            const nBranches = 5 + ((r * 991) | 0) % 4;
+            const nBranches = 5 + ((bRand(7, 11) * 4) | 0);
             for (let b = 0; b < nBranches; b++) {
               const bh = h + Math.floor(trunkH * 0.45) + Math.floor(b * 0.8);
               const angle = hash2(wx + b * 53, wz + b * 89) * Math.PI * 2;
               const dx = Math.cos(angle), dz = Math.sin(angle);
-              const len = 4 + ((r * (23 + b * 7)) | 0) % 2;  // 4..5
+              const len = 3 + ((bRand(31 + b * 5, 37 + b * 3) * 4) | 0);   // 3..6
               // branch logs lie along their dominant horizontal axis (variant 1 = X, 2 = Z)
               const branchVar = Math.abs(dx) >= Math.abs(dz) ? 1 : 2;
               let bx = 0, bz2 = 0, by = bh;
@@ -1276,24 +1306,85 @@ function VOXEL_CORE() {
             continue;
           }
 
-          // small tree (also used for all birches). birch trunks are taller (5..10).
+          /* Small tree (also used for all birches). birch trunks are taller (5..10).
+             Three canopy silhouettes chosen per tree so a forest is not one shape repeated:
+               0 ROUND  - the classic 5x5 blob, widest in the middle
+               1 TALL   - narrower and one layer higher, reads as a young/crowded tree
+               2 SPREAD - 7-wide bottom layer thinning fast, the "old oak" umbrella
+             Every form also grows 1-3 stub branches: a single horizontal log poking out of the
+             upper trunk with a small tuft on it. That is what makes the trunk read as a tree
+             rather than a pole, and it costs one extra log per branch. */
           const LOG = isBirch ? B.BIRCH_LOG : B.LOG, LEAF = isBirch ? B.BIRCH_LEAVES : B.LEAVES;
           const th = isBirch ? 5 + ((r * 1e6) | 0) % 6           // birch 5..10
                              : 4 + ((r * 1e6) | 0) % 3;          // oak   4..6
+          /* Per-tree dice. NOT derived from `r`: a tree only exists when r <= baseProb, and
+             baseProb is as low as 0.001, so every `(r * K) | 0` truncated to 0 and each tree came
+             out with identical form, branch count and branch length. These are independent
+             hashes of the grid cell, still a pure function of world position. */
+          const tRand = (a, b) => hash2(gcx * 37 + a, gcz * 53 + b);
+          const form = (tRand(11, 23) * 3) | 0;
           put(tx, h, tz, B.DIRT, true);
           for (let y = h + 1; y <= h + th; y++) put(tx, y, tz, LOG, true);
-          for (let ly = h + th - 1; ly <= h + th; ly++)        // 5x5 canopy, ragged corners
-            for (let oz = -2; oz <= 2; oz++)
-              for (let ox = -2; ox <= 2; ox++) {
+
+          /* Stub branches on the upper half of the trunk, each on its own side and each its own
+             LENGTH (1..3 cells, rising as it goes out). Uniform 1-cell stubs made every tree
+             look identical from a distance; varying the reach is what gives a stand its ragged,
+             overlapping canopy line. */
+          const nStub = 1 + ((tRand(41, 59) * 3) | 0);           // 1..3 branches
+          const STUB_DIR = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+          for (let s = 0; s < nStub; s++) {
+            const dir = STUB_DIR[(tRand(71 + s * 13, 83 + s * 7) * 4) | 0];
+            const sy = h + th - 1 - ((tRand(97 + s * 11, 101 + s * 5) * Math.max(1, th - 2)) | 0);
+            if (sy <= h + 1) continue;                           // never at ground level
+            const len = 1 + ((tRand(103 + s * 3, 107 + s * 9) * 3) | 0);   // 1..3 cells long
+            const axisVar = dir[0] ? 1 : 2;                      // lie flat along X or Z
+            let ex = tx, ez = tz, ey = sy;
+            for (let k = 1; k <= len; k++) {
+              ex = tx + dir[0] * k; ez = tz + dir[1] * k;
+              ey = sy + ((k >= 2) ? 1 : 0);                      // longer branches angle upward
+              put(ex, ey, ez, LOG | (axisVar << 8), true);
+            }
+            // leaf tuft on the branch tip, sized with the branch
+            const tuft = len >= 3 ? 2 : 1;
+            for (let ly = 0; ly <= tuft; ly++)
+              for (let oz = -tuft; oz <= tuft; oz++)
+                for (let ox = -tuft; ox <= tuft; ox++)
+                  if (Math.abs(ox) + Math.abs(oz) + ly <= tuft + 1)
+                    put(ex + ox, ey + ly, ez + oz, LEAF, false);
+          }
+
+          const wide = form === 2 ? 3 : 2;                       // SPREAD reaches one further
+          const lowTop = form === 1 ? h + th : h + th - 1;       // TALL starts its canopy higher
+          for (let ly = lowTop - 1; ly <= lowTop; ly++)
+            for (let oz = -wide; oz <= wide; oz++)
+              for (let ox = -wide; ox <= wide; ox++) {
                 if (ox === 0 && oz === 0) continue;
-                if (Math.abs(ox) === 2 && Math.abs(oz) === 2 && hash2(wx + ox * 31, wz + oz * 17 + ly) < 0.5) continue;
+                const rad2 = ox * ox + oz * oz;
+                if (rad2 > wide * wide + 1) continue;            // rounded, not square
+                if (form === 1 && rad2 > 4) continue;            // TALL stays narrow
+                if (rad2 >= wide * wide && hash2(wx + ox * 31, wz + oz * 17 + ly) < 0.5) continue;
                 put(tx + ox, ly, tz + oz, LEAF, false);
               }
-          const cap = h + th + 1;                              // 3x3 cap without corners
+          const cap = lowTop + 1;                                // 3x3 cap without corners
           for (let oz = -1; oz <= 1; oz++)
             for (let ox = -1; ox <= 1; ox++)
               if (Math.abs(ox) + Math.abs(oz) < 2) put(tx + ox, cap, tz + oz, LEAF, false);
-          put(tx, cap + 1, tz, LEAF, false);                   // tip
+          put(tx, cap + 1, tz, LEAF, false);                     // tip
+          if (form === 1) put(tx, cap + 2, tz, LEAF, false);      // TALL gets one more
+
+          /* Fallen leaf litter around the base. Placed only where the cell below is actually
+             grass inside this chunk — the canopy overhangs neighbouring columns whose height we
+             have not sampled, and littering those blind would leave carpets floating on slopes. */
+          const LITTER = isBirch ? B.BIRCH_LEAF_CARPET : B.LEAF_CARPET;
+          for (let oz = -2; oz <= 2; oz++)
+            for (let ox = -2; ox <= 2; ox++) {
+              if (!ox && !oz) continue;
+              if (hash2(wx + ox * 137 + 9, wz + oz * 211 - 5) > 0.3) continue;
+              const lx = tx + ox, lz = tz + oz;
+              if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
+              if ((data[idx(lx, h, lz)] & 255) !== B.GRASS) continue;
+              put(lx, h + 1, lz, LITTER, false);
+            }
         }
       }
 
@@ -1855,7 +1946,10 @@ function VOXEL_CORE() {
     };
     function emitLog(x, y, z, val) {
       const id = val & 255, va = (val >> 8) & 3;
-      const b = (LOG_BOX[va] || LOG_BOX[0]).slice();
+      // stripped logs carry a cut size in variant bits 2-3: the axe notch makes them visibly
+      // thinner as they are chopped through. Live logs always read size 0.
+      const cutSize = (id === B.STRIPPED_LOG || id === B.STRIPPED_BIRCH_LOG) ? (val >> 10) & 3 : 0;
+      const b = cutSize ? logCutBox(va, cutSize) : (LOG_BOX[va] || LOG_BOX[0]).slice();
       if (va !== 1) {                                     // X faces are inset unless this IS an X log
         if (isLogAt(x - 1, y, z)) b[0] = 0;
         if (isLogAt(x + 1, y, z)) b[3] = 1;
@@ -2096,9 +2190,10 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                IRON_HELMET: 331, IRON_CHESTPLATE: 332, IRON_LEGGINGS: 333, IRON_BOOTS: 334,
                GOLDEN_HELMET: 335, GOLDEN_CHESTPLATE: 336, GOLDEN_LEGGINGS: 337, GOLDEN_BOOTS: 338,
                DIAMOND_HELMET: 339, DIAMOND_CHESTPLATE: 340, DIAMOND_LEGGINGS: 341, DIAMOND_BOOTS: 342,
-               IRON_GLOVES: 343, BELT: 344 };
+               IRON_GLOVES: 343, BELT: 344, BARK: 345 };
 const ITEM_PROPS = {
   [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: '' },
+  [ITEM.BARK]:          { name: 'Bark',          stack: 99, icon: 'bark', desc: '' },
   [ITEM.FLINT]:         { name: 'Flint',         stack: 99, icon: 'flint', desc: '' },
   [ITEM.CLAY_BALL]:     { name: 'Clay ball',     stack: 99, icon: 'clay_ball', desc: '' },
   [ITEM.BOWL]:          { name: 'Bowl',          stack: 30, icon: 'bowl', desc: '' },
@@ -2243,7 +2338,8 @@ const TOOL_BLOCKS = {
                    B.FURNACE, B.COBBLESLAB, B.BRICKSSLAB, B.BRICKSSTAIRS, B.STONE_BRICKSLAB, B.STONESLAB, B.GRASS, B.GLASSSLAB,
                    B.MARBLE, B.GRANITE, B.LIMESTONE,
                    B.SULFUR_BLOCK, B.SULFUR_DOWN_TIP, B.SULFUR_UP_TIP, B.TIN_ORE, B.COPPER_ORE, B.GOLD_ORE]),
-  hatchet: new Set([B.LOG, B.PLANKS, B.BIRCH_LOG, B.BIRCH_PLANKS, B.MELON, B.PUMPKIN, B.CRAFTING_BENCH, B.DOOR, B.STAIRS, B.OAKSLAB, B.CACTUS, B.CACTUSSLAB]),
+  hatchet: new Set([B.LOG, B.PLANKS, B.BIRCH_LOG, B.BIRCH_PLANKS, B.STRIPPED_LOG, B.STRIPPED_BIRCH_LOG,
+                    B.MELON, B.PUMPKIN, B.CRAFTING_BENCH, B.DOOR, B.STAIRS, B.OAKSLAB, B.CACTUS, B.CACTUSSLAB]),
   hoe:    new Set([B.LEAVES, B.BIRCH_LEAVES, B.HAY]),
   // shears are the wool tool; they also snip plant matter cleanly
   shears: new Set([B.WOOL, B.LEAVES, B.BIRCH_LEAVES, B.TALLGRASS, B.TALL_LOWER, B.TALL_UPPER,
@@ -2267,6 +2363,9 @@ const BLOCK_DROP = {
 
 // Returns [{id, count}, ...] (empty array = no drops). isNatural=true uses lower leaf-decay probability.
 function blockDrop(blockId, isNatural = false) {
+  // litter is a leaf block lying flat — it yields exactly what leaves yield
+  if (blockId === B.LEAF_CARPET) blockId = B.LEAVES;
+  else if (blockId === B.BIRCH_LEAF_CARPET) blockId = B.BIRCH_LEAVES;
   if (blockId === B.LEAVES || blockId === B.BIRCH_LEAVES) {
     const drops = [];
     const stickChance = isNatural ? 0.009 : 0.004;

@@ -84,10 +84,15 @@ const TEXTURES = {
   sugar_cane:           'textures/Billboards/Plants/sugar_cane.png',
   oak_sapling:          'textures/Billboards/Plants/Saplings/oak_sapling.png',
   birch_sapling:        'textures/Billboards/Plants/Saplings/birch_sapling.png',
+  stripped_oak_log:         'textures/Blocks/Woods/stripped_oak_log.png',
+  stripped_oak_log_top:     'textures/Blocks/Woods/stripped_oak_log_top.png',
+  stripped_birch_log:       'textures/Blocks/Woods/stripped_birch_log.png',
+  stripped_birch_log_top:   'textures/Blocks/Woods/stripped_birch_log_top.png',
 };
 
 const ITEM_TEXTURES = {
   stick:       'textures/Items/Woods/stick.png',
+  bark:        'textures/Items/Woods/bark.png',
   coal:        'textures/Items/Ores/coal.png',
   coal_chunk:  'textures/Items/Ores/coal_chunk.png',
   raw_iron:    'textures/Items/Ores/raw_iron.png',

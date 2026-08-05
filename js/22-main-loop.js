@@ -6,11 +6,14 @@
    ================================================================================================ */
 /* ---- gravity blocks (sand, gravel) ---- */
 const fallingBlocks = new Map();   // "x,y,z" -> blockId
+// a cell a falling block drops into: empty, or a billboard it simply crushes on the way through
+const _fallOpen = (id) => id === B.AIR || PROPS[id]?.model === 'cross';
 function scheduleFall(x, y, z) {
   if (y < 1 || y > 199) return;
   const id = getBlock(x, y, z) & 255;
   if (id !== B.SAND && id !== B.RED_SAND && id !== B.GRAVEL) return;
-  if ((getBlock(x, y - 1, z) & 255) !== B.AIR) return;
+  // billboards don't hold up a falling block — they get crushed, so they count as empty here
+  if (!_fallOpen(getBlock(x, y - 1, z) & 255)) return;
   fallingBlocks.set(`${x},${y},${z}`, id);
 }
 let _fallTimer = 0;
@@ -25,7 +28,8 @@ function processFalling(dt) {
     fallingBlocks.delete(k);
     const [x, y, z] = k.split(',').map(Number);
     if ((getBlock(x, y, z) & 255) !== id) continue;
-    if ((getBlock(x, y - 1, z) & 255) !== B.AIR) continue;
+    if (!_fallOpen(getBlock(x, y - 1, z) & 255)) continue;
+    crushBillboard(x, y - 1, z);                 // torch/flower in the way is destroyed + dropped
     setBlock(x, y, z, B.AIR);
     setBlock(x, y - 1, z, id);
   }
@@ -36,7 +40,9 @@ const leavesDecayQueue = new Set();
 const DECAY_DIRS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
 
 const _isLeaf = (id) => id === B.LEAVES || id === B.BIRCH_LEAVES;
-const _isLog  = (id) => id === B.LOG || id === B.BIRCH_LOG;
+// stripped logs count as support: a half-chopped tree must not shed its canopy while you work
+const _isLog  = (id) => id === B.LOG || id === B.BIRCH_LOG ||
+                        id === B.STRIPPED_LOG || id === B.STRIPPED_BIRCH_LOG;
 function scheduleLeavesCheck(cx, cy, cz) {
   const R = 5;
   for (let dx = -R; dx <= R; dx++)
@@ -647,6 +653,8 @@ function frame(now) {
   lastT = now;
   sharedUniforms.uTime.value += dt;
   updateMusic();                            // menu track on/off follows menuScene
+  updateFelling(dt);                        // felled trunks come apart a few cells per tick
+  updateFallingLeaves(dt);                  // canopy coming down after a tree was felled
 
   // fps
   fpsFrames++;
@@ -892,11 +900,17 @@ function frame(now) {
         const mval = getBlock(mining.x, mining.y, mining.z), minedId = mval & 255;
         const mx = mining.x, my = mining.y, mz = mining.z, mbi = mining.bi || 0;
         resetMining();
-        playBlockSound(minedId, 'break', mx, my, mz);
+        // axe on a log: strip it, or fell the tree if it is already stripped. It performs its own
+        // block edit and drops, so the ordinary break path is skipped when it claims the hit.
+        // NOT an early return — the rest of frame() still has to stream chunks and render.
+        const chopped = tryChopLog(mx, my, mz);
+        if (!chopped) playBlockSound(minedId, 'break', mx, my, mz);
         // tier gate: wrong/too-weak tool still breaks the block but yields no drops
         const dropsOk = mineDropAllowed(slotId(HOTBAR[hotbarSel]), minedId);
-        const inf = slabBreakInfo(mval, mbi);     // double slab: break only the mined half
-        if (inf) {
+        const inf = chopped ? null : slabBreakInfo(mval, mbi);   // double slab: break only the mined half
+        if (chopped) {
+          /* felling already did everything */
+        } else if (inf) {
           setBlock(mx, my, mz, inf.remainVal);
           if (dropsOk) spawnDrop(inf.dropId, mx, my, mz);
         } else {

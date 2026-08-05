@@ -126,6 +126,7 @@ function doBreak() {
   const hit = currentRay();
   if (!hit) return;
   if (isTNTFuseActive(hit.x, hit.y, hit.z)) return;             // armed TNT is unbreakable
+  if (tryChopLog(hit.x, hit.y, hit.z)) return;   // axe on a log: strip / fell instead of breaking
   const inf = slabBreakInfo(getBlock(hit.x, hit.y, hit.z), hit.bi || 0);
   playBlockSound(hit.id, 'break', hit.x, hit.y, hit.z);
   setBlock(hit.x, hit.y, hit.z, inf ? inf.remainVal : B.AIR);   // double slab: only the aimed half
