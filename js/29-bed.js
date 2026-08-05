@@ -83,6 +83,23 @@ function bedUndersideMesh() {
   return { mesh: new THREE.Mesh(geo, down), mats: [down] };
 }
 
+/* Bed as a held/dropped item — same treatment as the chest: a flat bed_long sprite read as a
+   painting. One shared prototype cloned per use; built lazily because IMAGES is empty at parse
+   time. The model is 1 x BED_H x 2 anchored at the foot corner, so it is shifted to sit centred
+   on the origin the way drop/hand geometry expects. */
+let _bedItemProto = null;
+function bedItemNode() {
+  if (!_bedItemProto) {
+    const inner = new THREE.Group();
+    inner.add(bedMattressMesh().mesh, bedUndersideMesh().mesh);
+    inner.position.set(-0.5, -BED_H / 2, -1);
+    _bedItemProto = new THREE.Group();
+    _bedItemProto.add(inner);
+    _bedItemProto.scale.setScalar(0.62);     // 2 cells long — shrink so it reads in the hand
+  }
+  return _bedItemProto.clone();
+}
+
 /* ---------------------------------- lifecycle ---------------------------------- */
 const bedKey = (x, y, z) => x + ',' + y + ',' + z;
 
@@ -147,16 +164,19 @@ function bedBroken(x, y, z, oldVal) {
 // Called from doPlace. Needs two free cells on solid ground; lays the foot under the player
 // and the head one cell further along the facing.
 function tryPlaceBed(px, py, pz) {
-  // facing = the horizontal direction the player is looking, so the head goes away from them
-  const ddx = px + 0.5 - player.pos.x, ddz = pz + 0.5 - player.pos.z;
+  // Facing points foot -> head, and the bed reads correctly when the head lands on the player's
+  // side — same block-toward-player convention the door and chest use. Measuring player -> block
+  // instead put the whole bed the other way round.
+  const ddx = player.pos.x - (px + 0.5), ddz = player.pos.z - (pz + 0.5);
   const facing = Math.abs(ddx) > Math.abs(ddz) ? (ddx > 0 ? 2 : 3) : (ddz > 0 ? 0 : 1);
   const d = BED_DIR[facing];
   const hx = px + d[0], hz = pz + d[1];
-  const free = (x, z) => {
-    const id = getBlock(x, py, z) & 255;
-    return (id === B.AIR || id === B.WATER) && isSolid(x, py - 1, z);
-  };
+  // grass counts as free for BOTH cells — checked before anything is written, so a bed never
+  // mows one cell of grass and then bails because the other end was blocked
+  const free = (x, z) => isPlaceableInto(getBlock(x, py, z) & 255) && isSolid(x, py - 1, z);
   if (!free(px, pz) || !free(hx, hz)) { toast('no room for the bed'); return false; }
+  clearPlantAt(px, py, pz);
+  clearPlantAt(hx, py, hz);
   setBlock(px, py, pz, B.BED | (facing << 8));
   setBlock(hx, py, hz, B.BED | ((facing | 8) << 8));
   registerBed(px, py, pz, facing);
@@ -205,7 +225,7 @@ function updateBed(dt) {
     // tint by world light at the bed cell (same approximation the doors use)
     const bl = getLightWorld(b.x, b.y, b.z) / 15;
     const sky = getSkyWorld(b.x, b.y, b.z) / 15;
-    const skyF = 0.12 + 0.88 * sky * sky;
+    const skyF = 0.24 + 0.76 * sky * sky;   // must track the chunk shader in 04-materials.js
     const sun = sharedUniforms.uAmbient.value + sharedUniforms.uDirect.value;
     const br = Math.min(1, skyF * sun * 0.92 + (bl * 0.45 + bl * bl * 0.85));
     if (Math.abs(br - b.lastB) > 0.02) {

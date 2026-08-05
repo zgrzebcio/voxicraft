@@ -286,6 +286,10 @@ function updateEquipPreview(dt) {
 function buildEquipPanel() {
   const panel = document.getElementById('equipPanel');
   if (!panel) return;
+  // Creative has no gear: loadEquipForMode already hands it an empty throwaway array, so leaving
+  // the panel hidden is enough to disable armor entirely — slotDescriptors only registers equip
+  // and belt slots while the panel is visible, so there is nothing to drag into.
+  if (player.canFly) { panel.style.display = 'none'; return; }
   panel.style.display = 'flex';
   const cell = (s, i) => {
     const item = equipSlots[i];

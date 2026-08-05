@@ -72,7 +72,8 @@ function buildInventory() {
   if (!player.canFly) buildCraftPanel();
   if (activeFurnace) buildFurnacePanel();
   if (activeChest) buildChestPanel();
-  buildEquipPanel();                          // equipment sits on the right, always available
+  // equipment shares the right-hand column with the furnace and chest GUIs, so it yields to them
+  if (!activeFurnace && !activeChest) buildEquipPanel();
 }
 function refreshSlotsUI() { buildHotbar(); buildInventory(); saveAll(); }
 

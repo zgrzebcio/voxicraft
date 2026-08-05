@@ -33,7 +33,7 @@ function _lightAt(x, y, z) {
   const blk = getLightWorld(bx, by, bz) / 15;
   const amb = sharedUniforms.uAmbient.value, dir = sharedUniforms.uDirect.value;
   const daylight = (amb + dir * sky) * sky;
-  return Math.min(1, Math.max(0.12, Math.max(daylight, blk * 0.95)));
+  return Math.min(1, Math.max(0.24, Math.max(daylight, blk * 0.95)));   // floor tracks skyF
 }
 
 /* Write the six MC skin regions into a BoxGeometry's uv attribute.
@@ -465,9 +465,42 @@ function _entHazard(x, y, z) {
     const id = getBlock(Math.floor(x), Math.floor(y + dy), Math.floor(z)) & 255;
     if (id === B.LAVA || id === B.CACTUS) return true;
   }
+  const fx = Math.floor(x), fz = Math.floor(z), fy = Math.floor(y);
   // a step that would drop the feet into water counts as a hazard too
-  if ((getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) & 255) === B.WATER) return true;
-  return false;
+  if ((getBlock(fx, fy, fz) & 255) === B.WATER) return true;
+  // ...and so does a ledge: probe downward for a floor and refuse the step if the drop would
+  // hurt. Water counts as a floor here — falling into a pond is survivable, a ravine is not.
+  let d = 0;
+  while (d <= ENT_FALL_SAFE && fy - 1 - d >= 0) {
+    const bid = getBlock(fx, fy - 1 - d, fz) & 255;
+    if (bid === B.WATER || PROPS[bid]?.solid) break;
+    d++;
+  }
+  return d > ENT_FALL_SAFE;
+}
+
+/* Fall damage, mirroring the player's rule. Tracks the highest point reached while airborne
+   rather than integrating vy, so a mob knocked upward off a cliff is measured from the apex.
+   Returns true if the entity died and was removed — the caller must return immediately, since
+   ENTITIES has been spliced under it. */
+const ENT_FALL_SAFE = 3;              // blocks of free fall a mob shrugs off
+function _entFallDamage(e, i, wasGround, inWater) {
+  if (inWater) { e.peakY = null; return false; }
+  if (!e.onGround) {
+    e.peakY = (e.peakY == null) ? e.y : Math.max(e.peakY, e.y);
+    return false;
+  }
+  const peak = e.peakY;
+  e.peakY = null;
+  if (wasGround || peak == null) return false;
+  const drop = peak - e.y;
+  if (drop <= ENT_FALL_SAFE) return false;
+  e.hurtT = 0.25;
+  e.hp -= Math.round(drop - ENT_FALL_SAFE);
+  if (e.hp > 0) return false;
+  if (!player.canFly) _entDropLoot(e);
+  _removeEntity(i);
+  return true;
 }
 
 function _entDropLoot(ent) {
@@ -912,6 +945,7 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
   } else e.airT = ENT_AIR_MAX;
 
   /* ---- gravity ---- */
+  const wasGround = e.onGround;
   const standing = !inWater && e.vy <= 0 && _entBlocked(e.x, e.y - 0.02, e.z);
   if (standing) {
     e.y = Math.floor(e.y - 0.02) + 1; e.vy = 0; e.onGround = true;
@@ -924,6 +958,7 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
       e.vy = 0;
     } else { e.y = ny; e.onGround = false; }
   }
+  if (_entFallDamage(e, i, wasGround, inWater)) return;
   // Buoyancy, but never CLAMP an active climb/jump: the old unconditional Math.min pulled a
   // fresh 7.6 hop straight back down to 4.2, which is the other half of the shoreline trap.
   if (inWater) {
@@ -1127,6 +1162,7 @@ function updateEntities(dt) {
     /* ---- gravity + ground ---- */
     // Resting on a floor is a hard stop: don't integrate gravity at all, or the mob spends every
     // frame falling a hair and being snapped back up (the shake).
+    const wasGround = e.onGround;
     const standing = !inWater && e.vy <= 0 && _entBlocked(e.x, e.y - 0.02, e.z);
     if (standing) {
       e.y = Math.floor(e.y - 0.02) + 1;                  // seat exactly on the block top
@@ -1147,6 +1183,7 @@ function updateEntities(dt) {
         e.onGround = false;
       }
     }
+    if (_entFallDamage(e, i, wasGround, inWater)) continue;   // in updateEntities' own loop
     // Swimming: buoyancy holds the mob at the surface, but it must never CLAMP an active climb
     // — the old unconditional Math.min pulled a fresh hop straight back down to 4.2.
     if (inWater) {

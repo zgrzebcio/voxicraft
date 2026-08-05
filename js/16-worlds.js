@@ -162,7 +162,8 @@ async function loadWorld(w) {
       if (blockLightOf(v) > 0)
         glowLights.add((gx + (i & 15)) + ',' + (i >> 8) + ',' + (gz + ((i >> 4) & 15)));
       if ((v & 255) === B.DOOR && !((v >> 8) & 8))
-        registerDoor(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3, ((v >> 8) & 4) !== 0);
+        registerDoor(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3,
+                     ((v >> 8) & 4) !== 0, ((v >> 8) & DOOR_HINGE_R) !== 0);
       if ((v & 255) === B.BED && !((v >> 8) & 8))     // only the foot half owns a mesh
         registerBed(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3);
       if ((v & 255) === B.CHEST)

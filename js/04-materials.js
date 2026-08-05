@@ -102,7 +102,9 @@ const FSH = /* glsl */`
     float skyN = floor(vBlock / 16.0 + 0.001);
     float bl = (vBlock - skyN * 16.0) / 15.0;
     float sky = skyN / 15.0;
-    float skyF = 0.12 + 0.88 * sky * sky;    // quadratic falloff -> deep caves at 12% daylight
+    // quadratic falloff, but off a higher floor: unlit faces now bottom out at 24% of daylight
+    // instead of 12%, so shadowed sides and cave mouths stay readable rather than near-black
+    float skyF = 0.24 + 0.76 * sky * sky;
     // part-linear curve: light-source edges (low levels) stay visibly bright instead of
     // quadratic-fading to black; peak slightly above the old 1.15
     vec3 block = uGlowColor * (bl * 0.45 + bl * bl * 0.85);
@@ -128,9 +130,23 @@ const VSH_WATER = /* glsl */`
     vUv = uv; vTile = tile; vShade = shade;
     vBlock = blockLight;
     vec4 wp = modelMatrix * vec4(position, 1.0);
+    // Waving surface vertices are marked with shade 253/255 by emitWater; every vertex of one
+    // waving cell carries the SAME light byte, so top quad and side-quad top edge stay welded.
     if (shade > 0.985) {
-      wp.y += sin(wp.x * 1.1 + uTime * 2.2) * 0.038
-            + cos(wp.z * 0.9 + uTime * 1.8) * 0.028;
+      /* EVERY term here must be a pure function of world position and time — never of per-cell
+         data such as blockLight. Adjacent water cells share their edge vertices but are drawn as
+         separate quads, so a per-cell amplitude makes the two sides of a shared edge displace by
+         different amounts and rips the surface open into thin transparent slits. (Depth-scaled
+         amplitude did exactly that; depth still drives the surface COLOUR, which is per-cell and
+         harmless.) A low-frequency swell field varies wave height across the ocean instead: it is
+         smooth in world space, so both sides of any shared edge always agree. */
+      float swell = 0.65 + 0.35 * sin(wp.x * 0.035 + 1.7) * cos(wp.z * 0.028 - 0.9);
+      float amp = 0.085 * swell;
+      // three octaves at low spatial frequency: long rolling swells rather than fast ripples,
+      // with a diagonal cross-wave so the pattern never looks like a plain grid
+      wp.y += sin(wp.x * 0.55 + uTime * 1.5) * amp
+            + cos(wp.z * 0.42 + uTime * 1.15) * amp * 0.75
+            + sin((wp.x + wp.z) * 0.9 + uTime * 2.4) * amp * 0.35;
     }
     vSC = (uShadowMat * wp).xyz;
     vec4 mv = viewMatrix * wp;

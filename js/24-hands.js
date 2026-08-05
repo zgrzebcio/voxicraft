@@ -105,8 +105,8 @@ function _rebuildHeld(id) {
     heldGroup.add(g);
     target = g;
   }
-  for (const { p, geo, mat: mo } of passes)
-    target.add(new THREE.Mesh(geo, mo || MATERIALS[p]));
+  for (const { p, geo, mat: mo, node } of passes)
+    target.add(node || new THREE.Mesh(geo, mo || MATERIALS[p]));
 }
 
 function updateHands(dt, wantBreak, wantPlace, eatProg) {

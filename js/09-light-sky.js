@@ -8,6 +8,11 @@
    HIGH nibble of the light byte at mesh time (glow keeps the low nibble).
    ================================================================================================ */
 const SKY_LEVEL = 15;
+/* Levels absorbed per water block. At the old 6 a column went black after two blocks, which
+   crushed shallow shore water; the surface's own sense of depth now comes from the mesher
+   darkening the top face by how much water is under it, so this only has to handle what's
+   BELOW the surface and can be much gentler. */
+const WATER_ABSORB = 3;
 function chunkSkyArr(c) { return c.sky || (c.sky = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z)); }
 function getSkyWorld(x, y, z) {
   if (y > 199) return SKY_LEVEL;
@@ -30,8 +35,8 @@ function propagateSky(q, touched) {
       const i = (nx & 15) + ((nz & 15) << 4) + (ny << 8);
       const nid = c.data[i] & 255;
       if (PROPS[nid].opaque) continue;
-      // water absorbs hard during sideways spread too, matching the vertical -6
-      const nl = lv - (nid === B.WATER ? 6 : 1);
+      // water absorbs during sideways spread too, matching the vertical step
+      const nl = lv - (nid === B.WATER ? WATER_ABSORB : 1);
       if (nl <= 0) continue;
       const sky = chunkSkyArr(c);
       if (sky[i] >= nl) continue;
@@ -58,13 +63,13 @@ function seedSkyForChunk(c) {
       const top = skyColumnTop(data, lx, lz);
       tops[lx + lz * 16] = top;
       const li = lx + (lz << 4);
-      // descend from open sky; each water block absorbs 2 light levels, so deep water
+      // descend from open sky; each water block absorbs WATER_ABSORB levels, so deep water
       // columns go dark and the seabed under them is barely lit (surface stays bright)
       let lv = SKY_LEVEL;
       for (let y = 199; y >= top + 1; y--) {
         const i = li + (y << 8);
         sky[i] = lv;
-        if ((data[i] & 255) === B.WATER) lv = Math.max(0, lv - 6);
+        if ((data[i] & 255) === B.WATER) lv = Math.max(0, lv - WATER_ABSORB);
       }
     }
   const q = [];
@@ -123,12 +128,12 @@ function reskyAround(x, y, z) {
       tops[(xx - x0) + (zz - z0) * W] = top;
       const sky = chunkSkyArr(c);
       let changed = false;
-      // same water attenuation as seedSkyForChunk: -2 per water block on the way down
+      // same water attenuation as seedSkyForChunk
       let lv = SKY_LEVEL;
       for (let yy = 199; yy >= 0; yy--) {
         const i = li + (yy << 8);
         let v = 0;
-        if (yy > top) { v = lv; if ((c.data[i] & 255) === B.WATER) lv = Math.max(0, lv - 6); }
+        if (yy > top) { v = lv; if ((c.data[i] & 255) === B.WATER) lv = Math.max(0, lv - WATER_ABSORB); }
         if (sky[i] !== v) { sky[i] = v; changed = true; }
       }
       if (changed) touched.add(key(c.cx, c.cz));

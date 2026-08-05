@@ -159,7 +159,9 @@ function VOXEL_CORE() {
   PROPS[B.RED_SAND] = { name:'Red Sand', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.1, type:'ground', faces:[T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND,T.RED_SAND], desc: '' };
   // oak door: 2-cell (bottom + upper half), 1/8 thick. Rendered as an animated standalone mesh
   // (27-doors.js) — the chunk mesher emits nothing for it. Collision boxes swap with the open
-  // bit so an open door is passable. variant: bits 0-1 facing, bit 2 open, bit 3 upper half.
+  // bit so an open door is passable. variant: bits 0-1 facing, bit 2 open, bit 3 upper half,
+  // bit 4 (16) = hinged on the RIGHT instead of the left (mirrored swing; two doors side by side
+  // with opposite hinges form a double door that opens outward from the middle).
   {
     const t = 0.125;
     const closed = [[[0,0,0,1,1,t]], [[0,0,1-t,1,1,1]], [[0,0,0,t,1,1]], [[1-t,0,0,1,1,1]]];
@@ -168,9 +170,14 @@ function VOXEL_CORE() {
     // panel can't be flush both closed and open by rotation alone). Doorway stays clear — you walk
     // through the gap but not through the panel.
     const opened = [ [[0,0,0,t,1,1]], [[0,0,0,t,1,1]], [[0,0,0,1,1,t]], [[0,0,0,1,1,t]] ];
+    // right-hinged doors swing to the opposite wall: mirror each open panel across the cell
+    // centre (X for the +Z/-Z facings, Z for +X/-X). Closed panels span the whole cell either
+    // way, so only the open set differs.
+    const openedR = [ [[1-t,0,0,1,1,1]], [[1-t,0,0,1,1,1]], [[0,0,1-t,1,1,1]], [[0,0,1-t,1,1,1]] ];
     const bv = [], rv = [];
-    for (let v = 0; v < 16; v++) {
-      bv[v] = (v & 4) ? opened[v & 3] : closed[v & 3];   // open door now has a thin panel hitbox
+    for (let v = 0; v < 32; v++) {
+      const set = (v & 4) ? ((v & 16) ? openedR : opened) : closed;
+      bv[v] = set[v & 3];                                 // open door has a thin panel hitbox
       rv[v] = bv[v];                                      // raycast == collision (both match the visual)
     }
     PROPS[B.DOOR] = { name:'Oak door', solid:true, opaque:false, raycast:true, pass:1, model:'door', rot:'side', stack:20, hardness:3.5, type:'wood', boxes:closed[0], boxesByVar:bv, rayBoxesByVar:rv, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
@@ -455,18 +462,40 @@ function VOXEL_CORE() {
       if (landF > 0.01) {
         const rn = 1 - Math.abs(fbm(x * 0.0014 + 1223.7, z * 0.0014 - 817.3, 2));   // river ridge (lower freq -> longer rivers)
         const ln = fbm(x * 0.0042 - 313.7, z * 0.0042 + 991.1, 2);                  // lake blobs
-        const valley = Math.max(smooth01(ln, 0.18, 0.74), smooth01(rn, 0.34, 0.95)) * landF;
-        // wider river core band (0.88-0.965): rivers are several blocks across at minimum,
-        // never a 1-block water thread at the threshold edge
-        const core   = Math.max(smooth01(ln, 0.64, 0.84), smooth01(rn, 0.88, 0.965)) * landF;
+        // River WIDTH varies by region, and wide stretches also run deep — one noise field
+        // drives both so the two always agree: a broad river is never a shallow puddle and a
+        // narrow one never a canyon. wN 0 = narrow+shallow, 1 = wide+deep.
+        const wN = (fbm(x * 0.0009 + 2411.7, z * 0.0009 - 1877.3, 2) + 1) * 0.5;
+        const valley = Math.max(smooth01(ln, 0.18, 0.74), smooth01(rn, 0.34 - wN * 0.06, 0.95)) * landF;
+        // core band 0.88-0.965 at wN=0: rivers are several blocks across at minimum, never a
+        // 1-block water thread. Widening the band's lower edge is what broadens the channel.
+        const coreLo = 0.88 - wN * 0.10;
+        const core   = Math.max(smooth01(ln, 0.64, 0.84), smooth01(rn, coreLo, 0.965)) * landF;
         if (valley > 0.001) {
-          const rim = WATER_LEVEL + 1, floor = WATER_LEVEL - 3;    // 64 rim, 60 floor (shallow)
+          // shallow default (3 below water); wide stretches scoop up to 9 below
+          const rim = WATER_LEVEL + 1, floor = WATER_LEVEL - 3 - wN * 6;
           let target = h + (rim - h) * valley;                     // ease land down to the rim
           target += (floor - rim) * core;                          // then scoop the basin
           if (target < h) h = target;                              // only ever lower terrain
         }
-        rT = smooth01(rn, 0.88, 0.965) * landF;
+        rT = smooth01(rn, coreLo, 0.965) * landF;   // tracks the carve, so 'River' labels the real channel
         lk = smooth01(ln, 0.64, 0.84) * landF;
+      }
+      /* Seabed relief. Everything above shapes LAND; underwater the shelf and basin terms are
+         both very low frequency, so the floor came out as a near-featureless plane. Two extra
+         octaves ride on top of it: broad lumps plus a ridged term for the occasional spike.
+         Amplitude fades to zero at the shoreline (so beaches and the sand/beach-width logic are
+         untouched) and the result is clamped below water level so a spike can never surface as
+         an unintended island. */
+      if (h < WATER_LEVEL) {
+        const amp = Math.min(1, (WATER_LEVEL - h) / 8);     // 0 at the shore, full by 8 deep
+        // lower frequency + bigger amplitude = broad rolling hills rather than choppy bumps
+        const lump  = fbm(x * 0.018 + 1777.3, z * 0.018 - 2213.9, 3);
+        const spike = 1 - Math.abs(fbm(x * 0.05 - 611.7, z * 0.05 + 733.1, 2));
+        h += lump * 5.0 * amp;
+        // spikes kept as rare accents: narrower threshold band and a much smaller height
+        h += Math.pow(smooth01(spike, 0.93, 0.995), 2) * 2.0 * amp;
+        h = Math.min(h, WATER_LEVEL - 1);
       }
       h = Math.min(196, Math.max(4, Math.floor(h)));
       return { h, fPlains, fDesert, fSnow, dh, fRed, rdh, rT, lk, deep };
@@ -1811,8 +1840,34 @@ function VOXEL_CORE() {
                       [0.0625,0.0625,0, 0.9375,0.9375,1] ];    // var 2: Z-axis (inset X,Y)
     // side faces always draw (inset — visible through the gap); the two end-caps along the trunk
     // axis cull only against a same-id log (continuous trunk) or an opaque neighbour.
+    /* A log is inset 1/16 on its two non-axis sides, so wherever two logs meet on a face that is
+       inset there is a visible gap — up to 1/8 when BOTH are inset.
+
+       Each log independently widens its own inset faces out to the cell edge whenever the
+       neighbour there is a log. Both sides expanding is what closes the double-inset case: an
+       X-axis branch beside a Y-axis trunk in Z, for instance, has neither log running along the
+       shared direction, so a rule that only expanded toward logs pointing INTO the block left
+       that join open. Faces meeting air or leaves are untouched, so the trunk keeps its slim
+       silhouette everywhere it actually shows. */
+    const isLogAt = (nx, ny, nz) => {
+      const p = P[gb(nx, ny, nz) & 255];
+      return !!p && p.model === 'log';
+    };
     function emitLog(x, y, z, val) {
-      const id = val & 255, va = (val >> 8) & 3, b = LOG_BOX[va] || LOG_BOX[0];
+      const id = val & 255, va = (val >> 8) & 3;
+      const b = (LOG_BOX[va] || LOG_BOX[0]).slice();
+      if (va !== 1) {                                     // X faces are inset unless this IS an X log
+        if (isLogAt(x - 1, y, z)) b[0] = 0;
+        if (isLogAt(x + 1, y, z)) b[3] = 1;
+      }
+      if (va !== 0) {                                     // Y faces
+        if (isLogAt(x, y - 1, z)) b[1] = 0;
+        if (isLogAt(x, y + 1, z)) b[4] = 1;
+      }
+      if (va !== 2) {                                     // Z faces
+        if (isLogAt(x, y, z - 1)) b[2] = 0;
+        if (isLogAt(x, y, z + 1)) b[5] = 1;
+      }
       const F = PROPS[id].faces, side = F[0], top = F[2];
       const rf = va === 1 ? [top, top, side, side, side, side]      // X-axis: caps on ±X
                : va === 2 ? [side, side, side, side, top, top]      // Z-axis: caps on ±Z
@@ -1846,53 +1901,82 @@ function VOXEL_CORE() {
       const frac  = (8 - level) / 9;          // source≈0.889, level7≈0.111
       const x0 = x, x1 = x + 1, y0 = y, z0 = z, z1 = z + 1;
       const tile = T.WATER;
-      // depth darkness comes from sky-light attenuation through water (09-light-sky.js),
-      // not from tinting the surface quad — dl is a passthrough kept for the call sites
-      const dl = (v) => v;
+      /* Water light needs two corrections that plain neighbour-sampling gets wrong.
+
+         SIDE faces read the light of the cell they face. Against a shore that cell is sand —
+         opaque, so its stored light is 0 — which made shallow water at the water's edge read
+         almost black, exactly where it should be at its brightest. Taking the brighter of the
+         neighbour and the water cell itself fixes it without affecting open water, where the
+         neighbour is another water cell and already the brighter of the two.
+
+         TOP faces read the AIR above the surface, which is open sky at 15 no matter how deep
+         the water is — so a 40-block ocean lit identically to a puddle. The surface is now
+         darkened by how much water sits UNDER it, which is what actually reads as depth. */
+      const maxLite = (a, b) =>
+        (Math.max(a >> 4, b >> 4) << 4) | Math.max(a & 15, b & 15);
+      const DEPTH_MAX = 7;                    // past this the surface stops getting darker
+      function topLite() {
+        let d = 0;
+        while (d < DEPTH_MAX && (gb(x, y - 1 - d, z) & 255) === B.WATER) d++;
+        const above = gl(x, y + 1, z);
+        // scale rather than subtract: at night the sky nibble is already low and a flat -7
+        // would clamp every deep surface to pitch black
+        const sky = Math.round((above >> 4) * (1 - 0.62 * (d / DEPTH_MAX)));
+        return (sky << 4) | (above & 15);
+      }
+      /* A surface source uses topLite() for its whole ring — top quad and all four side quads —
+         so the depth shading stays continuous around the waterline instead of the top face
+         reading dark over deep water while the side faces beside it read bright. Submerged and
+         flowing cells keep the neighbour-max value, which is what rescues shore water from the
+         opaque sand's zero light. */
+      const openTop = (gb(x, y + 1, z) & 255) !== B.WATER;
+      const surfLite = (level === 0 && openTop) ? topLite() : null;
+      const sideLite = (nx, ny, nz) =>
+        surfLite !== null ? surfLite : maxLite(gl(nx, ny, nz), gl(x, y, z));
       // top: shade 255=source (waves), 240=flowing (no waves)
-      if ((gb(x, y + 1, z) & 255) !== B.WATER)
-        quad(2, [x0,y+frac,z0],[x0,y+frac,z1],[x1,y+frac,z1],[x1,y+frac,z0], [0,0],[0,1],[1,1],[1,0], tile, level === 0 ? 255 : 240, dl(gl(x, y + 1, z)));
+      if (openTop)
+        quad(2, [x0,y+frac,z0],[x0,y+frac,z1],[x1,y+frac,z1],[x1,y+frac,z0], [0,0],[0,1],[1,1],[1,0], tile, level === 0 ? 255 : 240, surfLite !== null ? surfLite : topLite());
       // bottom: only if below is not water/opaque
       const belowId = gb(x, y - 1, z) & 255;
       if (belowId !== B.WATER && !(P[belowId] && P[belowId].opaque))
-        quad(2, [x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1], [0,0],[1,0],[1,1],[0,1], tile, 140, dl(gl(x, y - 1, z)));
+        quad(2, [x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1], [0,0],[1,0],[1,1],[0,1], tile, 140, sideLite(x, y - 1, z));
       // shade 253 marks "waving surface vertex" → only source blocks wave; flowing stays static
       const topS = level === 0 ? 253 : 0;    // 0 = fall through to base shade below
       // +X: vertex order [BL,TL,TR,BR] → top=v1,v2
       const bxpRaw = gb(x + 1, y, z); const bxpId = bxpRaw & 255;
       if (bxpId !== B.WATER) {
         if (!(P[bxpId] && P[bxpId].opaque))
-          quadV(2, [x1,y0,z0],[x1,y+frac,z0],[x1,y+frac,z1],[x1,y0,z1], [1,0],[1,frac],[0,frac],[0,0], tile, 178,topS||178,topS||178,178, dl(gl(x + 1, y, z)));
+          quadV(2, [x1,y0,z0],[x1,y+frac,z0],[x1,y+frac,z1],[x1,y0,z1], [1,0],[1,frac],[0,frac],[0,0], tile, 178,topS||178,topS||178,178, sideLite(x + 1, y, z));
       } else { const nf = (8 - ((bxpRaw >> 8) & 7)) / 9;
         if (frac > nf + 0.01)
-          quadV(2, [x1,y+nf,z0],[x1,y+frac,z0],[x1,y+frac,z1],[x1,y+nf,z1], [1,nf],[1,frac],[0,frac],[0,nf], tile, 178,topS||178,topS||178,178, dl(gl(x + 1, y, z)));
+          quadV(2, [x1,y+nf,z0],[x1,y+frac,z0],[x1,y+frac,z1],[x1,y+nf,z1], [1,nf],[1,frac],[0,frac],[0,nf], tile, 178,topS||178,topS||178,178, sideLite(x + 1, y, z));
       }
       // -X: vertex order [BL,BR,TR,TL] → top=v2,v3
       const bxnRaw = gb(x - 1, y, z); const bxnId = bxnRaw & 255;
       if (bxnId !== B.WATER) {
         if (!(P[bxnId] && P[bxnId].opaque))
-          quadV(2, [x0,y0,z0],[x0,y0,z1],[x0,y+frac,z1],[x0,y+frac,z0], [0,0],[1,0],[1,frac],[0,frac], tile, 178,178,topS||178,topS||178, dl(gl(x - 1, y, z)));
+          quadV(2, [x0,y0,z0],[x0,y0,z1],[x0,y+frac,z1],[x0,y+frac,z0], [0,0],[1,0],[1,frac],[0,frac], tile, 178,178,topS||178,topS||178, sideLite(x - 1, y, z));
       } else { const nf = (8 - ((bxnRaw >> 8) & 7)) / 9;
         if (frac > nf + 0.01)
-          quadV(2, [x0,y+nf,z0],[x0,y+nf,z1],[x0,y+frac,z1],[x0,y+frac,z0], [0,nf],[1,nf],[1,frac],[0,frac], tile, 178,178,topS||178,topS||178, dl(gl(x - 1, y, z)));
+          quadV(2, [x0,y+nf,z0],[x0,y+nf,z1],[x0,y+frac,z1],[x0,y+frac,z0], [0,nf],[1,nf],[1,frac],[0,frac], tile, 178,178,topS||178,topS||178, sideLite(x - 1, y, z));
       }
       // +Z: vertex order [BL,BR,TR,TL] → top=v2,v3
       const bzpRaw = gb(x, y, z + 1); const bzpId = bzpRaw & 255;
       if (bzpId !== B.WATER) {
         if (!(P[bzpId] && P[bzpId].opaque))
-          quadV(2, [x0,y0,z1],[x1,y0,z1],[x1,y+frac,z1],[x0,y+frac,z1], [0,0],[1,0],[1,frac],[0,frac], tile, 216,216,topS||216,topS||216, dl(gl(x, y, z + 1)));
+          quadV(2, [x0,y0,z1],[x1,y0,z1],[x1,y+frac,z1],[x0,y+frac,z1], [0,0],[1,0],[1,frac],[0,frac], tile, 216,216,topS||216,topS||216, sideLite(x, y, z + 1));
       } else { const nf = (8 - ((bzpRaw >> 8) & 7)) / 9;
         if (frac > nf + 0.01)
-          quadV(2, [x0,y+nf,z1],[x1,y+nf,z1],[x1,y+frac,z1],[x0,y+frac,z1], [0,nf],[1,nf],[1,frac],[0,frac], tile, 216,216,topS||216,topS||216, dl(gl(x, y, z + 1)));
+          quadV(2, [x0,y+nf,z1],[x1,y+nf,z1],[x1,y+frac,z1],[x0,y+frac,z1], [0,nf],[1,nf],[1,frac],[0,frac], tile, 216,216,topS||216,topS||216, sideLite(x, y, z + 1));
       }
       // -Z: vertex order [BL,TL,TR,BR] → top=v1,v2
       const bznRaw = gb(x, y, z - 1); const bznId = bznRaw & 255;
       if (bznId !== B.WATER) {
         if (!(P[bznId] && P[bznId].opaque))
-          quadV(2, [x0,y0,z0],[x0,y+frac,z0],[x1,y+frac,z0],[x1,y0,z0], [1,0],[1,frac],[0,frac],[0,0], tile, 216,topS||216,topS||216,216, dl(gl(x, y, z - 1)));
+          quadV(2, [x0,y0,z0],[x0,y+frac,z0],[x1,y+frac,z0],[x1,y0,z0], [1,0],[1,frac],[0,frac],[0,0], tile, 216,topS||216,topS||216,216, sideLite(x, y, z - 1));
       } else { const nf = (8 - ((bznRaw >> 8) & 7)) / 9;
         if (frac > nf + 0.01)
-          quadV(2, [x0,y+nf,z0],[x0,y+frac,z0],[x1,y+frac,z0],[x1,y+nf,z0], [1,nf],[1,frac],[0,frac],[0,nf], tile, 216,topS||216,topS||216,216, dl(gl(x, y, z - 1)));
+          quadV(2, [x0,y+nf,z0],[x0,y+frac,z0],[x1,y+frac,z0],[x1,y+nf,z0], [1,nf],[1,frac],[0,frac],[0,nf], tile, 216,topS||216,topS||216,216, sideLite(x, y, z - 1));
       }
     }
     // ---- per-block lava: same as water (pass 3, opaque, slower waves) ----

@@ -74,6 +74,21 @@ function buildChestMesh() {
   return { group, lidPivot, mats };
 }
 
+/* Chest as a held/dropped item: one shared prototype, cloned per use so every copy shares the
+   geometry and materials. Built lazily — IMAGES isn't populated when this file is parsed.
+   buildChestMesh authors in cell-local 0..1 space; drops and hands expect the model centred on
+   the origin, hence the offset. */
+let _chestItemProto = null;
+function chestItemNode() {
+  if (!_chestItemProto) {
+    const m = buildChestMesh();
+    m.group.position.set(-0.5, -0.5, -0.5);
+    _chestItemProto = new THREE.Group();
+    _chestItemProto.add(m.group);
+  }
+  return _chestItemProto.clone();
+}
+
 /* ---------------------------------- lifecycle ---------------------------------- */
 function registerChest(x, y, z, facing) {
   const k = chestKey(x, y, z);
@@ -229,7 +244,7 @@ function updateChests(dt) {
     // tint by world light at the chest cell (same approximation the doors use)
     const bl = getLightWorld(c.x, c.y, c.z) / 15;
     const sky = getSkyWorld(c.x, c.y, c.z) / 15;
-    const skyF = 0.12 + 0.88 * sky * sky;
+    const skyF = 0.24 + 0.76 * sky * sky;   // must track the chunk shader in 04-materials.js
     const sun = sharedUniforms.uAmbient.value + sharedUniforms.uDirect.value;
     const br = Math.min(1, skyF * sun * 0.92 + (bl * 0.45 + bl * bl * 0.85));
     if (Math.abs(br - c.lastB) > 0.02) {

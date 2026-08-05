@@ -20,6 +20,20 @@ const DOOR_ORI = [
   [DOOR_T,  0,          -Math.PI / 2, 0,      0,           0          ],  // facing +X
   [1,       0,          -Math.PI / 2, 1,      DOOR_T,     -Math.PI    ],  // facing -X
 ];
+/* Right-hinged variants: the whole left-hinged door reflected across the cell centre — X for the
+   +Z/-Z facings, Z for +X/-X. The panel geometry is rebuilt extending -X from the hinge, which is
+   itself one reflection, so the rotation follows Mirror ∘ Rot(θ) = Rot(θ') ∘ Mirror:
+     mirror in X -> θ' = -θ        mirror in Z -> θ' = π - θ
+   Hinge points are the mirrored corners. Derived once and written out rather than computed, so
+   the swing can be eyeballed per facing. */
+const DOOR_ORI_R = [
+  [1, 0,          0,            1 - DOOR_T, 0,          Math.PI / 2 ],  // facing +Z
+  [1, 1 - DOOR_T, 0,            1,          1,         -Math.PI / 2 ],  // facing -Z
+  [DOOR_T, 1,    -Math.PI / 2,  0,          1,          Math.PI     ],  // facing +X
+  [1, 1,         -Math.PI / 2,  1,          1 - DOOR_T, 0           ],  // facing -X
+];
+const DOOR_HINGE_R = 16;                       // variant bit 4
+const doorOri = (varb) => (varb & DOOR_HINGE_R) ? DOOR_ORI_R[varb & 3] : DOOR_ORI[varb & 3];
 
 let _doorTex = null;
 function doorTexture() {
@@ -33,11 +47,16 @@ function doorTexture() {
 }
 const DOOR_EDGE_RGB = 0x8a6b41;
 // hinged panel geometry with the -Z face's U flipped so the back isn't mirrored
-function doorPanelGeom(hinged = true) {
+function doorPanelGeom(hinged = true, hingeRight = false) {
   const geo = new THREE.BoxGeometry(1, 2, DOOR_T);
-  if (hinged) geo.translate(0.5, 1, DOOR_T / 2);       // hinge corner at the local origin
+  // hinge corner at the local origin; a right-hinged panel extends -X from it instead of +X
+  if (hinged) geo.translate(hingeRight ? -0.5 : 0.5, 1, DOOR_T / 2);
   const uv = geo.attributes.uv;                        // face order +X,-X,+Y,-Y,+Z,-Z (4 verts each)
   for (let i = 20; i < 24; i++) uv.setX(i, 1 - uv.getX(i));
+  // A right-hinged door is the mirror image of a left-hinged one, so its artwork mirrors too —
+  // otherwise both halves of a double door show their handle on the same side. Flipping U on
+  // BOTH textured faces keeps front and back consistent with each other.
+  if (hingeRight) for (let i = 16; i < 24; i++) uv.setX(i, 1 - uv.getX(i));
   uv.needsUpdate = true;
   return geo;
 }
@@ -47,13 +66,13 @@ function doorMaterials() {                             // fresh per door — tin
   return { mats: [edge, edge, edge, edge, face, face], face, edge };
 }
 
-function registerDoor(x, y, z, facing, open) {
+function registerDoor(x, y, z, facing, open, hingeRight = false) {
   const k = x + ',' + y + ',' + z;
   if (DOORS.has(k)) return;
   const m = doorMaterials();
   const group = new THREE.Group();
-  group.add(new THREE.Mesh(doorPanelGeom(), m.mats));
-  const o = DOOR_ORI[facing & 3];
+  group.add(new THREE.Mesh(doorPanelGeom(true, hingeRight), m.mats));
+  const o = doorOri((facing & 3) | (hingeRight ? DOOR_HINGE_R : 0));
   group.position.set(x + (open ? o[3] : o[0]), y, z + (open ? o[4] : o[1]));
   group.rotation.y = open ? o[5] : o[2];
   scene.add(group);
@@ -78,18 +97,32 @@ function doorBroken(x, y, z, oldVal) {
   if ((getBlock(x, oy, z) & 255) === B.DOOR) setBlock(x, oy, z, B.AIR);
 }
 
-/* Double door: the bottom cell of a same-facing door standing directly beside this one, across
-   the facing. Unlike chests this needs no stored state — a door pair is symmetric, so both
-   halves find each other by the same rule and there is nothing to disambiguate. */
-function doorPartnerCell(x, by, z, facing) {
+/* Double door: the bottom cell of a same-facing door beside this one, across the facing, whose
+   hinge is on the OPPOSITE side. The opposite-hinge test is what makes it a real double — two
+   doors hinged the same way are two independent doors that happen to be adjacent, and swinging
+   them together would send one straight through the other. */
+function doorPartnerCell(x, by, z, facing, hinge) {
   const dirs = (facing === 0 || facing === 1) ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
   for (const [dx, dz] of dirs) {
     const nv = getBlock(x + dx, by, z + dz);
     if ((nv & 255) !== B.DOOR) continue;
     const nva = (nv >> 8) & 255;
-    if ((nva & 3) === facing && !(nva & 8)) return { x: x + dx, z: z + dz };   // bottom half only
+    if ((nva & 3) !== facing || (nva & 8)) continue;              // same facing, bottom half only
+    if ((nva & DOOR_HINGE_R) === hinge) continue;                 // same hinge: not a pair
+    return { x: x + dx, z: z + dz, hinge: nva & DOOR_HINGE_R };
   }
   return null;
+}
+
+/* Which side the hinge lands on for a door placed at (px,pz) facing `facing`, given the exact
+   point on the block that was clicked. Clicking the left half hinges left (opens left-to-right),
+   the right half hinges right. "Left" is from the player's view, i.e. relative to the facing —
+   hence the per-facing axis and sign. */
+function doorHingeFromHit(facing, fx, fz) {
+  if (facing === 0) return fx > 0.5;      // door faces +Z, player's right is +X
+  if (facing === 1) return fx < 0.5;      // faces -Z, right is -X
+  if (facing === 2) return fz < 0.5;      // faces +X, right is -Z
+  return fz > 0.5;                        // faces -X, right is +Z
 }
 
 // right-click either half: flip the open bit on both halves (facing bits preserved), and on the
@@ -102,14 +135,17 @@ function toggleDoor(x, y, z) {
   if ((bval & 255) !== B.DOOR) return;
   const bvar = (bval >> 8) & 255;
   const facing = bvar & 3;
+  const hinge = bvar & DOOR_HINGE_R;
   const opening = !(bvar & 4);
-  const nv = facing | (opening ? 4 : 0);
+  const openBit = opening ? 4 : 0;
+  const nv = facing | hinge | openBit;
   setBlock(x, by, z, B.DOOR | (nv << 8));
   setBlock(x, by + 1, z, B.DOOR | ((nv | 8) << 8));
-  const p = doorPartnerCell(x, by, z, facing);
+  const p = doorPartnerCell(x, by, z, facing, hinge);
   if (p) {
-    setBlock(p.x, by, p.z, B.DOOR | (nv << 8));
-    setBlock(p.x, by + 1, p.z, B.DOOR | ((nv | 8) << 8));
+    const pv = facing | p.hinge | openBit;      // partner keeps its own (opposite) hinge
+    setBlock(p.x, by, p.z, B.DOOR | (pv << 8));
+    setBlock(p.x, by + 1, p.z, B.DOOR | ((pv | 8) << 8));
   }
   playSound(opening ? 'doorOpen' : 'doorClose',
             { gain: 0.8, pos: { x: x + 0.5, y: by + 1, z: z + 0.5 } });
@@ -124,7 +160,7 @@ function updateDoors(dt) {
     if ((val & 255) !== B.DOOR) { removeDoorMesh(k); continue; }
     d.group.visible = true;
     const varb = (val >> 8) & 255;
-    const o = DOOR_ORI[varb & 3];
+    const o = doorOri(varb);
     const open = (varb & 4);
     const target = open ? o[5] : o[2];
     const diff = target - d.group.rotation.y;
@@ -141,7 +177,7 @@ function updateDoors(dt) {
     // tint by world light at the door cell (same curves as the chunk shader, approximated)
     const bl = getLightWorld(d.x, d.y, d.z) / 15;
     const sky = getSkyWorld(d.x, d.y, d.z) / 15;
-    const skyF = 0.12 + 0.88 * sky * sky;
+    const skyF = 0.24 + 0.76 * sky * sky;   // must track the chunk shader in 04-materials.js
     const sun = sharedUniforms.uAmbient.value + sharedUniforms.uDirect.value;
     const b = Math.min(1, skyF * sun * 0.92 + (bl * 0.45 + bl * bl * 0.85));
     if (Math.abs(b - d.lastB) > 0.02) {

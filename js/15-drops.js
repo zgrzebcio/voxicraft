@@ -85,8 +85,11 @@ function buildItemDropGeom(id, iconName) {
 function buildDropGeom(id, variant = 0) {
   if (id >= 256) return buildItemDropGeom(id);
   if (id === B.DOOR) return buildItemDropGeom(id, 'oak_door');   // no chunk-mesh model — sprite drop
-  if (id === B.BED)  return buildItemDropGeom(id, 'bed_long');   // ditto for the bed
-  if (id === B.CHEST) return buildItemDropGeom(id, 'chest_front');
+  if (id === B.BED)  return [{ node: bedItemNode() }];           // real mesh, not a flat sprite
+  // Chest has no chunk-mesh model, but unlike the door and bed it IS a full 3D shape — a flat
+  // chest_front sprite in the hand looked like a painting. Hand it the real lid-and-body mesh
+  // (the same one 05-icons.js renders) as a node the caller adds directly.
+  if (id === B.CHEST) return [{ node: chestItemNode() }];
   const key = id + ':' + variant;
   if (DROP_GEOM[key]) return DROP_GEOM[key];
   const data = new Uint16Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
@@ -130,7 +133,8 @@ function spawnDrop(id, x, y, z, vel, pickupDelay = DEFAULT_PICKUP_DELAY, dur = n
   const passes = buildDropGeom(id);
   if (!passes.length) return null;
   const group = new THREE.Group();
-  for (const { p, geo, mat: matOverride } of passes) {
+  for (const { p, geo, mat: matOverride, node } of passes) {
+    if (node) { group.add(node); continue; }     // prebuilt sub-tree (chest); no pass material
     const m = new THREE.Mesh(geo, matOverride || MATERIALS[p]);
     m.renderOrder = p;
     group.add(m);
@@ -222,7 +226,8 @@ function spawnProjectile(id, x, y, z, vx, vy, vz) {
   const passes = buildDropGeom(id);
   if (!passes.length) return;
   const group = new THREE.Group();
-  for (const { p, geo, mat: matOverride } of passes) {
+  for (const { p, geo, mat: matOverride, node } of passes) {
+    if (node) { group.add(node); continue; }     // prebuilt sub-tree (chest); no pass material
     const m = new THREE.Mesh(geo, matOverride || MATERIALS[p]);
     m.renderOrder = p;
     group.add(m);

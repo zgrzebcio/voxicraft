@@ -169,7 +169,7 @@ function updateDayNight(dt) {
 
   const sunI  = 0.74 * smoothstepJS(0.0, 0.22, sunElev);   // day peak ~0.98 total: no overexposure
   const moonI = 0.12 * smoothstepJS(0.0, 0.22, moonElev);
-  sharedUniforms.uAmbient.value = 0.09 + 0.15 * dayF;      // low ambient: shadows & underground go dark
+  sharedUniforms.uAmbient.value = 0.17 + 0.15 * dayF;      // ambient floor: how dark cast shadows get
   sharedUniforms.uDirect.value  = Math.max(sunI, moonI);
   sunMat.opacity  = Math.min(1, Math.max(0, (sunElev + 0.10) * 8));
   moonMat.opacity = Math.min(1, Math.max(0, (moonElev + 0.10) * 8));

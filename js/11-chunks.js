@@ -382,6 +382,19 @@ function setBlock(x, y, z, val) {
   // tall grass: breaking the UPPER half removes the lower half too (whole plant goes)
   if (newId === B.AIR && oldId === B.TALL_UPPER && (getBlock(x, y - 1, z) & 255) === B.TALL_LOWER)
     setBlock(x, y - 1, z, B.AIR);
+  /* Door / bed support: both need solid ground under them, so digging out any ONE of the cells
+     they stand on drops the whole thing. Each block's own break hook then takes its other half,
+     so only the cell directly above has to be handled here. Guarded on the new block not being
+     solid, otherwise swapping dirt for stone under a door would demolish it. */
+  if (!PROPS[newId]?.solid && y + 1 <= 199) {
+    const upVal = getBlock(x, y + 1, z), upId = upVal & 255;
+    const isDoorBottom = upId === B.DOOR && !((upVal >> 8) & 8);
+    if (isDoorBottom || upId === B.BED) {
+      setBlock(x, y + 1, z, B.AIR);
+      if (!player.canFly)
+        for (const d of blockDrop(upId)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, y + 1, z);
+    }
+  }
   // billboard support: breaking the block under a cross-model block (torch, mushroom) pops it off
   if (newId === B.AIR && y + 1 <= 199) {
     const above = getBlock(x, y + 1, z) & 255;

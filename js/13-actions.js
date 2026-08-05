@@ -87,6 +87,21 @@ const saveInv    = () => { if (currentInvMode === 'survival') { survStash.inv = 
 const saveAll = () => { saveHotbar(); saveInv(); if (typeof saveEquip === 'function') saveEquip(); };
 let hotbarSel = 0;
 
+/* Blocks a placement simply overwrites, the way air does. Only the grass billboards qualify —
+   flowers, saplings and torches are deliberate placements and must not be silently destroyed. */
+const PLANT_REPLACE = [B.TALLGRASS, B.TALL_LOWER, B.TALL_UPPER];
+const isPlantReplaceable = (id) => PLANT_REPLACE.includes(id & 255);
+const isPlaceableInto = (id) =>
+  id === B.AIR || id === B.WATER || id === B.LAVA || isPlantReplaceable(id);
+// clear a plant out of a cell before building there; tall grass is 2 cells, so take both halves
+function clearPlantAt(x, y, z) {
+  const id = getBlock(x, y, z) & 255;
+  if (!isPlantReplaceable(id)) return;
+  if (id === B.TALL_LOWER) setBlock(x, y + 1, z, B.AIR);
+  else if (id === B.TALL_UPPER) setBlock(x, y - 1, z, B.AIR);
+  setBlock(x, y, z, B.AIR);
+}
+
 const _dir = new THREE.Vector3();
 function currentRay() {
   camera.getWorldDirection(_dir);
@@ -219,7 +234,8 @@ function doPlace() {
   // right-clicking a bed sleeps through the night
   if (hit.id === B.BED) { trySleep(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
   // right-clicking a chest opens its storage GUI (both halves if it is a double)
-  if (hit.id === B.CHEST) { openChest(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
+  // survival only, same as the bench and the furnace — in creative a chest is just a block to build with
+  if (!player.canFly && hit.id === B.CHEST) { openChest(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
   const heldId = slotId(HOTBAR[hotbarSel]);
   // buckets: fill empty bucket from a water source, or pour a water source from a full one
   if (heldId === ITEM.BUCKET || heldId === ITEM.WATER_BUCKET || heldId === ITEM.LAVA_BUCKET) { useBucket(heldId, hit); return; }
@@ -294,7 +310,7 @@ function doPlace() {
   }
   const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
   const cur = getBlock(px, py, pz) & 255;
-  if (cur !== B.AIR && cur !== B.WATER && cur !== B.LAVA) {  // only into air/water/lava...
+  if (!isPlaceableInto(cur)) {                               // only into air/water/lava/grass...
     // ...case 2: unless the target cell holds a single slab the held slab can complete
     if (heldSlab && PROPS[cur].model === 'slab') {
       const tv = (getBlock(px, py, pz) >> 8) & 255;
@@ -354,13 +370,30 @@ function doPlace() {
   // door: needs headroom + floor, places both halves, spawns the animated mesh
   if (id === B.DOOR) {
     const above = getBlock(px, py + 1, pz) & 255;
-    if (above !== B.AIR && above !== B.WATER) return;
+    if (!isPlaceableInto(above)) return;
     if (!isSolid(px, py - 1, pz)) return;
     const ddx = player.pos.x - (px + 0.5), ddz = player.pos.z - (pz + 0.5);
     const facing = Math.abs(ddx) > Math.abs(ddz) ? (ddx > 0 ? 2 : 3) : (ddz > 0 ? 0 : 1);
-    setBlock(px, py, pz, id | (facing << 8));
-    setBlock(px, py + 1, pz, id | ((facing | 8) << 8));
-    registerDoor(px, py, pz, facing, false);
+    // hinge side from WHERE on the block the ray landed: left half hinges left, right half right
+    const hx = camera.position.x + _dir.x * hit.t, hz = camera.position.z + _dir.z * hit.t;
+    let hingeRight = doorHingeFromHit(facing, hx - px, hz - pz);
+    // beside an existing same-facing door, always take the opposite hinge — that is what turns
+    // the two into a double door that opens outward from the shared edge
+    const dirs = (facing === 0 || facing === 1) ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
+    for (const [dx, dz] of dirs) {
+      const nv = getBlock(px + dx, py, pz + dz);
+      if ((nv & 255) !== B.DOOR) continue;
+      const nva = (nv >> 8) & 255;
+      if ((nva & 3) !== facing || (nva & 8)) continue;
+      hingeRight = !(nva & DOOR_HINGE_R);
+      break;
+    }
+    const varb = facing | (hingeRight ? DOOR_HINGE_R : 0);
+    clearPlantAt(px, py, pz);
+    clearPlantAt(px, py + 1, pz);
+    setBlock(px, py, pz, id | (varb << 8));
+    setBlock(px, py + 1, pz, id | ((varb | 8) << 8));
+    registerDoor(px, py, pz, facing, false, hingeRight);
     playBlockSound(id, 'place', px, py, pz);
     handPlaceSwing = true;
     if (!player.canFly) {
@@ -402,6 +435,7 @@ function doPlace() {
            : hit.nx === 1 ? 2 : hit.nx === -1 ? 3               // vertical halves hug the
            : hit.nz === 1 ? 4 : 5;                              // clicked wall
   }
+  clearPlantAt(px, py, pz);                 // grass in the way is destroyed, not a blocker
   setBlock(px, py, pz, id | (varb << 8));
   playBlockSound(id, 'place', px, py, pz);
   if (id === B.CHEST) {
