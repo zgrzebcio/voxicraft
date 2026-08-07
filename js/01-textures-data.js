@@ -88,6 +88,14 @@ const TEXTURES = {
   stripped_oak_log_top:     'textures/Blocks/Woods/stripped_oak_log_top.png',
   stripped_birch_log:       'textures/Blocks/Woods/stripped_birch_log.png',
   stripped_birch_log_top:   'textures/Blocks/Woods/stripped_birch_log_top.png',
+  spruce_log:               'textures/Blocks/Woods/spruce_log.png',
+  spruce_log_top:           'textures/Blocks/Woods/spruce_log_top.png',
+  spruce_planks:            'textures/Blocks/Woods/spruce_planks.png',
+  spruce_leaves:            'textures/Blocks/Woods/spruce_leaves.png',
+  spruce_sapling:           'textures/Billboards/Plants/Saplings/spruce_sapling.png',
+  stripped_spruce_log:      'textures/Blocks/Woods/stripped_spruce_log.png',
+  stripped_spruce_log_top:  'textures/Blocks/Woods/stripped_spruce_log_top.png',
+  pincushions:              'textures/Billboards/Plants/Flowers/pincushions.png',
 };
 
 const ITEM_TEXTURES = {

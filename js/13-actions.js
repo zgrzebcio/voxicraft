@@ -102,6 +102,27 @@ function clearPlantAt(x, y, z) {
   setBlock(x, y, z, B.AIR);
 }
 
+/* A log wider than one block (a flared stump) physically overhangs its neighbours, so those cells
+   are already occupied even though they read as air. Refuse to build into them — except with the
+   things that legitimately grow through a canopy or wash around a trunk. */
+const OVERHANG_OK = [B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES,
+                     B.LEAF_CARPET, B.BIRCH_LEAF_CARPET, B.SPRUCE_LEAF_CARPET, B.WATER, B.LAVA];
+// every layered carpet shares one stacking rule, so a new carpet type only has to set model:'carpet'
+const isCarpet = (id) => id != null && id < 256 && PROPS[id]?.model === 'carpet';
+function logOverhangsCell(x, y, z) {
+  // a log only bulges along its two NON-axis directions, so check each neighbour accordingly
+  const dirs = [[1,0,0,0],[-1,0,0,0],[0,1,0,1],[0,-1,0,1],[0,0,1,2],[0,0,-1,2]];
+  for (const [dx, dy, dz, dirAxis] of dirs) {
+    const v = getBlock(x + dx, y + dy, z + dz);
+    const p = PROPS[v & 255];
+    if (!p || p.model !== 'log') continue;
+    const variant = (v >> 8) & 255;
+    if (((variant & 3) || 0) === dirAxis) continue;        // bulge is only across the trunk axis
+    if (CORE.logWidthPx(logWidthOf(variant)) > 64) return true;
+  }
+  return false;
+}
+
 const _dir = new THREE.Vector3();
 function currentRay() {
   camera.getWorldDirection(_dir);
@@ -260,9 +281,9 @@ function doPlace() {
     return;
   }
   // snow carpet placed onto a cross/billboard plant -> replaces the plant in the same cell
-  if (heldId === B.SNOW_CARPET && PROPS[hit.id] && PROPS[hit.id].model === 'cross' && isSolid(hit.x, hit.y - 1, hit.z)) {
-    setBlock(hit.x, hit.y, hit.z, B.SNOW_CARPET);
-    playBlockSound(B.SNOW_CARPET, 'place', hit.x, hit.y, hit.z);
+  if (isCarpet(heldId) && PROPS[hit.id] && PROPS[hit.id].model === 'cross' && isSolid(hit.x, hit.y - 1, hit.z)) {
+    setBlock(hit.x, hit.y, hit.z, heldId);
+    playBlockSound(heldId, 'place', hit.x, hit.y, hit.z);
     handPlaceSwing = true;
     if (!player.canFly) {
       const s = HOTBAR[hotbarSel]; s.count--;
@@ -271,13 +292,13 @@ function doPlace() {
     }
     return;
   }
-  // snow carpet + snow carpet -> add a layer to the aimed carpet (variant 0..5 = 1..6 layers).
+  // carpet on the same carpet -> add a layer to the aimed cell (variant 0..5 = 1..6 layers).
   // Once at 6 layers (full), further clicks fall through to normal placement (a new carpet above).
-  if (heldId === B.SNOW_CARPET && hit.id === B.SNOW_CARPET) {
+  if (isCarpet(heldId) && hit.id === heldId) {
     const hv = (getBlock(hit.x, hit.y, hit.z) >> 8) & 255;
     if (hv < 5) {
-      setBlock(hit.x, hit.y, hit.z, B.SNOW_CARPET | ((hv + 1) << 8));
-      playBlockSound(B.SNOW_CARPET, 'place', hit.x, hit.y, hit.z);
+      setBlock(hit.x, hit.y, hit.z, heldId | ((hv + 1) << 8));
+      playBlockSound(heldId, 'place', hit.x, hit.y, hit.z);
       handPlaceSwing = true;
       if (!player.canFly) {
         const s = HOTBAR[hotbarSel]; s.count--;
@@ -333,7 +354,7 @@ function doPlace() {
     if ((getBlock(px, py - 1, pz) & 255) !== B.GRASS) return;
   }
   // saplings require grass underneath (same rule as flowers)
-  if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING) {
+  if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING || id === B.SPRUCE_SAPLING) {
     if ((getBlock(px, py - 1, pz) & 255) !== B.GRASS) return;
   }
   // sugar cane: on top of an existing cane (stack up to 5), OR on sand/grass/dirt with an
@@ -356,13 +377,34 @@ function doPlace() {
       if (!nearWater) return;
     }
   }
-  // cactus: only on sand / red sand / cactus, and never touching a solid block on any side
+  /* Cactus: grows on sand or on itself, and still refuses to touch a foreign solid on its sides.
+     Another cactus IS allowed there now — that is how an arm attaches to the trunk. Placing
+     against a cactus side lays the cell horizontally so it reads as an arm rather than a stray
+     floating column. */
   if (id === B.CACTUS) {
     const below = getBlock(px, py - 1, pz) & 255;
-    if (below !== B.SAND && below !== B.RED_SAND && below !== B.CACTUS) return;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]])
-      if (PROPS[getBlock(px + dx, py, pz + dz) & 255].solid) return;
+    let armAxis = -1;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nid = getBlock(px + dx, py, pz + dz) & 255;
+      if (nid === B.CACTUS) { if (armAxis < 0) armAxis = dx ? 1 : 2; continue; }
+      if (PROPS[nid].solid) return;
+    }
+    if (below !== B.SAND && below !== B.RED_SAND && below !== B.CACTUS && armAxis < 0) return;
+    if (below !== B.CACTUS && armAxis >= 0) {
+      clearPlantAt(px, py, pz);
+      setBlock(px, py, pz, B.CACTUS | ((armAxis | (18 << 2)) << 8));    // slimmer, lying flat
+      playBlockSound(B.CACTUS, 'place', px, py, pz);
+      handPlaceSwing = true;
+      if (!player.canFly) {
+        slot.count--;
+        if (slot.count <= 0) HOTBAR[hotbarSel] = null;
+        saveHotbar(); updateHotbar(); buildHotbar();
+      }
+      return;
+    }
   }
+  // a flared stump next door already fills this cell, whatever the block data says
+  if (!OVERHANG_OK.includes(id) && logOverhangsCell(px, py, pz)) return;
   if (PROPS[id].solid) {                                    // don't place a solid inside yourself
     const p = player.pos, R = player.R;
     if (px + 1 > p.x - R && px < p.x + R && py + 1 > p.y && py < p.y + player.H &&
@@ -444,7 +486,7 @@ function doPlace() {
     registerChest(px, py, pz, varb & 3);      // spawn its animated mesh
   }
   if (id === B.TNT) armTNT(px, py, pz);          // start the fuse the moment TNT is placed
-  if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING) armSapling(px, py, pz, id);
+  if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING || id === B.SPRUCE_SAPLING) armSapling(px, py, pz, id);
   // a real block placed on top of grass smothers it back to dirt (billboards/cross don't)
   if (type !== 'cross' && (getBlock(px, py - 1, pz) & 255) === B.GRASS) setBlock(px, py - 1, pz, B.DIRT);
   handPlaceSwing = true;

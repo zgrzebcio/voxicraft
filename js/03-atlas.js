@@ -28,7 +28,11 @@ const ATLAS_TILES = ['grass_block_top', 'grass_block_side', 'dirt', 'stone', 'sa
                      ,'tnt_lit'
                      ,'oak_sapling', 'birch_sapling', 'sugar_cane'
                      ,'stripped_oak_log', 'stripped_oak_log_top'
-                     ,'stripped_birch_log', 'stripped_birch_log_top'];
+                     ,'stripped_birch_log', 'stripped_birch_log_top'
+                     ,'spruce_log', 'spruce_log_top', 'spruce_planks', 'spruce_leaves'
+                     ,'spruce_sapling'
+                     ,'stripped_spruce_log', 'stripped_spruce_log_top'
+                     ,'pincushions'];
 const IMAGES = {}; // name -> HTMLImageElement (also reused for hotbar / radial icons)
 
 // glowstone uses the embedded texture if present; otherwise a procedural warm-speckle fallback

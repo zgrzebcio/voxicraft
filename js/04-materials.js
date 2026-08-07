@@ -25,6 +25,11 @@ const sharedUniforms = {
   uLightColor: { value: new THREE.Color(1, 1, 1) },
   uGlowColor:  { value: new THREE.Color(1.0, 0.82, 0.45) },   // warm glowstone block-light tint
   uTime:       { value: 0 },
+  /* Per-tile colour multiplier. The spruce needle art is nearly white, so rather than authoring a
+     second PNG the tile is tinted at draw time. One slot is enough today; if a second tinted tile
+     ever appears, promote these to small uniform arrays and loop. */
+  uTintTile:   { value: -1 },
+  uTintColor:  { value: new THREE.Color(0.42, 0.66, 0.46) },   // cold blue-green conifer
 };
 const GLOW_LEVEL = 14;   // glowstone emission (light reaches this many blocks through open air)
 
@@ -56,6 +61,8 @@ const FSH = /* glsl */`
   uniform highp sampler2DShadow tShadL;
   uniform float uAmbient, uDirect, uLeafShadow, uShadowOn;
   uniform vec3 uLightColor;
+  uniform float uTintTile;
+  uniform vec3 uTintColor;
   uniform vec3 uGlowColor;
   uniform float uTime;
   in vec2 vUv;
@@ -87,6 +94,7 @@ const FSH = /* glsl */`
       : fract(vUv);
     vec4 tex = textureGrad(map, off + wUV * sc, dFdx(vUv) * sc, dFdy(vUv) * sc);
     if (tex.a < 0.02) discard;
+    if (uTintTile >= 0.0 && abs(vTile - uTintTile) < 0.5) tex.rgb *= uTintColor;
     // sun/moon shadows: soft PCF compare against the two depth maps; outside the shadow
     // window (far from the player) everything counts as lit
     float sS = 1.0, sL = 1.0;
@@ -197,4 +205,6 @@ const VSH_LAVA = /* glsl */`
   }`;
 const matLava = makeMat({ vertexShader: VSH_LAVA });
 const MATERIALS = [matOpaque, matCutout, matWater, matLava];
+// spruce needles ship almost white; tint the tile instead of shipping a second sheet
+sharedUniforms.uTintTile.value = CORE.T.SPRUCE_LEAVES;
 

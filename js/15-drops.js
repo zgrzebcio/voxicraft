@@ -90,6 +90,8 @@ function buildDropGeom(id, variant = 0) {
   // chest_front sprite in the hand looked like a painting. Hand it the real lid-and-body mesh
   // (the same one 05-icons.js renders) as a node the caller adds directly.
   if (id === B.CHEST) return [{ node: chestItemNode() }];
+  // as an item a log is a full 64-unit block, not whatever width it happened to grow at
+  if (!variant && PROPS[id]?.model === 'log') variant = CORE.LOG_W_BLOCK << 2;
   const key = id + ':' + variant;
   if (DROP_GEOM[key]) return DROP_GEOM[key];
   const data = new Uint16Array(CHUNK_X * CHUNK_Y * CHUNK_Z);

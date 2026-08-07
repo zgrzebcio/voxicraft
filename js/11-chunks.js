@@ -338,9 +338,11 @@ function setBlock(x, y, z, val) {
   if (PROPS[oldId].opaque !== PROPS[newId].opaque) reskyAround(x, y, z);
   // snow-on-grass: the grass directly under a snow block wears snowy sides (variant), and reverts
   // to plain grass when the snow is removed. Recursive setBlock is safe (grass fires no snow hook).
-  if (newId === B.SNOW && oldId !== B.SNOW && (getBlock(x, y - 1, z) & 255) === B.GRASS)
+  // snow carpet counts as snow cover here too — a trunk replacing a carpet must clear the rim
+  const _snowy = (i) => i === B.SNOW || i === B.SNOW_CARPET;
+  if (_snowy(newId) && !_snowy(oldId) && (getBlock(x, y - 1, z) & 255) === B.GRASS)
     setBlock(x, y - 1, z, B.GRASS | (V.GRASS_SNOWY << 8));
-  if (oldId === B.SNOW && newId !== B.SNOW) {
+  if (_snowy(oldId) && !_snowy(newId)) {
     const below = getBlock(x, y - 1, z);
     if ((below & 255) === B.GRASS && ((below >> 8) & 255) === V.GRASS_SNOWY) setBlock(x, y - 1, z, B.GRASS);
   }
@@ -369,8 +371,9 @@ function setBlock(x, y, z, val) {
   if (oldId === B.BED && newId !== B.BED) bedBroken(x, y, z, oldVal);
   // chest removed/replaced: spill its contents and drop the mesh
   if (oldId === B.CHEST && newId !== B.CHEST) chestBroken(x, y, z, oldVal);
-  // placing a solid block against a cactus's side snaps the cactus off (column chain-breaks up)
-  if (PROPS[newId]?.solid)
+  // placing a solid block against a cactus's side snaps the cactus off (column chain-breaks up).
+  // Cactus is exempt from its own rule — arms attach side-on to the trunk.
+  if (PROPS[newId]?.solid && newId !== B.CACTUS)
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, nz = z + dz;
       if ((getBlock(nx, y, nz) & 255) === B.CACTUS) {
@@ -404,6 +407,20 @@ function setBlock(x, y, z, val) {
         for (const d of blockDrop(above)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, y + 1, z);
     }
   }
+  /* A cactus arm hangs off the SIDE of its trunk, so the upward chain-break above never reached
+     it — cutting the trunk out left arms floating. When a cactus goes, take any neighbouring cell
+     that is a cactus lying horizontally (variant axis 1 or 2, i.e. an arm root rather than another
+     column). Removing that root re-enters this hook, and the upward rule carries the rest of the
+     arm with it. */
+  if (oldId === B.CACTUS && newId !== B.CACTUS)
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, nz = z + dz;
+      const nv = getBlock(nx, y, nz);
+      if ((nv & 255) !== B.CACTUS || (((nv >> 8) & 3) === 0)) continue;   // vertical = its own trunk
+      setBlock(nx, y, nz, B.AIR);
+      if (!player.canFly)
+        for (const d of blockDrop(B.CACTUS)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, nx, y, nz);
+    }
   // sulfur down-tip hangs from the block ABOVE — pop it when that ceiling block is destroyed
   if (newId === B.AIR && y > 0) {
     const bVal = getBlock(x, y - 1, z);

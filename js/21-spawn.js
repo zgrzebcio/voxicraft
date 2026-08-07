@@ -16,6 +16,7 @@ function resetWorld(seed, terrainType) {
   clearDrops();
   clearFallingLeaves();
   clearFelling();
+  clearLitterRot();
   clearEntities();
   clearBeds();
   clearChests();

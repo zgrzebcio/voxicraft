@@ -5,16 +5,20 @@
    MAIN LOOP
    ================================================================================================ */
 /* ---- gravity blocks (sand, gravel) ---- */
-const fallingBlocks = new Map();   // "x,y,z" -> blockId
+const fallingBlocks = new Map();   // "x,y,z" -> full block VALUE (id + variant)
 // a cell a falling block drops into: empty, or a billboard it simply crushes on the way through
 const _fallOpen = (id) => id === B.AIR || PROPS[id]?.model === 'cross';
+// Carpets fall too — snow and leaf litter both need ground under them, and digging out that
+// ground used to leave a sheet of snow hanging in the air.
+const _fallsUnderGravity = (id) =>
+  id === B.SAND || id === B.RED_SAND || id === B.GRAVEL || PROPS[id]?.model === 'carpet';
 function scheduleFall(x, y, z) {
   if (y < 1 || y > 199) return;
-  const id = getBlock(x, y, z) & 255;
-  if (id !== B.SAND && id !== B.RED_SAND && id !== B.GRAVEL) return;
+  const val = getBlock(x, y, z);
+  if (!_fallsUnderGravity(val & 255)) return;
   // billboards don't hold up a falling block — they get crushed, so they count as empty here
   if (!_fallOpen(getBlock(x, y - 1, z) & 255)) return;
-  fallingBlocks.set(`${x},${y},${z}`, id);
+  fallingBlocks.set(`${x},${y},${z}`, val);        // keep the variant: carpets carry layer count
 }
 let _fallTimer = 0;
 function processFalling(dt) {
@@ -24,14 +28,14 @@ function processFalling(dt) {
   const todo = [...fallingBlocks.keys()];
   for (const k of todo) {
     if (!fallingBlocks.has(k)) continue;
-    const id = fallingBlocks.get(k);
+    const val = fallingBlocks.get(k);
     fallingBlocks.delete(k);
     const [x, y, z] = k.split(',').map(Number);
-    if ((getBlock(x, y, z) & 255) !== id) continue;
+    if (getBlock(x, y, z) !== val) continue;
     if (!_fallOpen(getBlock(x, y - 1, z) & 255)) continue;
     crushBillboard(x, y - 1, z);                 // torch/flower in the way is destroyed + dropped
     setBlock(x, y, z, B.AIR);
-    setBlock(x, y - 1, z, id);
+    setBlock(x, y - 1, z, val);                  // variant travels with it
   }
 }
 
@@ -39,9 +43,10 @@ function processFalling(dt) {
 const leavesDecayQueue = new Set();
 const DECAY_DIRS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
 
-const _isLeaf = (id) => id === B.LEAVES || id === B.BIRCH_LEAVES;
+const _isLeaf = (id) => id === B.LEAVES || id === B.BIRCH_LEAVES || id === B.SPRUCE_LEAVES;
 // stripped logs count as support: a half-chopped tree must not shed its canopy while you work
-const _isLog  = (id) => id === B.LOG || id === B.BIRCH_LOG ||
+const _isLog  = (id) => id === B.LOG || id === B.BIRCH_LOG || id === B.SPRUCE_LOG ||
+                        id === B.STRIPPED_SPRUCE_LOG ||
                         id === B.STRIPPED_LOG || id === B.STRIPPED_BIRCH_LOG;
 function scheduleLeavesCheck(cx, cy, cz) {
   const R = 5;
@@ -72,22 +77,26 @@ function isLeavesConnected(lx, ly, lz) {
 }
 
 let leavesDecayTimer = 0;
+const DECAY_INTERVAL = 0.2;      // was 0.5 — an orphaned canopy should clear while you watch
+const DECAY_BATCH = 24;          // was 8
 function processLeavesDecay(dt) {
   leavesDecayTimer += dt;
-  if (leavesDecayTimer < 0.5) return;
-  leavesDecayTimer -= 0.5;
-  const toProcess = [...leavesDecayQueue].slice(0, 8);
+  if (leavesDecayTimer < DECAY_INTERVAL) return;
+  leavesDecayTimer -= DECAY_INTERVAL;
+  const toProcess = [...leavesDecayQueue].slice(0, DECAY_BATCH);
   for (const key of toProcess) {
     leavesDecayQueue.delete(key);
     const [x, y, z] = key.split(',').map(Number);
     const leafId = getBlock(x, y, z) & 255;
     if (!_isLeaf(leafId)) continue;
     if (!isLeavesConnected(x, y, z)) {
-      // base decay chance 0.08, then scaled by the world tick speed
-      if (Math.random() < 0.08 * tickFactor()) {
+      // base decay chance, then scaled by the world tick speed
+      if (Math.random() < 0.3 * tickFactor()) {
+        // decayed leaves fall the same way a felled canopy does, so they end up as litter on
+        // the ground instead of evaporating in place
         setBlock(x, y, z, B.AIR);
-        for (const drop of blockDrop(leafId, true))
-          for (let i = 0; i < drop.count; i++) spawnDrop(drop.id, x, y, z);
+        if (FALLING.length < MAX_FALLING) spawnFallingLeaf(leafId, x, y, z);
+        else settleLeafNow(leafId, x, y, z);
         scheduleLeavesCheck(x, y, z);
       } else {
         leavesDecayQueue.add(key);
@@ -573,11 +582,39 @@ function armSapling(x, y, z, type) {
 function _putSoft(x, y, z, id) {
   if (y < 0 || y > 199) return;
   const cur = getBlock(x, y, z) & 255;
-  if (cur === B.AIR || cur === B.LEAVES || cur === B.BIRCH_LEAVES) setBlock(x, y, z, id);
+  if (_isLeaf(cur) || cur === B.AIR) setBlock(x, y, z, id);
 }
-function _growTree(x, y, z, isBirch) {
-  const LOG = isBirch ? B.BIRCH_LOG : B.LOG;
-  const LEAF = isBirch ? B.BIRCH_LEAVES : B.LEAVES;
+function _growTree(x, y, z, species) {
+  const isBirch = species === B.BIRCH_SAPLING, isSpruce = species === B.SPRUCE_SAPLING;
+  const LOG  = isSpruce ? B.SPRUCE_LOG : isBirch ? B.BIRCH_LOG : B.LOG;
+  const LEAF = isSpruce ? B.SPRUCE_LEAVES : isBirch ? B.BIRCH_LEAVES : B.LEAVES;
+  // a grown spruce is a cone like the generated ones, not the round oak blob
+  if (isSpruce) {
+    // same cone the world generator builds: tapering spike, heavy skirt low, always tipped
+    const sh = 13 + Math.floor(Math.random() * 7);     // 13..19
+    const SPR_STUMP = 30, SPR_TIP = 14;
+    for (let k = 0; k < sh; k++) {
+      const t = k / Math.max(1, sh - 1);
+      const w = Math.round(SPR_STUMP - (SPR_STUMP - SPR_TIP) * t);
+      const val = LOG | ((w << 2) << 8);
+      if (k === 0) setBlock(x, y, z, val); else _putSoft(x, y + k, z, val);
+    }
+    const base = y + 2, topY = y + sh - 1, span = Math.max(1, topY - base);
+    for (let ly = base; ly <= topY; ly++) {
+      const t = (ly - base) / span;
+      let rad = Math.max(1, Math.round(4 - 3.2 * t));
+      if (((ly - base) % 2) === 1) rad = Math.max(1, rad - 1);
+      const rimKeep = 0.85 - 0.5 * t;
+      for (let oz = -rad; oz <= rad; oz++)
+        for (let ox = -rad; ox <= rad; ox++) {
+          const d = Math.abs(ox) + Math.abs(oz);
+          if (d > rad || (d === rad && Math.random() > rimKeep)) continue;
+          _putSoft(x + ox, ly, z + oz, LEAF);
+        }
+    }
+    for (let t = 1; t <= 2; t++) _putSoft(x, topY + t, z, LEAF);
+    return;
+  }
   const h = 4 + Math.floor(Math.random() * 3);         // 4..6
   setBlock(x, y, z, LOG);                              // trunk starts at sapling cell (overwrites it)
   for (let k = 1; k < h; k++) _putSoft(x, y + k, z, LOG);
@@ -603,7 +640,7 @@ function updateSaplings() {
     if (cur !== r.type) { stale.push(k); continue; }               // broken / replaced
     if (worldDay >= r.growAt) {
       stale.push(k);
-      _growTree(x, y, z, r.type === B.BIRCH_SAPLING);
+      _growTree(x, y, z, r.type);
     }
   }
   for (const k of stale) SAPLINGS.delete(k);
@@ -654,6 +691,7 @@ function frame(now) {
   sharedUniforms.uTime.value += dt;
   updateMusic();                            // menu track on/off follows menuScene
   updateFelling(dt);                        // felled trunks come apart a few cells per tick
+  updateLitterRot(dt);                      // fallen leaves rot off the forest floor
   updateFallingLeaves(dt);                  // canopy coming down after a tree was felled
 
   // fps

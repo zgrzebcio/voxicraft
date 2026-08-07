@@ -10,13 +10,14 @@
    An ingredient id may also be an ARRAY of interchangeable ids — a variant group. Any mix of
    them satisfies the requirement (4 oak + 5 birch planks crafts a bench), and the row's icon
    cycles through the group every CRAFT_VARIANT_MS so you can see what else is accepted. */
-const V_PLANKS = [B.PLANKS, B.BIRCH_PLANKS];
-const V_LOG    = [B.LOG, B.BIRCH_LOG];
+const V_PLANKS = [B.PLANKS, B.BIRCH_PLANKS, B.SPRUCE_PLANKS];
+const V_LOG    = [B.LOG, B.BIRCH_LOG, B.SPRUCE_LOG];
 const V_STONE  = [B.COBBLE, B.STONE];          // anything that takes cobble takes stone too
 
 const RECIPES_BASIC = [
   { in: [[B.LOG, 1]],                                                        out: [B.PLANKS, 3] },
   { in: [[B.BIRCH_LOG, 1]],                                                  out: [B.BIRCH_PLANKS, 3] },
+  { in: [[B.SPRUCE_LOG, 1]],                                                 out: [B.SPRUCE_PLANKS, 3] },
   { in: [[V_PLANKS, 2]],                                                     out: [ITEM.STICK, 6] },
   { in: [[V_PLANKS, 1]],                                                     out: [B.OAKSLAB, 2] },
   { in: [[ITEM.SNOWBALL, 4]],                                                out: [B.SNOW, 1] },

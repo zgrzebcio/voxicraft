@@ -46,6 +46,8 @@ function _renderIconScene(scene, cam) {
 
 function renderBlockIcon(id, variant = 0) {
   if (id >= 256) return renderItemIcon(id);
+  // inventory logs read as a full block, matching the item they place
+  if (!variant && PROPS[id]?.model === 'log') variant = CORE.LOG_W_BLOCK << 2;
   const key = id + ':' + variant;
   if (ICON3D[key]) return ICON3D[key];
   if (id === B.CHEST) {                   // chest has no chunk-mesh model — render its real mesh

@@ -30,21 +30,30 @@
    a silent setBlock so the normal mining drop never fires for them. */
 
 const FELL_MAX_LOGS = 512;          // safety bound on the flood (a real tree is well under 100)
-const LEAF_REACH = 4;               // leaves this close to a felled log come down with it
+const FELL_MAX_LEAVES = 900;        // ditto for the canopy flood
+const LEAF_REACH = 5;               // leaf-to-leaf hops a canopy may span out from its wood
+const LEAF_DIRS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
 const BARK_MIN = 1, BARK_MAX = 2;
+/* Falling leaves are one THREE.Group each, so a big canopy would add several hundred objects to
+   the scene in one go — the other half of the felling hitch. Past this many in flight the rest
+   settle straight to the ground with no visual, which nobody notices inside a collapsing tree. */
+const MAX_FALLING = 70;
 
 // live log -> its stripped form. Anything not in here can't be stripped.
 const STRIPPED_OF = {};
 STRIPPED_OF[B.LOG] = B.STRIPPED_LOG;
 STRIPPED_OF[B.BIRCH_LOG] = B.STRIPPED_BIRCH_LOG;
+STRIPPED_OF[B.SPRUCE_LOG] = B.STRIPPED_SPRUCE_LOG;
 // stripped -> the live log it came from, so a felled tree can drop the normal variant
 const UNSTRIPPED_OF = {};
 UNSTRIPPED_OF[B.STRIPPED_LOG] = B.LOG;
 UNSTRIPPED_OF[B.STRIPPED_BIRCH_LOG] = B.BIRCH_LOG;
+UNSTRIPPED_OF[B.STRIPPED_SPRUCE_LOG] = B.SPRUCE_LOG;
 // leaves -> the litter they settle into
 const LITTER_OF = {};
 LITTER_OF[B.LEAVES] = B.LEAF_CARPET;
 LITTER_OF[B.BIRCH_LEAVES] = B.BIRCH_LEAF_CARPET;
+LITTER_OF[B.SPRUCE_LEAVES] = B.SPRUCE_LEAF_CARPET;
 
 const isLiveLog     = (id) => STRIPPED_OF[id] !== undefined;
 const isStrippedLog = (id) => UNSTRIPPED_OF[id] !== undefined;
@@ -63,7 +72,7 @@ function _holdingAxe() {
    that cannot hold litter (another leaf, water, a slope) just drops the item instead of leaving
    a block floating in mid-air. */
 const FALLING = [];
-const FALL_GRAVITY = 26, FALL_MAX_SPEED = 22;
+const FALL_GRAVITY = 55, FALL_MAX_SPEED = 34;   // leaves come down quickly, not drifting
 
 function spawnFallingLeaf(id, x, y, z) {
   const passes = buildDropGeom(id);
@@ -73,14 +82,50 @@ function spawnFallingLeaf(id, x, y, z) {
     group.add(node || new THREE.Mesh(geo, mo || MATERIALS[p]));
   group.position.set(x + 0.5, y + 0.5, z + 0.5);
   scene.add(group);
-  FALLING.push({ group, id, x, z, y: y + 0.5, vy: -1 - Math.random() * 2 });
+  FALLING.push({ group, id, x, z, y: y + 0.5, vy: -3 - Math.random() * 3 });
 }
+
+/* ---- litter rots ----
+   Fallen leaves are not permanent scenery: each carpet is queued when it lands and rots away
+   after a while. Deliberately NOT gated on nearby logs the way canopy decay is — litter lying at
+   the foot of a living tree should still rot, otherwise every forest floor silts up forever. */
+const litterRot = new Map();        // "x,y,z" -> seconds remaining
+const LITTER_LIFE = 40, LITTER_LIFE_JITTER = 40;
+const LITTER_ROT_TICK = 1.0;
+let _litterTimer = 0;
+
+function queueLitterRot(x, y, z) {
+  litterRot.set(x + ',' + y + ',' + z, LITTER_LIFE + Math.random() * LITTER_LIFE_JITTER);
+}
+function updateLitterRot(dt) {
+  _litterTimer += dt;
+  if (_litterTimer < LITTER_ROT_TICK) return;
+  const step = _litterTimer * (typeof tickFactor === 'function' ? tickFactor() : 1);
+  _litterTimer = 0;
+  for (const [k, t] of litterRot) {
+    const left = t - step;
+    const [x, y, z] = k.split(',').map(Number);
+    const val = getBlock(x, y, z);
+    if (!isLitter(val & 255)) { litterRot.delete(k); continue; }   // mined or replaced
+    if (left > 0) { litterRot.set(k, left); continue; }
+    // thin the pile one layer at a time so a deep drift fades instead of blinking out
+    const v = (val >> 8) & 255;
+    if (v > 0) {
+      setBlock(x, y, z, (val & 255) | ((v - 1) << 8));
+      litterRot.set(k, LITTER_LIFE * 0.4 + Math.random() * LITTER_LIFE_JITTER * 0.4);
+    } else {
+      setBlock(x, y, z, B.AIR);
+      litterRot.delete(k);
+    }
+  }
+}
+function clearLitterRot() { litterRot.clear(); }
 
 /* Cells a falling block passes straight through. Billboards are included so a torch or a flower
    never stops a falling leaf in mid-air — it gets crushed on the way, the same rule sand and
    gravel use in 22-main-loop.js. */
 const fallPassable = (id) =>
-  id === B.AIR || id === B.WATER || PROPS[id]?.model === 'cross';
+  id === B.AIR || id === B.WATER || isLeaf(id) || PROPS[id]?.model === 'cross';
 
 /* Crush whatever billboard is in the cell, dropping it so nothing is silently destroyed. */
 function crushBillboard(x, y, z) {
@@ -91,7 +136,7 @@ function crushBillboard(x, y, z) {
     for (const d of blockDrop(id)) for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, y, z);
 }
 
-const isLitter = (id) => id === B.LEAF_CARPET || id === B.BIRCH_LEAF_CARPET;
+const isLitter = (id) => id === B.LEAF_CARPET || id === B.BIRCH_LEAF_CARPET || id === B.SPRUCE_LEAF_CARPET;
 const LITTER_MAX_V = 5;             // variant 0..5 = 1..6 layers, same scale as snow carpet
 
 /* Deepen the pile already in a cell. Returns false if that cell isn't this litter, or is full. */
@@ -101,6 +146,7 @@ function _deepenLitter(x, y, z, litter) {
   const v = (val >> 8) & 255;
   if (v >= LITTER_MAX_V) return false;
   setBlock(x, y, z, litter | ((v + 1) << 8));
+  queueLitterRot(x, y, z);
   return true;
 }
 
@@ -114,6 +160,7 @@ function _layLitter(x, y, z, litter) {
   if (!PROPS[below]?.solid && !isLitter(below)) return false;
   crushBillboard(x, y, z);
   setBlock(x, y, z, litter);
+  queueLitterRot(x, y, z);
   return true;
 }
 
@@ -153,46 +200,41 @@ function clearFallingLeaves() {
   FALLING.length = 0;
 }
 
+/* Same outcome as falling, minus the animation and the scene object: walk straight down to the
+   first surface and settle there. Used once the in-flight budget is spent. */
+const SETTLE_MAX_DROP = 24;
+function settleLeafNow(id, x, y, z) {
+  const litter = LITTER_OF[id] || B.LEAF_CARPET;
+  let ry = y;
+  for (let d = 0; d < SETTLE_MAX_DROP && ry > 1; d++) {
+    if (!fallPassable(getBlock(x, ry - 1, z) & 255)) break;
+    ry--;
+  }
+  if (_addLitter(x, ry, z, litter)) return;
+  if (_addLitter(x, ry + 1, z, litter)) return;
+  if (!player.canFly)
+    for (const d of blockDrop(id, true))
+      for (let n = 0; n < d.count; n++) spawnDrop(d.id, x, ry, z);
+}
+
 /* ---------------------------------- strip + fell ---------------------------------- */
 /* Called from the mining code the instant a log finishes breaking, BEFORE the block is cleared.
    Returns true when this module handled the hit, meaning the caller must not remove the block or
    spawn its normal drops. */
-/* How many axe swings it takes to cut THROUGH one trunk cell, from the size of the tree it
-   belongs to. A sapling-sized tree goes down in ~6 swings including the strip; a mature one
-   takes ~9. Recounted per swing rather than stored, because the flood is cheap (<100 cells) and
-   there is nowhere to persist per-tree state across a save. */
-const CUT_MIN = 5, CUT_MAX = 8;
-function cutStagesFor(logCount) {
-  return Math.max(CUT_MIN, Math.min(CUT_MAX, Math.ceil(logCount / 2)));
-}
-function countTreeLogs(x, y, z) {
-  let n = 0;
-  const seen = new Set([x + ',' + y + ',' + z]);
-  const stack = [[x, y, z]];
-  while (stack.length && n < FELL_MAX_LOGS) {
-    const [cx, cy, cz] = stack.pop();
-    if (!isAnyLog(getBlock(cx, cy, cz) & 255)) continue;
-    n++;
-    for (let dy = -1; dy <= 1; dy++)
-      for (let dz = -1; dz <= 1; dz++)
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy && !dz) continue;
-          const k = (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz);
-          if (seen.has(k)) continue;
-          seen.add(k);
-          if (isAnyLog(getBlock(cx + dx, cy + dy, cz + dz) & 255)) stack.push([cx + dx, cy + dy, cz + dz]);
-        }
-  }
-  return n;
-}
+/* Cutting is just the width field running down. Each swing takes CUT_STEP off the log's width
+   index, so the number of swings falls straight out of how thick the cell is — a slim branch
+   parts in two or three, a normal trunk in six, a flared oak stump in nine or ten. No stage
+   counter, no per-tree bookkeeping, and the notch you see IS the remaining wood. */
+const CUT_STEP = 4;                 // width indices removed per swing (8 texture units)
 
 function tryChopLog(x, y, z) {
   const val = getBlock(x, y, z), id = val & 255;
   if (!isAnyLog(id) || !_holdingAxe()) return false;
+  const variant = (val >> 8) & 255;
 
-  // first swing: take the bark off. The log stays standing at full thickness.
+  // first swing: take the bark off. Same width — nothing has been cut away yet.
   if (isLiveLog(id)) {
-    setBlock(x, y, z, STRIPPED_OF[id] | ((val >> 8) & 3) << 8);   // keep the axis, clear cut bits
+    setBlock(x, y, z, STRIPPED_OF[id] | (variant << 8));
     playBlockSound(id, 'break', x, y, z);
     if (!player.canFly) {
       const n = BARK_MIN + Math.floor(Math.random() * (BARK_MAX - BARK_MIN + 1));
@@ -201,17 +243,11 @@ function tryChopLog(x, y, z) {
     return true;
   }
 
-  /* Every swing after that bites deeper into the same cell. variant: bits 0-1 axis,
-     bits 2-3 the visible notch size (0..3), bits 4-6 the stage counter. The notch is a separate
-     field because the mesher sees only the variant and cannot know how many stages this tree
-     needs — size is recomputed here and baked in. */
-  const axis = (val >> 8) & 3;
-  const stage = (val >> 12) & 7;
-  const total = cutStagesFor(countTreeLogs(x, y, z));
-  const next = stage + 1;
-  if (next >= total) { fellTreeFrom(x, y, z); return true; }
-  const size = Math.min(3, Math.floor(next * 4 / total));
-  setBlock(x, y, z, id | ((axis | (size << 2) | (next << 4)) << 8));
+  // every swing after that bites CUT_STEP off the remaining width
+  const w = logWidthOf(variant);
+  const next = w - CUT_STEP;
+  if (next < LOG_W_MIN) { fellTreeFrom(x, y, z); return true; }
+  setBlock(x, y, z, id | (((variant & 3) | (next << 2)) << 8));
   playBlockSound(id, 'hit', x, y, z);
   return true;
 }
@@ -242,30 +278,52 @@ function fellTreeFrom(x, y, z) {
   }
   if (!logs.length) return;
 
-  // leaves first: read them while the logs are still in place, so LEAF_REACH measures from wood
+  /* Canopy, gathered while the logs are still standing so reach is measured from wood.
+
+     This is a BFS THROUGH connected leaves rather than a box scan around every log. The old
+     version tested a LEAF_REACH ball per log — 40 logs x 729 cells is ~29k getBlock calls in a
+     single frame, which was the bulk of the felling hitch. A canopy is one connected shell, so
+     flooding it visits each leaf about once: ~300 leaves x 6 neighbours instead. */
   const leafCells = new Map();
+  const leafSeen = new Set();
+  const lq = [];
   for (const l of logs)
-    for (let dy = -LEAF_REACH; dy <= LEAF_REACH; dy++)
-      for (let dz = -LEAF_REACH; dz <= LEAF_REACH; dz++)
-        for (let dx = -LEAF_REACH; dx <= LEAF_REACH; dx++) {
-          if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > LEAF_REACH) continue;
-          const nx = l.x + dx, ny = l.y + dy, nz = l.z + dz;
-          const k = nx + ',' + ny + ',' + nz;
-          if (leafCells.has(k)) continue;
-          const nid = getBlock(nx, ny, nz) & 255;
-          if (isLeaf(nid)) leafCells.set(k, { x: nx, y: ny, z: nz, id: nid });
-        }
+    for (const [dx, dy, dz] of LEAF_DIRS) {
+      const nx = l.x + dx, ny = l.y + dy, nz = l.z + dz;
+      const k = nx + ',' + ny + ',' + nz;
+      if (leafSeen.has(k)) continue;
+      leafSeen.add(k);
+      lq.push([nx, ny, nz, 1]);
+    }
+  for (let qi = 0; qi < lq.length && leafCells.size < FELL_MAX_LEAVES; qi++) {
+    const [cx, cy, cz, d] = lq[qi];
+    const cid = getBlock(cx, cy, cz) & 255;
+    if (!isLeaf(cid)) continue;
+    leafCells.set(cx + ',' + cy + ',' + cz, { x: cx, y: cy, z: cz, id: cid });
+    if (d >= LEAF_REACH) continue;
+    for (const [dx, dy, dz] of LEAF_DIRS) {
+      const nx = cx + dx, ny = cy + dy, nz = cz + dz;
+      const k = nx + ',' + ny + ',' + nz;
+      if (leafSeen.has(k)) continue;
+      leafSeen.add(k);
+      lq.push([nx, ny, nz, d + 1]);
+    }
+  }
 
   /* Queue the collapse instead of doing it now. A mature oak is ~40 logs and several hundred
      leaves; clearing all of them in one frame means that many setBlock calls, each dirtying a
      chunk and re-flooding light, which showed up as a hard hitch. Spreading it over FELL_STEPS
      ticks also reads better — the tree comes apart from the top down instead of vanishing. */
-  logs.sort((a, b) => b.y - a.y);                       // topmost first
-  const leaves = [...leafCells.values()].sort((a, b) => b.y - a.y);
+  logs.sort((a, b) => b.y - a.y);                       // crown first, so the tree folds downward
+  /* Leaves go the OTHER way — lowest first. Releasing the top of the canopy first dropped every
+     upper leaf onto the leaf blocks still standing underneath it: it came to rest in mid-air,
+     could not settle, and spilled as an item instead of deepening the drift. Bottom-up clears
+     each column ahead of the leaf above it. */
+  const leaves = [...leafCells.values()].sort((a, b) => a.y - b.y);
   FELL_JOBS.push({
     logs, leaves, li: 0, ci: 0,
-    logStep: Math.ceil(logs.length / FELL_STEPS),
-    leafStep: Math.ceil(leaves.length / FELL_STEPS),
+    logStep: Math.min(FELL_MAX_PER_STEP, Math.ceil(logs.length / FELL_STEPS)),
+    leafStep: Math.min(FELL_MAX_PER_STEP, Math.ceil(leaves.length / FELL_STEPS)),
     kind: logs[0].id, normal: 0, stripped: 0,
     dropX: x, dropY: y, dropZ: z,
     survival: !player.canFly,
@@ -279,8 +337,9 @@ function fellTreeFrom(x, y, z) {
 
 /* ---------------------------------- collapse, one step at a time ---------------------------- */
 const FELL_JOBS = [];
-const FELL_STEPS = 5;               // how many ticks a whole tree takes to come apart
-const FELL_TICK = 0.06;             // seconds per step
+const FELL_STEPS = 10;              // how many ticks a whole tree takes to come apart
+const FELL_TICK = 0.05;             // seconds per step (so ~0.5s for any size of tree)
+const FELL_MAX_PER_STEP = 24;       // hard ceiling on cells touched per tick, whatever the size
 let _fellTimer = 0;
 
 function updateFelling(dt) {
@@ -302,7 +361,8 @@ function updateFelling(dt) {
       const c = job.leaves[job.ci];
       if ((getBlock(c.x, c.y, c.z) & 255) !== c.id) continue;
       setBlock(c.x, c.y, c.z, B.AIR);
-      spawnFallingLeaf(c.id, c.x, c.y, c.z);
+      if (FALLING.length < MAX_FALLING) spawnFallingLeaf(c.id, c.x, c.y, c.z);
+      else settleLeafNow(c.id, c.x, c.y, c.z);
     }
     if (job.li < job.logs.length || job.ci < job.leaves.length) continue;
     // finished: pay out the whole trunk at the stump, mostly normal wood plus what you stripped

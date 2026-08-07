@@ -33,7 +33,9 @@ function VOXEL_CORE() {
               GRASS_PLANT:52, POPPY:53, ORCHID:54, TALL_BOT:55, TALL_TOP:56, LAVA:57, TIN_ORE:58, GOLD_ORE:59, COPPER_ORE:60,
               OBSIDIAN:61, TNT_TOP:62, TNT_SIDE:63, TNT_BOTTOM:64, SULFUR_BLOCK:65, SULFUR_DOWN_TIP:66,
               SULFUR_UP_TIP:67, TNT_LIT:68, OAK_SAPLING:69, BIRCH_SAPLING:70, SUGAR_CANE:71,
-              STRIPPED_LOG:72, STRIPPED_LOG_TOP:73, STRIPPED_BIRCH_LOG:74, STRIPPED_BIRCH_LOG_TOP:75 };
+              STRIPPED_LOG:72, STRIPPED_LOG_TOP:73, STRIPPED_BIRCH_LOG:74, STRIPPED_BIRCH_LOG_TOP:75,
+              SPRUCE_LOG:76, SPRUCE_LOG_TOP:77, SPRUCE_PLANKS:78, SPRUCE_LEAVES:79, SPRUCE_SAPLING:80,
+              STRIPPED_SPRUCE_LOG:81, STRIPPED_SPRUCE_LOG_TOP:82, PINCUSHION:83 };
   const B = { AIR:0, GRASS:1, DIRT:2, STONE:3, LOG:4, PLANKS:5, LEAVES:6, SAND:7,
               GLASS:8, BEDROCK:9, WATER:10, GLOWSTONE:11, OAKSLAB:12, CLAY:13, SNOW:14, COBBLE:15,
               COAL_ORE:16, IRON_ORE:17, DIAMOND_ORE:18, GRAVEL:19, RED_MUSHROOM:20, BROWN_MUSHROOM:21,
@@ -45,7 +47,9 @@ function VOXEL_CORE() {
               OBSIDIAN:59, SULFUR_BLOCK:60, SULFUR_DOWN_TIP:61, SULFUR_UP_TIP:62, OAK_SAPLING:63, BIRCH_SAPLING:64, SUGAR_CANE:65, TNT:66,
               BED:67, CHEST:68,
               // felling: a log is stripped before it can be cut through; leaves land as carpet
-              STRIPPED_LOG:69, STRIPPED_BIRCH_LOG:70, LEAF_CARPET:71, BIRCH_LEAF_CARPET:72, };
+              STRIPPED_LOG:69, STRIPPED_BIRCH_LOG:70, LEAF_CARPET:71, BIRCH_LEAF_CARPET:72,
+              SPRUCE_LOG:73, STRIPPED_SPRUCE_LOG:74, SPRUCE_PLANKS:75, SPRUCE_LEAVES:76,
+              SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -62,30 +66,38 @@ function VOXEL_CORE() {
   PROPS[B.GRASS]   = { name:'Grass', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.0, type:'grass', faces:[T.GRASS_SIDE,T.GRASS_SIDE,T.GRASS_TOP,T.DIRT,T.GRASS_SIDE,T.GRASS_SIDE], desc: '' };
   PROPS[B.DIRT]    = { name:'Dirt', solid:true,  opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:1.8, type:'ground', faces:[T.DIRT,T.DIRT,T.DIRT,T.DIRT,T.DIRT,T.DIRT], desc: '' };
   PROPS[B.STONE]   = { name:'Stone', solid:true,  opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE], desc: '' };
-  // slim log collision/raycast boxes per trunk axis (match the inset visual). opaque:false so a
-  // log never culls its neighbours' faces (otherwise the 1/16 gap around it shows holes).
-  const LOG_COLL = [ [[0.0625,0,0.0625, 0.9375,1,0.9375]],   // var 0: Y-axis
-                     [[0,0.0625,0.0625, 1,0.9375,0.9375]],   // var 1: X-axis
-                     [[0.0625,0.0625,0, 0.9375,0.9375,1]] ];  // var 2: Z-axis
+  /* ---- log width ----
+     Log variant byte: bits 0-1 axis | bits 2-7 WIDTH INDEX (1..40).
 
-  /* Stripped-log variant byte:  bits 0-1 axis | bits 2-3 CUT SIZE (0..3) | bits 4-6 cut stage.
-     The axe bites a notch out of the log, so a partly-cut trunk is visibly thinner on its two
-     non-axis sides. Size is stored separately from the stage because the mesher only knows the
-     variant — it cannot see how many stages this particular tree needs. */
-  const LOG_CUT_INSET = [0.0625, 0.1875, 0.3125, 0.4375];    // 1/16, 3/16, 5/16, 7/16
-  function logCutBox(axis, size) {
-    const t = LOG_CUT_INSET[size & 3];
+     Textures are 64x64, so one block is 64 units across. Width index w maps to 8 + 2w units:
+     index 1 = 10 (thinnest twig), 12 = 32 (half a block), 24 = 56 (the width every log in the
+     game has had until now), 28 = 64 (exactly one block), up to 40 = 88 (a stump that bulges
+     past its own cell). One field drives everything — the mesh, the collision box, branch taper,
+     stump girth, and how many axe swings a cell takes to cut through, since felling just walks
+     the width down.
+
+     Index 0 means "unset" and reads as LOG_W_NORMAL. That is what keeps hand-placed logs, and
+     every log in a world saved before this, looking exactly as they did. */
+  const LOG_W_MIN = 1, LOG_W_MAX = 40;
+  const LOG_W_BLOCK = 28;                                    // 64 units — a full cell
+  // A log you hold, place or see in the inventory is a full block. Only grown wood is slimmer:
+  // trunks sit at 60 units and branches well under that.
+  const LOG_W_NORMAL = LOG_W_BLOCK;
+  const logWidthPx = (w) => 8 + 2 * Math.max(LOG_W_MIN, Math.min(LOG_W_MAX, w));
+  const logWidthOf = (variant) => ((variant >> 2) & 63) || LOG_W_NORMAL;
+  function logCutBox(axis, w) {
+    const t = (1 - logWidthPx(w) / 64) / 2;                  // inset per side; negative past 64
     return axis === 1 ? [0, t, t, 1, 1 - t, 1 - t]           // X-axis: inset Y,Z
          : axis === 2 ? [t, t, 0, 1 - t, 1 - t, 1]           // Z-axis: inset X,Y
          :              [t, 0, t, 1 - t, 1, 1 - t];          // Y-axis: inset X,Z
   }
-  // indexed by the whole variant byte, so the stage bits don't fall through to prop.boxes
+  // indexed by the whole variant byte, so the width bits never fall through to prop.boxes
   const LOG_CUT_COLL = [];
-  for (let v = 0; v < 256; v++) LOG_CUT_COLL[v] = [logCutBox(v & 3, (v >> 2) & 3)];
-  PROPS[B.LOG]     = { name:'Oak log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.LOG,T.LOG,T.LOG_TOP,T.LOG_TOP,T.LOG,T.LOG], desc: '' };
+  for (let v = 0; v < 256; v++) LOG_CUT_COLL[v] = [logCutBox(v & 3, logWidthOf(v))];
+  PROPS[B.LOG]     = { name:'Oak log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.LOG,T.LOG,T.LOG_TOP,T.LOG_TOP,T.LOG,T.LOG], desc: '' };
   PROPS[B.PLANKS]  = { name:'Oak planks', solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:4.0, type:'wood', faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
   PROPS[B.LEAVES]  = { name:'Oak leaves',     solid:false, opaque:false, raycast:true,  pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES], desc: '' };
-  PROPS[B.BIRCH_LOG]    = { name:'Birch log',    solid:true,  opaque:false,  raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_COLL[0], boxesByVar:LOG_COLL, faces:[T.BIRCH_LOG,T.BIRCH_LOG,T.BIRCH_LOG_TOP,T.BIRCH_LOG_TOP,T.BIRCH_LOG,T.BIRCH_LOG], desc: '' };
+  PROPS[B.BIRCH_LOG]    = { name:'Birch log',    solid:true,  opaque:false,  raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.BIRCH_LOG,T.BIRCH_LOG,T.BIRCH_LOG_TOP,T.BIRCH_LOG_TOP,T.BIRCH_LOG,T.BIRCH_LOG], desc: '' };
   PROPS[B.BIRCH_PLANKS] = { name:'Birch planks', solid:true,  opaque:true,  raycast:true, pass:0, model:'cube', stack:60, hardness:3.0, type:'wood', faces:[T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS,T.BIRCH_PLANKS], desc: '' };
   PROPS[B.BIRCH_LEAVES] = { name:'Birch leaves', solid:false, opaque:false, raycast:true, pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES], desc: '' };
   PROPS[B.SAND]    = { name:'Sand',       solid:true,  opaque:true,  raycast:true,  pass:0, model:'cube', stack:60, hardness:1.9, type:'ground', faces:[T.SAND,T.SAND,T.SAND,T.SAND,T.SAND,T.SAND], desc: '' };
@@ -135,6 +147,13 @@ function VOXEL_CORE() {
   /* Leaf litter — a fallen leaf block lying flat. Not solid: you walk straight through a drift
      of leaves. Each fallen leaf is its OWN block, so a pile is several carpets stacked in
      separate cells rather than one cell counting layers. */
+  /* Spruce: the cold-forest conifer. */
+  PROPS[B.SPRUCE_LOG]          = { name:'Spruce log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:4.0, type:'wood', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.SPRUCE_LOG,T.SPRUCE_LOG,T.SPRUCE_LOG_TOP,T.SPRUCE_LOG_TOP,T.SPRUCE_LOG,T.SPRUCE_LOG], desc: '' };
+  PROPS[B.STRIPPED_SPRUCE_LOG] = { name:'Stripped spruce log', solid:true, opaque:false, raycast:true, pass:0, model:'log', rot:'all', stack:60, hardness:3.0, type:'wood', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.STRIPPED_SPRUCE_LOG,T.STRIPPED_SPRUCE_LOG,T.STRIPPED_SPRUCE_LOG_TOP,T.STRIPPED_SPRUCE_LOG_TOP,T.STRIPPED_SPRUCE_LOG,T.STRIPPED_SPRUCE_LOG], desc: '' };
+  PROPS[B.SPRUCE_PLANKS]       = { name:'Spruce planks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:3.0, type:'wood', faces:[T.SPRUCE_PLANKS,T.SPRUCE_PLANKS,T.SPRUCE_PLANKS,T.SPRUCE_PLANKS,T.SPRUCE_PLANKS,T.SPRUCE_PLANKS], desc: '' };
+  PROPS[B.SPRUCE_LEAVES]       = { name:'Spruce leaves', solid:false, opaque:false, raycast:true, pass:1, model:'cube', stack:60, hardness:0.4, type:'grass', faces:[T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES], desc: '' };
+  PROPS[B.SPRUCE_SAPLING]      = { name:'Spruce sapling', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.8,0.75]], faces:[T.SPRUCE_SAPLING], desc: '' };
+  PROPS[B.SPRUCE_LEAF_CARPET]  = { name:'Spruce leaf litter', solid:false, opaque:false, raycast:true, pass:1, model:'carpet', topOnly:true, stack:60, hardness:0.1, type:'grass', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES,T.SPRUCE_LEAVES], desc: '' };
   PROPS[B.LEAF_CARPET]        = { name:'Leaf litter', solid:false, opaque:false, raycast:true, pass:1, model:'carpet', topOnly:true, stack:60, hardness:0.1, type:'grass', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES,T.LEAVES], desc: '' };
   PROPS[B.BIRCH_LEAF_CARPET]  = { name:'Birch leaf litter', solid:false, opaque:false, raycast:true, pass:1, model:'carpet', topOnly:true, stack:60, hardness:0.1, type:'grass', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES,T.BIRCH_LEAVES], desc: '' };
   PROPS[B.COBBLE]      = { name:'Cobblestone', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:8.0, type:'stone', faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
@@ -286,7 +305,13 @@ function VOXEL_CORE() {
   }
   PROPS[B.STAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:3, type:'wood', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES, faces:[T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS,T.PLANKS], desc: '' };
   // cactus: own model — side faces inset 1/16 so the column reads thin; touching it hurts (19-vitals)
-  PROPS[B.CACTUS] = { name:'Cactus', solid:true, opaque:false, raycast:true, pass:1, model:'cactus', stack:60, hardness:1.4, type:'grass', boxes:[[0.0625,0,0.0625,0.9375,1,0.9375]], faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
+  /* Cactus runs on the LOG model. It gains an axis and a width index for free, which is what lets
+     a saguaro put out arms: the arm is a horizontal cactus cell that flares into the trunk exactly
+     the way a branch does. `family` keeps it from welding itself to actual wood if the two ever
+     end up adjacent. No stripping and no leaves — those live in 33-felling, which only knows about
+     the wood ids. */
+  PROPS[B.CACTUS] = { name:'Cactus', solid:true, opaque:false, raycast:true, pass:1, model:'log', rot:'all', family:'cactus', stack:60, hardness:1.4, type:'grass', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
+  PROPS[B.PINCUSHION] = { name:'Pincushion', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.7,0.75]], faces:[T.PINCUSHION], desc: '' };
   PROPS[B.COBBLESLAB]    = { name:'Cobblestone slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:8, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
   PROPS[B.BRICKS]    = { name:'Bricks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:6.5, type:'stone', faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
   PROPS[B.BRICKSSLAB]    = { name:'Brick slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
@@ -297,7 +322,10 @@ function VOXEL_CORE() {
   PROPS[B.STONE_BRICK]    = { name:'Stone brick', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60,  hardness:8.5, type:'stone', faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
   PROPS[B.STONE_BRICKSLAB]    = { name:'Stone brick slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
   PROPS[B.STONESLAB]    = { name:'Stone slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.0, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE], desc: '' };
-  PROPS[B.CACTUSSLAB]    = { name:'Cactus slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:1.0, type:'grass', boxes:CACTUS_SLAB_VAR[0], boxesByVar: CACTUS_SLAB_VAR, faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
+  /* RETIRED — cactus slab. The PROPS entry has to stay so worlds that already contain one still
+     mesh instead of crashing on an undefined block, but `noInv` keeps it out of the creative
+     palette and it has no recipe, so it can no longer be obtained. */
+  PROPS[B.CACTUSSLAB]    = { name:'Cactus slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', noInv:true, stack:60, hardness:1.0, type:'grass', boxes:CACTUS_SLAB_VAR[0], boxesByVar: CACTUS_SLAB_VAR, faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
   PROPS[B.GLASSSLAB]    = { name:'Glass slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:0.9, type:'glass', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS,T.GLASS], desc: '' };
   PROPS[B.WOOL]    = { name:'Wool', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wool', faces:[T.WOOL,T.WOOL,T.WOOL,T.WOOL,T.WOOL,T.WOOL], desc: '' };
   PROPS[B.HAY]     = { name:'Hay bale', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:1.0, type:'grass', faces:[T.HAY_SIDE,T.HAY_SIDE,T.HAY_TOP,T.HAY_TOP,T.HAY_SIDE,T.HAY_SIDE], desc: '' };
@@ -651,6 +679,8 @@ function VOXEL_CORE() {
           // surface material: grass/dirt on land, sand on beaches/seafloor/deserts, stone caps on
           // desert hills, clay+dirt patches on the seabed, snowy grass (+snow cap) in cold biomes
           let topB, underB, snowCap = false;
+          // altitude at which solid snow starts winning over carpet (see the snowCap block below)
+          const SNOW_SOLID_Y = WATER_LEVEL + 26;
           // beach mask: for above-water columns near shore level, sand only if the nearest
           // wet column is closer than that water type's beach width. Ocean beaches vary 4..8,
           // river/lake beaches 2..4, both from a low-freq noise so widths change by region.
@@ -723,12 +753,19 @@ function VOXEL_CORE() {
               const thick = 4 + Math.floor(hash2(wx * 17 + 331, wz * 19 + 733) * 2);   // 4 or 5
               data[idx(x, h + 1, z)] = B.SNOW_CARPET | ((thick - 1) << 8);
             } else {
+              /* Solid snow is now an ALTITUDE feature, not the default filler. At sea level a
+                 snow biome is almost entirely carpet — the ground still reads white but you can
+                 see the grass and plants through it — and full blocks only take over as you
+                 climb. `snowline` runs 0 below SNOW_SOLID_Y to 1 well above it, and gates the
+                 patch threshold, which cuts low-altitude snow blocks by ~90%. */
               const patch = (fbm(wx * 0.045 + 1201.7, wz * 0.045 - 903.3, 3) + 1) * 0.5;
-              if (patch < 0.42) {
+              const snowline = smooth01(h, SNOW_SOLID_Y, SNOW_SOLID_Y + 34);
+              const solidCut = 0.04 + 0.5 * snowline;            // 4% low down, ~54% up high
+              if (patch < solidCut) {
                 data[idx(x, h + 1, z)] = B.SNOW;                  // solid snowfield
               } else {
-                // taper: patch 0.42 → 5 layers (blends into neighbouring full blocks); patch 1.0 → 1 layer
-                const layers = Math.min(5, Math.max(1, 5 - Math.floor((patch - 0.42) * 8)));
+                // taper: just above the cut -> 5 layers (blends into neighbouring full blocks)
+                const layers = Math.min(5, Math.max(1, 5 - Math.floor((patch - solidCut) * 8)));
                 data[idx(x, h + 1, z)] = B.SNOW_CARPET | ((layers - 1) << 8);
               }
             }
@@ -1223,11 +1260,16 @@ function VOXEL_CORE() {
           // forests. Never in snow biomes, never the big/mega form.
           const birchRegion = !isPlains && !isSnow && fbm(wx * 0.004 + 1234, wz * 0.004 - 987, 2) > 0.35;
           const isBirch = birchRegion || (!isPlains && !isSnow && hash2(gcx * 211 + 5, gcz * 197 + 3) < 0.01);
+          // spruce is strictly a cold-biome tree — no scattering into temperate forest
+          const isSpruce = !isBirch && isSnow;
           // plains/meadow: flat 0.1% chance. forest/other: original density-scaled odds. birch forest: dense.
           // flat worlds are entirely Plains, and plains odds (0.1%) would leave a testbed with
           // almost no trees at all — lift it enough that a few are always in sight
-          let baseProb = isPlains ? (FLAT ? 0.03 : 0.001) : (forestNoise ? 0.55 : 0.08) * treeF;
-          if (birchRegion) baseProb = Math.max(baseProb, 0.5);
+          /* Roughly halved across the board. Canopies are far bigger than they used to be —
+             wider oaks, tall spruce cones — so the old per-cell odds packed the forest into a
+             solid roof with no gaps or light between trunks. */
+          let baseProb = isPlains ? (FLAT ? 0.02 : 0.0007) : (forestNoise ? 0.26 : 0.04) * treeF;
+          if (birchRegion) baseProb = Math.max(baseProb, 0.24);
           if (r > baseProb) continue;
           // flatness check
           let clear = true;
@@ -1246,7 +1288,14 @@ function VOXEL_CORE() {
             const bRand = (a, b) => hash2(gcx * 29 + a, gcz * 61 + b);
             const trunkH = 9 + ((bRand(3, 5) * 4) | 0);        // 9..12
             put(tx, h, tz, B.DIRT, true);
-            for (let y = h + 1; y <= h + trunkH; y++) put(tx, y, tz, B.LOG, true);
+            // big oak: an oversized stump flaring past its own cell, tapering one index per cell
+            // down to the trunk — a hard step from stump straight to trunk width read as a wide
+            // block with a pole balanced on it
+            const bigStumpW = LOG_W_BLOCK + 6, bigTrunkW = 26;
+            for (let y = h + 1; y <= h + trunkH; y++) {
+              const w = Math.max(bigTrunkW, bigStumpW - (y - (h + 1)));
+              put(tx, y, tz, B.LOG | ((w << 2) << 8), true);
+            }
             // top canopy: 7x7 base spanning 3 layers, then 5x5, 3x3, tip
             for (let ly = h + trunkH - 2; ly <= h + trunkH + 1; ly++)
               for (let oz = -3; oz <= 3; oz++)
@@ -1282,7 +1331,9 @@ function VOXEL_CORE() {
                 bx = Math.round(dx * s);
                 bz2 = Math.round(dz * s);
                 by = bh + Math.floor(s * 0.45);
-                put(tx + bx, by, tz + bz2, B.LOG | (branchVar << 8), true);
+                // taper as it reaches out, same rule the small tree uses
+                const bw = Math.max(LOG_W_MIN + 3, 22 - (s - 1) * 3);
+                put(tx + bx, by, tz + bz2, B.LOG | ((branchVar | (bw << 2)) << 8), true);
               }
               // wider leaf blob at branch tip (radius ~2) + a smaller blob mid-branch
               for (let ly = -2; ly <= 2; ly++)
@@ -1314,35 +1365,146 @@ function VOXEL_CORE() {
              Every form also grows 1-3 stub branches: a single horizontal log poking out of the
              upper trunk with a small tuft on it. That is what makes the trunk read as a tree
              rather than a pole, and it costs one extra log per branch. */
-          const LOG = isBirch ? B.BIRCH_LOG : B.LOG, LEAF = isBirch ? B.BIRCH_LEAVES : B.LEAVES;
-          const th = isBirch ? 5 + ((r * 1e6) | 0) % 6           // birch 5..10
-                             : 4 + ((r * 1e6) | 0) % 3;          // oak   4..6
+          const LOG = isSpruce ? B.SPRUCE_LOG : isBirch ? B.BIRCH_LOG : B.LOG;
+          const LEAF = isSpruce ? B.SPRUCE_LEAVES : isBirch ? B.BIRCH_LEAVES : B.LEAVES;
+
+          /* Spruce is a cone, not a ball, so it gets its own shape entirely: a straight pole with
+             skirts of needles that shrink toward a point. Branch stubs are skipped — a conifer's
+             limbs are short and buried in the skirt, so a bare stub sticking out looks wrong. */
+          if (isSpruce) {
+            const sh = 14 + ((hash2(gcx * 53 + 3, gcz * 97 + 7) * 7) | 0);         // 14..20 tall
+            put(tx, h, tz, B.DIRT, true);
+            /* The trunk narrows the whole way up rather than stepping from stump to a constant
+               width — a real conifer is a spike, and by the crown it is barely thicker than a
+               branch. 30 units at the base down to 14 at the tip. */
+            const SPR_STUMP = 30, SPR_TIP = 14;
+            for (let y = h + 1; y <= h + sh; y++) {
+              const t = (y - (h + 1)) / Math.max(1, sh - 1);
+              const w = Math.round(SPR_STUMP - (SPR_STUMP - SPR_TIP) * t);
+              put(tx, y, tz, LOG | ((w << 2) << 8), true);
+            }
+            /* Needles: a broad heavy skirt low down thinning to a spike, and never absent at the
+               top — radius is interpolated 4 -> 1 over the canopy and floored at 1, so the crown
+               always carries foliage instead of ending in bare trunk. Alternate tiers pull in one
+               step for the layered look, and the rim thins out as it climbs so the silhouette
+               reads dense at the bottom and wispy at the top. */
+            const base = h + 2, topY = h + sh, span = Math.max(1, topY - base);
+            for (let ly = base; ly <= topY; ly++) {
+              const t = (ly - base) / span;                                        // 0 low .. 1 high
+              let rad = Math.max(1, Math.round(4 - 3.2 * t));
+              if (((ly - base) % 2) === 1) rad = Math.max(1, rad - 1);
+              const rimKeep = 0.85 - 0.5 * t;                                      // thinner rim up top
+              for (let oz = -rad; oz <= rad; oz++)
+                for (let ox = -rad; ox <= rad; ox++) {
+                  const d = Math.abs(ox) + Math.abs(oz);
+                  if (d > rad) continue;
+                  if (d === rad && hash2(wx + ox * 31 + ly, wz + oz * 17 - ly) > rimKeep) continue;
+                  put(tx + ox, ly, tz + oz, LEAF, false);
+                }
+            }
+            for (let t2 = 1; t2 <= 2; t2++) put(tx, topY + t2, tz, LEAF, false);   // spire
+            const SLIT = B.SPRUCE_LEAF_CARPET;
+            for (let oz = -2; oz <= 2; oz++)
+              for (let ox = -2; ox <= 2; ox++) {
+                if (!ox && !oz) continue;
+                if (hash2(wx + ox * 137 + 41, wz + oz * 211 - 29) > 0.3) continue;
+                const lx = tx + ox, lz = tz + oz;
+                if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
+                if ((data[idx(lx, h, lz)] & 255) !== B.GRASS) continue;
+                put(lx, h + 1, lz, SLIT, false);
+              }
+            continue;
+          }
+          // birch grows tall and straight (7..12); oak keeps a shorter, thicker stump (5..8)
+          const th = isBirch ? 7 + ((hash2(gcx * 43 + 5, gcz * 71 + 9) * 6) | 0)
+                             : 5 + ((hash2(gcx * 43 + 5, gcz * 71 + 9) * 4) | 0);
           /* Per-tree dice. NOT derived from `r`: a tree only exists when r <= baseProb, and
              baseProb is as low as 0.001, so every `(r * K) | 0` truncated to 0 and each tree came
              out with identical form, branch count and branch length. These are independent
              hashes of the grid cell, still a pure function of world position. */
           const tRand = (a, b) => hash2(gcx * 37 + a, gcz * 53 + b);
           const form = (tRand(11, 23) * 3) | 0;
+
+          /* Trunk width, and the flared stump at its foot.
+             Oak carries a stump wider than a full cell (up to 76 units). That only looks right on
+             open ground, so it needs 3x3 of grass/dirt under it — otherwise the flare hangs over
+             a ledge. Failing the test isn't fatal: the tree still grows, just on a plain trunk.
+             Birch never flares; its width tracks its height so tall ones aren't spindly. */
+          const TRUNK_W_MIN = 26;                                          // 60 units, both species
+          const trunkW = isBirch ? Math.max(TRUNK_W_MIN, Math.min(28, 16 + th))
+                                 : TRUNK_W_MIN + ((tRand(131, 137) * 3) | 0);
+          let stumpW = trunkW;
+          if (!isBirch) {
+            const want = LOG_W_BLOCK + 2 + ((tRand(139, 149) * 5) | 0);    // 68..76 units
+            let flat = true;
+            for (let oz = -1; oz <= 1 && flat; oz++)
+              for (let ox = -1; ox <= 1; ox++) {
+                const gx2 = tx + ox, gz2 = tz + oz;
+                if (gx2 < 0 || gx2 > 15 || gz2 < 0 || gz2 > 15) continue;  // outside: trust the flatness test
+                const under = data[idx(gx2, h, gz2)] & 255;
+                if (under !== B.GRASS && under !== B.DIRT) { flat = false; break; }
+              }
+            if (flat) stumpW = want;
+          }
+          const wBits = (w) => (w << 2);                   // variant bits 2-7 carry the width
+
           put(tx, h, tz, B.DIRT, true);
-          for (let y = h + 1; y <= h + th; y++) put(tx, y, tz, LOG, true);
+          /* The flare tapers away instead of stopping dead: each cell above the stump loses one
+             width index (2 units) until it reaches the trunk width. A 70-unit stump therefore
+             reads 70, 68, 66 ... down to 60, which is what makes the base look grown rather than
+             like a wide block with a thin pole balanced on it. */
+          for (let y = h + 1; y <= h + th; y++) {
+            const w = Math.max(trunkW, stumpW - (y - (h + 1)));
+            put(tx, y, tz, LOG | (wBits(w) << 8), true);
+          }
 
           /* Stub branches on the upper half of the trunk, each on its own side and each its own
              LENGTH (1..3 cells, rising as it goes out). Uniform 1-cell stubs made every tree
              look identical from a distance; varying the reach is what gives a stand its ragged,
              overlapping canopy line. */
-          const nStub = 1 + ((tRand(41, 59) * 3) | 0);           // 1..3 branches
+          /* Birch and oak branch very differently, and treating them the same was what made
+             birches look wrong — a fat branch a third of the way up a slender white trunk.
+
+             BIRCH: a tall clean pole. Branches only in the top quarter, at most two, and only on
+                    a trunk tall enough to have earned them.
+             OAK:   branchier and shaggier, 2..4 branches spread over the upper half.
+
+             Branch cells carry thickness 2 in variant bits 2-3, so a branch renders visibly
+             thinner than the trunk it grows from instead of being another full log. */
+          const isTall = th >= (isBirch ? 8 : 6);
+          const nStub = isBirch ? (isTall ? 1 + ((tRand(41, 59) * 2) | 0) : 0)
+                                : 2 + ((tRand(41, 59) * 3) | 0);
+          const stubLow  = isBirch ? h + th - Math.max(1, Math.round(th * 0.25))   // top quarter
+                                   : h + th - Math.max(2, Math.round(th * 0.5));   // upper half
+          const stubSpan = Math.max(1, (h + th - 1) - stubLow);
           const STUB_DIR = [[1, 0], [-1, 0], [0, 1], [0, -1]];
           for (let s = 0; s < nStub; s++) {
             const dir = STUB_DIR[(tRand(71 + s * 13, 83 + s * 7) * 4) | 0];
-            const sy = h + th - 1 - ((tRand(97 + s * 11, 101 + s * 5) * Math.max(1, th - 2)) | 0);
-            if (sy <= h + 1) continue;                           // never at ground level
-            const len = 1 + ((tRand(103 + s * 3, 107 + s * 9) * 3) | 0);   // 1..3 cells long
+            const sy = stubLow + ((tRand(97 + s * 11, 101 + s * 5) * stubSpan) | 0);
+            if (sy <= h + 2) continue;                           // never down at the stump
+            // birch twigs stay short; oak reaches out and rises as it goes
+            const len = isBirch ? 1 + ((tRand(103 + s * 3, 107 + s * 9) * 2) | 0)
+                                : 1 + ((tRand(103 + s * 3, 107 + s * 9) * 3) | 0);
+            /* Walk the branch as a path of horizontal runs and vertical risers rather than one
+               diagonal line of horizontal logs. The riser cells are Y-axis logs, so at every turn
+               the horizontal log flares into the vertical one (logInto already does that) and the
+               pair reads as an L elbow pointing the way the branch is going — which is what a
+               real limb looks like where it kinks upward.
+
+               Birch rises a cell per step, so it is elbows all the way up; oak runs out level and
+               kinks once it is clear of the trunk. */
             const axisVar = dir[0] ? 1 : 2;                      // lie flat along X or Z
             let ex = tx, ez = tz, ey = sy;
             for (let k = 1; k <= len; k++) {
               ex = tx + dir[0] * k; ez = tz + dir[1] * k;
-              ey = sy + ((k >= 2) ? 1 : 0);                      // longer branches angle upward
-              put(ex, ey, ez, LOG | (axisVar << 8), true);
+              const bw = isBirch ? 11                            // 30 units, uniform
+                                 : Math.max(LOG_W_MIN + 3, trunkW - 4 - (k - 1) * 3);
+              put(ex, ey, ez, LOG | ((axisVar | wBits(bw)) << 8), true);   // horizontal run
+              const rise = isBirch ? 1 : (k === 1 ? 1 : 0);
+              for (let u = 0; u < rise; u++) {
+                ey++;
+                put(ex, ey, ez, LOG | ((0 | wBits(bw)) << 8), true);       // the elbow, vertical
+              }
             }
             // leaf tuft on the branch tip, sized with the branch
             const tuft = len >= 3 ? 2 : 1;
@@ -1387,6 +1549,19 @@ function VOXEL_CORE() {
             }
         }
       }
+
+      /* Snowy grass sides are only correct when snow is actually sitting on the block. The snow
+         cap is laid before the tree pass, so any column a trunk landed in still claims a white
+         rim under bare wood. Sweep it off after the trees have gone in. */
+      for (let z = 0; z < CZ; z++)
+        for (let x = 0; x < CX; x++) {
+          const gi2 = (x + 2) + (z + 2) * 20, hh = H[gi2];
+          if (hh < 1 || hh > 198) continue;
+          const gv = data[idx(x, hh, z)];
+          if ((gv & 255) !== B.GRASS || ((gv >> 8) & 255) !== V.GRASS_SNOWY) continue;
+          const above = data[idx(x, hh + 1, z)] & 255;
+          if (above !== B.SNOW && above !== B.SNOW_CARPET) data[idx(x, hh, z)] = B.GRASS;
+        }
 
       /* ---- red mushrooms: cave floors + shadowed ground under leaves ---- */
       for (let z = 0; z < CZ; z++) {
@@ -1573,8 +1748,51 @@ function VOXEL_CORE() {
           if ((data[idx(x, h + 1, z)] & 255) !== B.AIR) continue;
           if (heightAt(wx + 1, wz) > h || heightAt(wx - 1, wz) > h ||
               heightAt(wx, wz + 1) > h || heightAt(wx, wz - 1) > h) continue;
-          const n = 1 + ((hash3(wx, 8888, wz) * 4) | 0);
-          for (let k = 1; k <= n && h + k < 199; k++) data[idx(x, h + k, z)] = B.CACTUS;
+          /* Saguaro: a tapering column with 0-2 arms. An arm is one horizontal cactus cell out
+             from the trunk followed by a short vertical run, so it flares into the trunk exactly
+             the way a tree branch does and reads as a raised hand. Arms are placed with the same
+             cell writes as the trunk — the log mesher does the rest. */
+          const cw = (w) => (w << 2);                          // variant bits 2-7 = width index
+          const CAC_BASE = 26, CAC_TIP = 20;                   // 60 -> 48 units
+          const n = 3 + ((hash3(wx, 8888, wz) * 4) | 0);       // 3..6 tall
+          const putCac = (cx2, cy2, cz2, axis, w) => {
+            if (cx2 < 0 || cx2 > 15 || cz2 < 0 || cz2 > 15 || cy2 < 2 || cy2 > 198) return;
+            const i2 = idx(cx2, cy2, cz2);
+            if ((data[i2] & 255) !== B.AIR) return;
+            data[i2] = B.CACTUS | ((axis | cw(w)) << 8);
+          };
+          for (let k = 1; k <= n && h + k < 199; k++) {
+            const t = (k - 1) / Math.max(1, n - 1);
+            putCac(x, h + k, z, 0, Math.round(CAC_BASE - (CAC_BASE - CAC_TIP) * t));
+          }
+          /* Arms leave the trunk high up — near the crown, and often above it once their vertical
+             run is added, which is what gives a saguaro its raised-hands silhouette. Branching
+             from halfway down made them read as a shrub. */
+          const FLOWER_CHANCE = 0.05;
+          const capFlower = (fx, fy, fz, salt) => {
+            if (fy >= 199 || (data[idx(fx, fy, fz)] & 255) !== B.AIR) return;
+            if (fx < 0 || fx > 15 || fz < 0 || fz > 15) return;
+            if (hash3(wx + salt, 3141 + salt, wz - salt) >= FLOWER_CHANCE) return;
+            data[idx(fx, fy, fz)] = B.PINCUSHION;
+          };
+          const armCount = (hash3(wx + 5, 9999, wz + 5) * 2.4) | 0;    // 0..2
+          const ARM_DIR = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+          for (let a = 0; a < armCount && n >= 4; a++) {
+            const d = ARM_DIR[(hash3(wx + a * 7, 1234 + a, wz - a * 11) * 4) | 0];
+            /* The elbow must sit BESIDE trunk, never level with the crown or above it — an arm
+               that starts at the top reads as a second cactus balanced on the first rather than
+               a limb. Clamping it one cell below the crown keeps it flanked by trunk; the 1-2
+               cell vertical run afterwards is what raises the hand to crown height and past it. */
+            const lo = h + Math.max(2, n - 3);
+            const ay = Math.min(h + n - 1, lo + ((hash3(wx - a * 3, 4321 + a, wz + a * 13) * 3) | 0));
+            const armAxis = d[0] ? 1 : 2;
+            const ax2 = x + d[0], az2 = z + d[1];
+            putCac(ax2, ay, az2, armAxis, 18);                         // 44 units, thinner than trunk
+            const up = 1 + ((hash3(wx + a * 17, 555 + a, wz + a * 19) * 2) | 0);   // rises 1..2
+            for (let u = 1; u <= up; u++) putCac(ax2, ay + u, az2, 0, 18);
+            capFlower(ax2, ay + up + 1, az2, 17 + a * 31);             // flower on the raised hand
+          }
+          capFlower(x, h + n + 1, z, 3);                               // ...and on the trunk's crown
         }
 
       /* ---- sugar cane: ground column must be exactly one block above water level so the sand
@@ -1905,81 +2123,90 @@ function VOXEL_CORE() {
         }
 
     // ---- non-cube: cactus — full-height column, side faces inset 1/16 (thin look) ----
-    function emitCactus(x, y, z) {
-      const f = PROPS[B.CACTUS].faces;           // [+X,-X,top,bottom,+Z,-Z]
-      const e = 0.0625;
-      const y0 = y, y1 = y + 1;
-      if ((gb(x, y + 1, z) & 255) !== B.CACTUS)
-        quad(1, [x,y1,z],[x,y1,z+1],[x+1,y1,z+1],[x+1,y1,z], [0,0],[0,1],[1,1],[1,0], f[2], 255, gl(x, y+1, z));
-      if ((gb(x, y - 1, z) & 255) !== B.CACTUS && !P[gb(x, y-1, z) & 255].opaque)
-        quad(1, [x,y0,z],[x+1,y0,z],[x+1,y0,z+1],[x,y0,z+1], [0,0],[1,0],[1,1],[0,1], f[3], 140, gl(x, y-1, z));
-      const xp = x + 1 - e, xn = x + e, zp = z + 1 - e, zn = z + e;
-      quad(1, [xp,y0,z],[xp,y1,z],[xp,y1,z+1],[xp,y0,z+1], [1,0],[1,1],[0,1],[0,0], f[0], 178, gl(x+1, y, z)); // +X
-      quad(1, [xn,y0,z],[xn,y0,z+1],[xn,y1,z+1],[xn,y1,z], [0,0],[1,0],[1,1],[0,1], f[1], 178, gl(x-1, y, z)); // -X
-      quad(1, [x,y0,zp],[x+1,y0,zp],[x+1,y1,zp],[x,y1,zp], [0,0],[1,0],[1,1],[0,1], f[4], 216, gl(x, y, z+1)); // +Z
-      quad(1, [x,y0,zn],[x,y1,zn],[x+1,y1,zn],[x+1,y0,zn], [1,0],[1,1],[0,1],[0,0], f[5], 216, gl(x, y, z-1)); // -Z
-    }
-    for (let y = 0; y < Math.min(199, yCap); y++)
-      for (let z = 0; z < 16; z++)
-        for (let x = 0; x < 16; x++)
-          if ((data[x + (z << 4) + (y << 8)] & 255) === B.CACTUS) emitCactus(x, y, z);
+    // cactus is drawn by the log pass below (model:'log'), so it needs no emitter of its own
 
     // ---- logs: inset column (like cactus) on the two axes perpendicular to the trunk axis;
     // reuses emitBoxFaces so end-cap faces still cull against opaque/same neighbours ----
-    const LOG_BOX = [ [0.0625,0,0.0625, 0.9375,1,0.9375],     // var 0: Y-axis trunk (inset X,Z)
-                      [0,0.0625,0.0625, 1,0.9375,0.9375],     // var 1: X-axis (inset Y,Z)
-                      [0.0625,0.0625,0, 0.9375,0.9375,1] ];    // var 2: Z-axis (inset X,Y)
-    // side faces always draw (inset — visible through the gap); the two end-caps along the trunk
-    // axis cull only against a same-id log (continuous trunk) or an opaque neighbour.
-    /* A log is inset 1/16 on its two non-axis sides, so wherever two logs meet on a face that is
-       inset there is a visible gap — up to 1/8 when BOTH are inset.
+    /* A log's box comes straight from its width index. Two joint problems have to be solved on
+       top of that, both caused by neighbouring logs having DIFFERENT widths:
 
-       Each log independently widens its own inset faces out to the cell edge whenever the
-       neighbour there is a log. Both sides expanding is what closes the double-inset case: an
-       X-axis branch beside a Y-axis trunk in Z, for instance, has neither log running along the
-       shared direction, so a rule that only expanded toward logs pointing INTO the block left
-       that join open. Faces meeting air or leaves are untouched, so the trunk keeps its slim
-       silhouette everywhere it actually shows. */
-    const isLogAt = (nx, ny, nz) => {
-      const p = P[gb(nx, ny, nz) & 255];
-      return !!p && p.model === 'log';
+       1. A branch butts into the side of a trunk. The branch spans its whole cell along its own
+          axis, so it reaches the shared boundary — but the trunk's wood starts inset from that
+          boundary, leaving a hole. Fix: the trunk grows the face on that side out to the cell
+          edge, but ONLY toward a log whose axis runs INTO it. Expanding toward any log at all
+          would also weld two parallel trunks standing side by side into one slab.
+
+       2. A wide cell sits above a narrow one (stump under trunk, or a cut notch). The narrow
+          log's end cap must still be drawn or you see straight into the hollow; the wide one's
+          cap is what would show through. Fix: cull an end cap only against a same-axis log at
+          least as wide as this one. That is also what draws the ring where a trunk steps down. */
+    /* `family` separates the two things that use the log model — wood and cactus — so a cactus
+       standing beside a trunk never flares into it or culls its cap against it. Undefined means
+       wood, so every existing log entry keeps working untouched. */
+    const logAt = (nx, ny, nz, fam) => {
+      const v = gb(nx, ny, nz);
+      const p = P[v & 255];
+      if (!p || p.model !== 'log') return null;
+      if ((p.family || 'wood') !== fam) return null;
+      return { axis: (v >> 8) & 3, w: logWidthOf((v >> 8) & 255) };
+    };
+    /* A neighbour running INTO this cell along `axis`, thick enough to be worth meeting. A twig
+       narrower than LOG_JOIN_MIN just pokes out of the bark — flaring the whole trunk face to
+       greet it made the trunk bulge for something a few units across. */
+    const LOG_JOIN_MIN = 14;                              // 36 units
+    const logInto = (nx, ny, nz, axis, fam) => {
+      const n = logAt(nx, ny, nz, fam);
+      return !!n && n.axis === axis && n.w >= LOG_JOIN_MIN;
     };
     function emitLog(x, y, z, val) {
-      const id = val & 255, va = (val >> 8) & 3;
-      // stripped logs carry a cut size in variant bits 2-3: the axe notch makes them visibly
-      // thinner as they are chopped through. Live logs always read size 0.
-      const cutSize = (id === B.STRIPPED_LOG || id === B.STRIPPED_BIRCH_LOG) ? (val >> 10) & 3 : 0;
-      const b = cutSize ? logCutBox(va, cutSize) : (LOG_BOX[va] || LOG_BOX[0]).slice();
+      const id = val & 255, variant = (val >> 8) & 255, va = variant & 3;
+      const fam = PROPS[id].family || 'wood';
+      const pss = PROPS[id].pass;              // wood is opaque(0), cactus is cutout(1)
+      const myW = logWidthOf(variant);
+      const b = logCutBox(va, myW);
+      let flared = false;                                 // did a branch pull a face out to the edge?
       if (va !== 1) {                                     // X faces are inset unless this IS an X log
-        if (isLogAt(x - 1, y, z)) b[0] = 0;
-        if (isLogAt(x + 1, y, z)) b[3] = 1;
+        if (logInto(x - 1, y, z, 1, fam)) { b[0] = 0; flared = true; }
+        if (logInto(x + 1, y, z, 1, fam)) { b[3] = 1; flared = true; }
       }
       if (va !== 0) {                                     // Y faces
-        if (isLogAt(x, y - 1, z)) b[1] = 0;
-        if (isLogAt(x, y + 1, z)) b[4] = 1;
+        if (logInto(x, y - 1, z, 0, fam)) { b[1] = 0; flared = true; }
+        if (logInto(x, y + 1, z, 0, fam)) { b[4] = 1; flared = true; }
       }
       if (va !== 2) {                                     // Z faces
-        if (isLogAt(x, y, z - 1)) b[2] = 0;
-        if (isLogAt(x, y, z + 1)) b[5] = 1;
+        if (logInto(x, y, z - 1, 2, fam)) { b[2] = 0; flared = true; }
+        if (logInto(x, y, z + 1, 2, fam)) { b[5] = 1; flared = true; }
       }
       const F = PROPS[id].faces, side = F[0], top = F[2];
       const rf = va === 1 ? [top, top, side, side, side, side]      // X-axis: caps on ±X
                : va === 2 ? [side, side, side, side, top, top]      // Z-axis: caps on ±Z
                :            [side, side, top, top, side, side];     // Y-axis: caps on ±Y
       const x0 = x+b[0], y0 = y+b[1], z0 = z+b[2], x1 = x+b[3], y1 = y+b[4], z1 = z+b[5];
-      const capped = (nx, ny, nz) => { const n = gb(nx, ny, nz) & 255; return n === id || P[n].opaque; };
+      /* An end cap is culled only against a same-axis log at least as wide as this cell — the
+         narrower of two stacked logs must keep its cap or you see into the hollow.
+
+         `flared` overrides that. A cell that pulled a face out to meet a branch is wider than
+         the width it has stored, so the neighbour above compares against a stale number, culls,
+         and leaves the collar open at the top — the horizontal slit where a branch meets the
+         trunk. A flared cell always draws both of its axis caps. */
+      const capped = (nx, ny, nz) => {
+        if (P[gb(nx, ny, nz) & 255].opaque) return true;
+        if (flared) return false;
+        const n = logAt(nx, ny, nz, fam);
+        return !!n && n.axis === va && n.w >= myW;        // continuous trunk, no narrower than us
+      };
       if (!(va === 0 && capped(x, y+1, z)))         // +Y
-        quad(0, [x0,y1,z0],[x0,y1,z1],[x1,y1,z1],[x1,y1,z0], [b[0],b[2]],[b[0],b[5]],[b[3],b[5]],[b[3],b[2]], rf[2], 255, gl(x, y+1, z));
+        quad(pss, [x0,y1,z0],[x0,y1,z1],[x1,y1,z1],[x1,y1,z0], [b[0],b[2]],[b[0],b[5]],[b[3],b[5]],[b[3],b[2]], rf[2], 255, gl(x, y+1, z));
       if (!(va === 0 && capped(x, y-1, z)))         // -Y
-        quad(0, [x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1], [b[0],b[2]],[b[3],b[2]],[b[3],b[5]],[b[0],b[5]], rf[3], 140, gl(x, y-1, z));
+        quad(pss, [x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1], [b[0],b[2]],[b[3],b[2]],[b[3],b[5]],[b[0],b[5]], rf[3], 140, gl(x, y-1, z));
       if (!(va === 1 && capped(x+1, y, z)))         // +X
-        quad(0, [x1,y0,z0],[x1,y1,z0],[x1,y1,z1],[x1,y0,z1], [1-b[2],b[1]],[1-b[2],b[4]],[1-b[5],b[4]],[1-b[5],b[1]], rf[0], 178, gl(x+1, y, z));
+        quad(pss, [x1,y0,z0],[x1,y1,z0],[x1,y1,z1],[x1,y0,z1], [1-b[2],b[1]],[1-b[2],b[4]],[1-b[5],b[4]],[1-b[5],b[1]], rf[0], 178, gl(x+1, y, z));
       if (!(va === 1 && capped(x-1, y, z)))         // -X
-        quad(0, [x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0], [b[2],b[1]],[b[5],b[1]],[b[5],b[4]],[b[2],b[4]], rf[1], 178, gl(x-1, y, z));
+        quad(pss, [x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0], [b[2],b[1]],[b[5],b[1]],[b[5],b[4]],[b[2],b[4]], rf[1], 178, gl(x-1, y, z));
       if (!(va === 2 && capped(x, y, z+1)))         // +Z
-        quad(0, [x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1], [b[0],b[1]],[b[3],b[1]],[b[3],b[4]],[b[0],b[4]], rf[4], 216, gl(x, y, z+1));
+        quad(pss, [x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1], [b[0],b[1]],[b[3],b[1]],[b[3],b[4]],[b[0],b[4]], rf[4], 216, gl(x, y, z+1));
       if (!(va === 2 && capped(x, y, z-1)))         // -Z
-        quad(0, [x0,y0,z0],[x0,y1,z0],[x1,y1,z0],[x1,y0,z0], [1-b[0],b[1]],[1-b[0],b[4]],[1-b[3],b[4]],[1-b[3],b[1]], rf[5], 216, gl(x, y, z-1));
+        quad(pss, [x0,y0,z0],[x0,y1,z0],[x1,y1,z0],[x1,y0,z0], [1-b[0],b[1]],[1-b[0],b[4]],[1-b[3],b[4]],[1-b[3],b[1]], rf[5], 216, gl(x, y, z-1));
     }
     for (let y = 0; y < yCap; y++)
       for (let z = 0; z < 16; z++)
@@ -2140,7 +2367,8 @@ function VOXEL_CORE() {
     return { passes: out, minY: Math.min(minY, maxY), maxY: Math.max(maxY, 2) };
   }
 
-  return { B, T, V, PROPS, SLAB_IDS, stairBoxesAt, makeGen, meshChunk, idx };
+  return { B, T, V, PROPS, SLAB_IDS, stairBoxesAt, makeGen, meshChunk, idx,
+           logWidthOf, logWidthPx, LOG_W_MIN, LOG_W_MAX, LOG_W_NORMAL, LOG_W_BLOCK };
 }
 
 /* ---------- worker entry point (stringified into the blob together with VOXEL_CORE) ---------- */
@@ -2167,7 +2395,7 @@ function WORKER_MAIN() {
 }
 
 const CORE = VOXEL_CORE();
-const { B, V, PROPS, SLAB_IDS } = CORE;
+const { B, V, PROPS, SLAB_IDS, logWidthOf, LOG_W_MIN, LOG_W_NORMAL } = CORE;
 
 // Items (IDs >= 256) — separate registry from blocks
 const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 260, APPLE: 261,
@@ -2338,16 +2566,16 @@ const TOOL_BLOCKS = {
                    B.FURNACE, B.COBBLESLAB, B.BRICKSSLAB, B.BRICKSSTAIRS, B.STONE_BRICKSLAB, B.STONESLAB, B.GRASS, B.GLASSSLAB,
                    B.MARBLE, B.GRANITE, B.LIMESTONE,
                    B.SULFUR_BLOCK, B.SULFUR_DOWN_TIP, B.SULFUR_UP_TIP, B.TIN_ORE, B.COPPER_ORE, B.GOLD_ORE]),
-  hatchet: new Set([B.LOG, B.PLANKS, B.BIRCH_LOG, B.BIRCH_PLANKS, B.STRIPPED_LOG, B.STRIPPED_BIRCH_LOG,
-                    B.MELON, B.PUMPKIN, B.CRAFTING_BENCH, B.DOOR, B.STAIRS, B.OAKSLAB, B.CACTUS, B.CACTUSSLAB]),
-  hoe:    new Set([B.LEAVES, B.BIRCH_LEAVES, B.HAY]),
+  hatchet: new Set([B.LOG, B.PLANKS, B.BIRCH_LOG, B.BIRCH_PLANKS, B.STRIPPED_LOG, B.STRIPPED_BIRCH_LOG, B.SPRUCE_LOG, B.STRIPPED_SPRUCE_LOG, B.SPRUCE_PLANKS,
+                    B.MELON, B.PUMPKIN, B.CRAFTING_BENCH, B.DOOR, B.STAIRS, B.OAKSLAB, B.CACTUS]),
+  hoe:    new Set([B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.HAY]),
   // shears are the wool tool; they also snip plant matter cleanly
-  shears: new Set([B.WOOL, B.LEAVES, B.BIRCH_LEAVES, B.TALLGRASS, B.TALL_LOWER, B.TALL_UPPER,
+  shears: new Set([B.WOOL, B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.TALLGRASS, B.TALL_LOWER, B.TALL_UPPER,
                    B.POPPY, B.ORCHID, B.SUGAR_CANE]),
   // a blade cuts soft, fibrous things fast — plants, leaves, melons, cane and webbing-like props
-  sword:  new Set([B.LEAVES, B.BIRCH_LEAVES, B.HAY, B.MELON, B.PUMPKIN, B.SUGAR_CANE,
+  sword:  new Set([B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.HAY, B.MELON, B.PUMPKIN, B.SUGAR_CANE,
                    B.TALLGRASS, B.TALL_LOWER, B.TALL_UPPER, B.POPPY, B.ORCHID,
-                   B.OAK_SAPLING, B.BIRCH_SAPLING, B.RED_MUSHROOM, B.BROWN_MUSHROOM, B.CACTUS]),
+                   B.OAK_SAPLING, B.BIRCH_SAPLING, B.SPRUCE_SAPLING, B.PINCUSHION, B.RED_MUSHROOM, B.BROWN_MUSHROOM, B.CACTUS]),
 };
 // mining-time divisor for held item vs block: 1.5 when the right tool, 1 otherwise
 function toolFactor(heldId, blockId) {
@@ -2366,7 +2594,8 @@ function blockDrop(blockId, isNatural = false) {
   // litter is a leaf block lying flat — it yields exactly what leaves yield
   if (blockId === B.LEAF_CARPET) blockId = B.LEAVES;
   else if (blockId === B.BIRCH_LEAF_CARPET) blockId = B.BIRCH_LEAVES;
-  if (blockId === B.LEAVES || blockId === B.BIRCH_LEAVES) {
+  else if (blockId === B.SPRUCE_LEAF_CARPET) blockId = B.SPRUCE_LEAVES;
+  if (blockId === B.LEAVES || blockId === B.BIRCH_LEAVES || blockId === B.SPRUCE_LEAVES) {
     const drops = [];
     const stickChance = isNatural ? 0.009 : 0.004;
     if (Math.random() < stickChance)
@@ -2377,7 +2606,8 @@ function blockDrop(blockId, isNatural = false) {
     // saplings from decayed/mined leaves: 2% natural, 0.1% player-broken. Matches the leaf type.
     const sapChance = isNatural ? 0.02 : 0.001;
     if (Math.random() < sapChance)
-      drops.push({ id: blockId === B.BIRCH_LEAVES ? B.BIRCH_SAPLING : B.OAK_SAPLING, count: 1 });
+      drops.push({ id: blockId === B.BIRCH_LEAVES ? B.BIRCH_SAPLING
+                     : blockId === B.SPRUCE_LEAVES ? B.SPRUCE_SAPLING : B.OAK_SAPLING, count: 1 });
     return drops;
   }
   if (blockId === B.COAL_ORE)    return [
@@ -2401,7 +2631,8 @@ function blockDrop(blockId, isNatural = false) {
   if (blockId === B.SNOW)  return [{ id: ITEM.SNOWBALL,  count: 2 + Math.floor(Math.random() * 3) }];
   if (blockId === B.SNOW_CARPET) return [{ id: B.SNOW_CARPET, count: 1 }];   // full carpet regardless of layers
   if (blockId === B.SUGAR_CANE) return [{ id: ITEM.SUGAR_CANE, count: 1 }];
-  if (blockId === B.OAK_SAPLING || blockId === B.BIRCH_SAPLING) return [{ id: blockId, count: 1 }];
+  if (blockId === B.OAK_SAPLING || blockId === B.BIRCH_SAPLING || blockId === B.SPRUCE_SAPLING)
+    return [{ id: blockId, count: 1 }];
   if (blockId === B.SULFUR_DOWN_TIP || blockId === B.SULFUR_UP_TIP) {
     // legacy DOWN_TIP still drops sulfur so terrain-generated tips work; both variants of the
     // canonical SULFUR_UP_TIP block also drop sulfur only (never the tip back)
