@@ -16,11 +16,12 @@ const SMELT = { [B.SAND]: B.GLASS, [B.COBBLE]: B.STONE,       // input id -> out
                 [B.LOG]: ITEM.CHARCOAL, [B.BIRCH_LOG]: ITEM.CHARCOAL,
                 [ITEM.CLAY_BALL]: ITEM.BRICK, [ITEM.FLOUR]: ITEM.BREAD,
                 [ITEM.RAW_COPPER]: ITEM.COPPER_INGOT, [ITEM.RAW_TIN]: ITEM.TIN_INGOT,
+                [ITEM.MUTTON]: ITEM.COOKED_MUTTON,
 };
 const FUEL_SMELTS = {                                          // fuel id -> smelts' worth of burn
-  [ITEM.COAL]: 8, [ITEM.COAL_CHUNK]: 1, [ITEM.CHARCOAL]: 4,
-  [B.LOG]: 2, [B.BIRCH_LOG]: 2, [B.PLANKS]: 0.75, [ITEM.STICK]: 0.25,
+  [ITEM.COAL]: 8, [ITEM.COAL_CHUNK]: 1, [ITEM.CHARCOAL]: 4, [B.PLANKS]: 0.75, [ITEM.STICK]: 0.25,
   [ITEM.WOODEN_PICKAXE]: 2.5, [ITEM.WOODEN_HATCHET]: 2, [ITEM.WOODEN_HOE]: 1.5, [ITEM.WOODEN_SHOVEL]: 1, 
+  [B.OAK_SAPLING]: 0.5,[B.BIRCH_SAPLING]: 0.5,[B.SPRUCE_SAPLING]: 0.5, [ITEM.LAVA_BUCKET]: 99, [ITEM.BARK]: 0.75,
 };
 const SMELT_TIME = 6;                                          // seconds per item
 

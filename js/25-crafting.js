@@ -10,35 +10,39 @@
    An ingredient id may also be an ARRAY of interchangeable ids — a variant group. Any mix of
    them satisfies the requirement (4 oak + 5 birch planks crafts a bench), and the row's icon
    cycles through the group every CRAFT_VARIANT_MS so you can see what else is accepted. */
-const V_PLANKS = [B.PLANKS, B.BIRCH_PLANKS, B.SPRUCE_PLANKS];
+const V_PLANKS = [B.PLANKS, B.BIRCH_PLANKS, B.SPRUCE_PLANKS, ];
 const V_LOG    = [B.LOG, B.BIRCH_LOG, B.SPRUCE_LOG];
-const V_STONE  = [B.COBBLE, B.STONE];          // anything that takes cobble takes stone too
+const V_OLOG   = [B.LOG, B.STRIPPED_LOG];
+const V_BLOG   = [B.BIRCH_LOG, B.STRIPPED_BIRCH_LOG];
+const V_SLOG   = [B.SPRUCE_LOG, B.STRIPPED_SPRUCE_LOG];
+const V_STONE  = [B.COBBLE, B.STONE, B.MARBLE, B.LIMESTONE, B.GRANITE];          // anything that takes cobble takes stone too
 
 const RECIPES_BASIC = [
-  { in: [[B.LOG, 1]],                                                        out: [B.PLANKS, 3] },
-  { in: [[B.BIRCH_LOG, 1]],                                                  out: [B.BIRCH_PLANKS, 3] },
-  { in: [[B.SPRUCE_LOG, 1]],                                                 out: [B.SPRUCE_PLANKS, 3] },
+  { in: [[V_OLOG, 1]],                                                       out: [B.PLANKS, 3] },
+  { in: [[V_BLOG, 1]],                                                       out: [B.BIRCH_PLANKS, 3] },
+  { in: [[V_SLOG, 1]],                                                       out: [B.SPRUCE_PLANKS, 3] },
   { in: [[V_PLANKS, 2]],                                                     out: [ITEM.STICK, 6] },
   { in: [[V_PLANKS, 1]],                                                     out: [B.OAKSLAB, 2] },
   { in: [[ITEM.SNOWBALL, 4]],                                                out: [B.SNOW, 1] },
   { in: [[ITEM.WHEAT, 9]],                                                   out: [B.HAY, 1] },
   { in: [[ITEM.CLAY_BALL, 4]],                                               out: [B.CLAY, 1] },
   { in: [[ITEM.COAL, 1]],                                                    out: [ITEM.COAL_CHUNK, 8] },
-  { in: [[V_PLANKS, 4]],                                                     out: [B.CRAFTING_BENCH, 1] },
-  { in: [[V_PLANKS, 8]],                                                     out: [B.CHEST, 1] },
+  { in: [[V_PLANKS, 5]],                                                     out: [B.CRAFTING_BENCH, 1] },
+  { in: [[V_PLANKS, 10]],                                                    out: [B.CHEST, 1] },
   { in: [[ITEM.BOWL, 1], [B.RED_MUSHROOM, 1], [B.BROWN_MUSHROOM, 1]],        out: [ITEM.MUSHROOM_STEW, 1] },
   { in: [[ITEM.COAL, 1], [ITEM.STICK, 1]],                                   out: [B.TORCH, 4] },
   { in: [[ITEM.GLASS_SHARD, 4]],                                             out: [B.GLASS, 1] },
   { in: [[ITEM.SUGAR_CANE, 1]],                                              out: [ITEM.SUGAR, 2] },
   { in: [[B.STONE, 1]],                                                      out: [B.STONE_BRICK, 1] },
   { in: [[ITEM.BRICK, 4]],                                                   out: [B.BRICKS, 1] },
+  { in: [[ITEM.STRING, 4]],                                                  out: [B.WOOL, 1] },
   { in: [[ITEM.IRON_INGOT, 2]],                                              out: [ITEM.IRON_SHEARS, 1] },
 ];
 const RECIPES_ADVANCED = [
   { in: [[ITEM.COAL_CHUNK, 8]],                                              out: [ITEM.COAL, 1] },
   { in: [[B.STONE, 1], [ITEM.FLINT, 1], [ITEM.COAL, 1]],                     out: [ITEM.GLOW_DUST, 1] },
   { in: [[V_PLANKS, 3]],                                                     out: [ITEM.BOWL, 4] },
-  { in: [[V_STONE, 8]],                                                      out: [B.FURNACE, 1] },
+  { in: [[V_STONE, 10]],                                                      out: [B.FURNACE, 1] },
   { in: [[ITEM.IRON_INGOT, 1]],                                              out: [ITEM.IRON_NUGGET, 9] },
   { in: [[ITEM.IRON_NUGGET, 9]],                                             out: [ITEM.IRON_INGOT, 1] },
   { in: [[ITEM.GOLD_INGOT, 1]],                                              out: [ITEM.GOLD_NUGGET, 9] },
