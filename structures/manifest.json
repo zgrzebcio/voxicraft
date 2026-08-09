@@ -10,33 +10,33 @@
  "groups": {
   "village": {
    "type": "village",
-   "chance": 0.01,
+   "chance": 0.0001,
    "biomes": [
     "Plains",
     "Forest"
    ],
    "minY": 62,
-   "maxY": 140,
+   "maxY": 100,
    "count": [
-    4,
-    7
+    3,
+    6
    ],
    "radius": 24,
-   "spacing": 2,
+   "spacing": 3,
    "path": 19,
    "_doc": "count = buildings per village, radius = how far they scatter from the centre, spacing = minimum gap between footprints, path = the block paths are paved with."
   },
   "catacomb": {
    "type": "dungeon",
-   "chance": 0.008,
+   "chance": 0.000008,
    "minY": 14,
    "maxY": 46,
    "rooms": [
-    4,
-    8
+    3,
+    6
    ],
-   "corridor": 5,
-   "spread": 26,
+   "corridor": 2,
+   "spread": 22,
    "_doc": "rooms = how many chambers, corridor = gap between rooms that the tunnel spans, spread = radius of chunks the dungeon claims."
   }
  }
