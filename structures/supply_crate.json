@@ -26,7 +26,7 @@
   "lootTables": {
     "1": {
       "name": "basic",
-      "rolls": [3, 6],
+      "rolls": [6, 10],
       "entries": [
         { "id": "WOODEN_PICKAXE", "min": 1, "max": 1, "chance": 0.35 },
         { "id": "WOODEN_HATCHET", "min": 1, "max": 1, "chance": 0.35 },
@@ -46,11 +46,10 @@
 
     "2": {
       "name": "super good",
-      "rolls": [4, 7],
+      "rolls": [7, 12],
       "entries": [
         { "id": "IRON_INGOT",     "min": 2, "max": 6, "chance": 0.55 },
         { "id": "GOLD_INGOT",     "min": 1, "max": 4, "chance": 0.35 },
-        { "id": "DIAMOND",        "min": 1, "max": 2, "chance": 0.15 },
         { "id": "IRON_PICKAXE",   "min": 1, "max": 1, "chance": 0.30 },
         { "id": "IRON_SWORD",     "min": 1, "max": 1, "chance": 0.25 },
         { "id": "GOLDEN_APPLE",   "min": 1, "max": 1, "chance": 0.10 },
@@ -63,7 +62,7 @@
   "spawn": {
     "mode": "embed",
     "biomes": ["Forest", "Plains"],
-    "chance": 0.06,
+    "chance": 0.006,
     "minY": 60,
     "maxY": 150,
 
