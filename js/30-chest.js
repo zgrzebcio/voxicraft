@@ -211,6 +211,11 @@ function openChest(x, y, z) {
   if (b) registerChest(b.x, b.y, b.z, (getBlock(b.x, b.y, b.z) >> 8) & 3);
   activeChest = chestKey(a.x, a.y, a.z);
   activeChest2 = b ? chestKey(b.x, b.y, b.z) : null;
+  /* Structure loot is rolled on FIRST OPEN, not when the structure was stamped — a hundred
+     untouched chests then cost nothing, and the contents feel rolled for you. */
+  const ra = CHESTS.get(activeChest);
+  if (ra) fillPendingLoot(a.x, a.y, a.z, ra.slots);
+  if (b) { const rb = CHESTS.get(activeChest2); if (rb) fillPendingLoot(b.x, b.y, b.z, rb.slots); }
   // ONE sound for the whole chest, single or double — it's one lid action either way
   playSound('chestOpen', { gain: 0.8, pos: { x: a.x + 0.5, y: a.y + 0.5, z: a.z + 0.5 } });
   toggleInventory(true);

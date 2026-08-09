@@ -196,6 +196,8 @@ function onWorkerMessage(m) {
     }
     relightForChunk(m.cx, m.cz);             // pour in any nearby glowstone before this meshes
     seedSkyForChunk(c);                      // daylight columns + spread into caves/overhangs
+    // structures are stamped AFTER terrain, on the main thread — see the header of 34-structures.js
+    trySpawnStructureInChunk(m.cx, m.cz);
     // this chunk (and each neighbour that was waiting on it) may be meshable now
     const R2 = viewDist * viewDist;
     for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
@@ -371,6 +373,8 @@ function setBlock(x, y, z, val) {
   if (oldId === B.BED && newId !== B.BED) bedBroken(x, y, z, oldVal);
   // chest removed/replaced: spill its contents and drop the mesh
   if (oldId === B.CHEST && newId !== B.CHEST) chestBroken(x, y, z, oldVal);
+  // structure block gone: forget its size/name settings and drop its outline
+  if (oldId === B.STRUCTURE_BLOCK && newId !== B.STRUCTURE_BLOCK) structBlockBroken(x, y, z);
   // placing a solid block against a cactus's side snaps the cactus off (column chain-breaks up).
   // Cactus is exempt from its own rule — arms attach side-on to the trunk.
   if (PROPS[newId]?.solid && newId !== B.CACTUS)

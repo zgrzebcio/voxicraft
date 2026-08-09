@@ -98,6 +98,19 @@
   #chestPanel .row { display:flex; gap:4px; }
   #chestPanel .slot { pointer-events:auto; }
 
+  /* structure block editor — sits in the same right-hand column as the chest/furnace GUIs */
+  #structPanel { display:none; flex-direction:column; gap:8px; width:220px;
+                 background:rgba(16,18,30,.94); border:1px solid rgba(255,255,255,.15);
+                 border-radius:10px; padding:12px; pointer-events:auto; }
+  #structPanel .ctitle { color:#9ab; font-size:12px; text-align:center; }
+  #structPanel label { display:flex; align-items:center; justify-content:space-between;
+                       gap:8px; color:#9ab; font-size:12px; }
+  #structPanel input { width:96px; background:#0b0d16; color:#dfe;
+                       border:1px solid #445; border-radius:6px; padding:5px 7px; font-size:12px; }
+  #structPanel .strow { display:flex; gap:6px; }
+  #structPanel .strow button { flex:1; padding:6px 8px; font-size:13px; }
+  #structPanel #stMsg { color:#7c9; font-size:11px; min-height:14px; text-align:center; }
+
   /* ---- crafting recipe list (survival) — separate panel ---- */
   #craftPanel { display:none; flex-direction:column; gap:6px; width:320px;
                 position:relative; left:-30px;

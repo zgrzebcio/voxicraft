@@ -91,6 +91,9 @@ function saveWorld(syncToLS = false) {
   const data = {
     savedAt: Date.now(),
     edits, drops, furnaces, entities: serializeEntities(), chests: serializeChests(),
+    // structures: which chunks were already rolled, unopened loot markers, structure-block setups
+    structPlaced: serializeStructPlaced(), structLoot: serializePendingLoot(),
+    structBlocks: serializeStructBlocks(),
     time: worldTime, worldDay, curMode: currentInvMode,
     survHot: survStash.hot, survInv: survStash.inv, survInv2: survStash.inv2,
     survEquip: serializeEquip(), survBelt: serializeBelt(),
@@ -156,6 +159,10 @@ async function loadWorld(w) {
   clearBeds();                               // and bed meshes from saved FOOT cells
   clearChests();
   if (data && Array.isArray(data.chests)) restoreChests(data.chests);   // contents before meshes
+  // structure state must land BEFORE any chunk streams in, or already-rolled chunks re-roll
+  restoreStructPlaced(data && data.structPlaced);
+  restorePendingLoot(data && data.structLoot);
+  restoreStructBlocks(data && data.structBlocks);
   for (const [k, m] of editStore) {
     const cxz = k.split(','), gx = cxz[0] * 16, gz = cxz[1] * 16;
     for (const [i, v] of m) {

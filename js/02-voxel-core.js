@@ -35,7 +35,7 @@ function VOXEL_CORE() {
               SULFUR_UP_TIP:67, TNT_LIT:68, OAK_SAPLING:69, BIRCH_SAPLING:70, SUGAR_CANE:71,
               STRIPPED_LOG:72, STRIPPED_LOG_TOP:73, STRIPPED_BIRCH_LOG:74, STRIPPED_BIRCH_LOG_TOP:75,
               SPRUCE_LOG:76, SPRUCE_LOG_TOP:77, SPRUCE_PLANKS:78, SPRUCE_LEAVES:79, SPRUCE_SAPLING:80,
-              STRIPPED_SPRUCE_LOG:81, STRIPPED_SPRUCE_LOG_TOP:82, PINCUSHION:83 };
+              STRIPPED_SPRUCE_LOG:81, STRIPPED_SPRUCE_LOG_TOP:82, PINCUSHION:83, STRUCTURE_BLOCK:84 };
   const B = { AIR:0, GRASS:1, DIRT:2, STONE:3, LOG:4, PLANKS:5, LEAVES:6, SAND:7,
               GLASS:8, BEDROCK:9, WATER:10, GLOWSTONE:11, OAKSLAB:12, CLAY:13, SNOW:14, COBBLE:15,
               COAL_ORE:16, IRON_ORE:17, DIAMOND_ORE:18, GRAVEL:19, RED_MUSHROOM:20, BROWN_MUSHROOM:21,
@@ -49,7 +49,7 @@ function VOXEL_CORE() {
               // felling: a log is stripped before it can be cut through; leaves land as carpet
               STRIPPED_LOG:69, STRIPPED_BIRCH_LOG:70, LEAF_CARPET:71, BIRCH_LEAF_CARPET:72,
               SPRUCE_LOG:73, STRIPPED_SPRUCE_LOG:74, SPRUCE_PLANKS:75, SPRUCE_LEAVES:76,
-              SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, };
+              SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, STRUCTURE_BLOCK:80, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -311,6 +311,9 @@ function VOXEL_CORE() {
      end up adjacent. No stripping and no leaves — those live in 33-felling, which only knows about
      the wood ids. */
   PROPS[B.CACTUS] = { name:'Cactus', solid:true, opaque:false, raycast:true, pass:1, model:'log', rot:'all', family:'cactus', stack:60, hardness:1.4, type:'grass', boxes:LOG_CUT_COLL[0], boxesByVar:LOG_CUT_COLL, faces:[T.CACTUS_SIDE,T.CACTUS_SIDE,T.CACTUS_TOP,T.CACTUS_BOTTOM,T.CACTUS_SIDE,T.CACTUS_SIDE], desc: '' };
+  /* Build tool, not a material: it has no recipe, so it only ever reaches a player through the
+     creative palette. Left fully solid so a capture volume can be lined up against it. */
+  PROPS[B.STRUCTURE_BLOCK] = { name:'Structure block', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:1, hardness:1.0, type:'stone', faces:[T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK], desc: '' };
   PROPS[B.PINCUSHION] = { name:'Pincushion', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.7,0.75]], faces:[T.PINCUSHION], desc: '' };
   PROPS[B.COBBLESLAB]    = { name:'Cobblestone slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:8, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
   PROPS[B.BRICKS]    = { name:'Bricks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:6.5, type:'stone', faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };

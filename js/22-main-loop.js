@@ -692,6 +692,7 @@ function frame(now) {
   updateMusic();                            // menu track on/off follows menuScene
   updateFelling(dt);                        // felled trunks come apart a few cells per tick
   updateLitterRot(dt);                      // fallen leaves rot off the forest floor
+  updateStructOutline();                    // drop the capture box if its block was broken
   updateFallingLeaves(dt);                  // canopy coming down after a tree was felled
 
   // fps

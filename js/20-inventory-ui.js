@@ -35,6 +35,8 @@ function buildInventory() {
   if (chpEl) chpEl.style.display = 'none';
   const eqpEl = document.getElementById('equipPanel');
   if (eqpEl) eqpEl.style.display = 'none';
+  const stpEl = document.getElementById('structPanel');
+  if (stpEl) stpEl.style.display = 'none';
 
   invEl.innerHTML =
     '<div class="title">Inventory</div>' +
@@ -73,7 +75,9 @@ function buildInventory() {
   if (activeFurnace) buildFurnacePanel();
   if (activeChest) buildChestPanel();
   // equipment shares the right-hand column with the furnace and chest GUIs, so it yields to them
-  if (!activeFurnace && !activeChest) buildEquipPanel();
+  if (activeStructBlock) buildStructPanel();
+  // equipment yields the right-hand column to whichever GUI is open there
+  else if (!activeFurnace && !activeChest) buildEquipPanel();
 }
 function refreshSlotsUI() { buildHotbar(); buildInventory(); saveAll(); }
 
@@ -419,6 +423,7 @@ function toggleInventory(open, mode) {
     activeFurnace = null;                       // closing always detaches the furnace GUI
     chestClosedSound();                         // must run BEFORE the key is cleared
     activeChest = activeChest2 = null;          // ...and the chest, which also shuts its lid
+    activeStructBlock = null;                   // structure editor closes with the inventory
     if (lastHoverEl) { lastHoverEl.classList.remove('hover'); lastHoverEl = null; }
     vcurEl.style.display = vdragEl.style.display = 'none';
     if (playing) { lockTries = 0; tryPointerLock(); }

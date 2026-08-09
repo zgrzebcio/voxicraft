@@ -96,6 +96,7 @@ const TEXTURES = {
   stripped_spruce_log:      'textures/Blocks/Woods/stripped_spruce_log.png',
   stripped_spruce_log_top:  'textures/Blocks/Woods/stripped_spruce_log_top.png',
   pincushions:              'textures/Billboards/Plants/Flowers/pincushions.png',
+  structure_block:          'textures/Blocks/Interactables/Structure_block.png',
 };
 
 const ITEM_TEXTURES = {

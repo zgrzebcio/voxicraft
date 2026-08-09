@@ -1,0 +1,73 @@
+{
+  "id": "supply_crate",
+  "comment": "Test prefab. 3x2x3: a cobble pad with a chest on it and a torch beside. Blocks are [x, y, z, blockId, variant] in prefab-local coords; variant is the raw high byte, so chest facing / slab halves / log widths all survive. `loot` maps a prefab-local cell to a table in `lootTables` below — by key (\"1\") or by that table's `name` (\"basic\").",
+  "size": [3, 2, 3],
+
+  "blocks": [
+    [0, 0, 0, 15, 0],
+    [1, 0, 0, 15, 0],
+    [2, 0, 0, 15, 0],
+    [0, 0, 1, 15, 0],
+    [1, 0, 1, 15, 0],
+    [2, 0, 1, 15, 0],
+    [0, 0, 2, 15, 0],
+    [1, 0, 2, 15, 0],
+    [2, 0, 2, 15, 0],
+
+    [1, 1, 1, 68, 0],
+    [0, 1, 0, 23, 0],
+    [2, 1, 2, 23, 0]
+  ],
+
+  "loot": {
+    "1,1,1": "1"
+  },
+
+  "lootTables": {
+    "1": {
+      "name": "basic",
+      "rolls": [3, 6],
+      "entries": [
+        { "id": "WOODEN_PICKAXE", "min": 1, "max": 1, "chance": 0.35 },
+        { "id": "WOODEN_HATCHET", "min": 1, "max": 1, "chance": 0.35 },
+        { "id": "WOODEN_SHOVEL",  "min": 1, "max": 1, "chance": 0.35 },
+        { "id": "WOODEN_SWORD",   "min": 1, "max": 1, "chance": 0.30 },
+        { "id": "APPLE",          "min": 1, "max": 3, "chance": 0.60 },
+        { "id": "BREAD",          "min": 1, "max": 2, "chance": 0.50 },
+        { "id": "B:LOG",          "min": 1, "max": 5, "chance": 0.45 },
+        { "id": "STRING",         "min": 1, "max": 4, "chance": 0.30 },
+        { "id": "GUNPOWDER",      "min": 1, "max": 2, "chance": 0.25 },
+        { "id": "FLINT",          "min": 1, "max": 3, "chance": 0.30 },
+        { "id": "BRICK",          "min": 1, "max": 4, "chance": 0.25 },
+        { "id": "FEATHER",        "min": 1, "max": 3, "chance": 0.30 },
+        { "id": "FLOUR",          "min": 1, "max": 2, "chance": 0.25 }
+      ]
+    },
+
+    "2": {
+      "name": "super good",
+      "rolls": [4, 7],
+      "entries": [
+        { "id": "IRON_INGOT",     "min": 2, "max": 6, "chance": 0.55 },
+        { "id": "GOLD_INGOT",     "min": 1, "max": 4, "chance": 0.35 },
+        { "id": "DIAMOND",        "min": 1, "max": 2, "chance": 0.15 },
+        { "id": "IRON_PICKAXE",   "min": 1, "max": 1, "chance": 0.30 },
+        { "id": "IRON_SWORD",     "min": 1, "max": 1, "chance": 0.25 },
+        { "id": "GOLDEN_APPLE",   "min": 1, "max": 1, "chance": 0.10 },
+        { "id": "BREAD",          "min": 2, "max": 4, "chance": 0.50 },
+        { "id": "B:GLOWSTONE",    "min": 1, "max": 3, "chance": 0.20 }
+      ]
+    }
+  },
+
+  "spawn": {
+    "mode": "embed",
+    "biomes": ["Forest", "Plains"],
+    "chance": 0.06,
+    "minY": 60,
+    "maxY": 150,
+
+    "_mode": "surface = flat ground only, sits on top. embed = anchors on the lowest ground in the footprint, carves the hillside out of its walls and pillars any overhang, so it never floats. air = ignores the ground entirely and picks a random height inside minY..maxY. cave = drops into a cavern that already exists, needs an open pocket on a solid floor and carves nothing. underground = digs its own room, needs solid rock through the volume plus a one-block shell, then hollows it out.",
+    "_minY_maxY": "for surface/embed these filter the terrain height; for air/cave/underground they ARE the band the prefab is placed in. cave/underground also stay at least 3 blocks below the surface."
+  }
+}

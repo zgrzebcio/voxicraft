@@ -28,7 +28,9 @@ function _defaultCreativeInventory() {
   const sorted = PLACEABLE.slice().sort((a, b) => a - b).concat([ITEM.WATER_BUCKET, ITEM.LAVA_BUCKET]);
   const hot = new Array(9).fill(null);
   const inv = new Array(27).fill(null);
-  const inv2 = new Array(36).fill(null);            // overflow palette — 4 rows, scrolls in the UI
+  // overflow palette — scrolls in the UI. Sized well past the current block count so newly
+  // registered blocks (structure block, spruce set, ...) don't silently fall off the end.
+  const inv2 = new Array(72).fill(null);
   for (let i = 0; i < sorted.length; i++) {
     if (i < 9) hot[i] = mkSlot(sorted[i]);
     else if (i - 9 < 27) inv[i - 9] = mkSlot(sorted[i]);
@@ -256,6 +258,8 @@ function doPlace() {
   // right-clicking a bed sleeps through the night
   if (hit.id === B.BED) { trySleep(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
   // right-clicking a chest opens its storage GUI (both halves if it is a double)
+  // structure block: a build tool, so it opens in BOTH modes (unlike the chest/bench/furnace)
+  if (hit.id === B.STRUCTURE_BLOCK) { openStructureBlock(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
   // survival only, same as the bench and the furnace — in creative a chest is just a block to build with
   if (!player.canFly && hit.id === B.CHEST) { openChest(hit.x, hit.y, hit.z); handPlaceSwing = true; return; }
   const heldId = slotId(HOTBAR[hotbarSel]);
