@@ -693,6 +693,7 @@ function frame(now) {
   updateFelling(dt);                        // felled trunks come apart a few cells per tick
   updateLitterRot(dt);                      // fallen leaves rot off the forest floor
   updateStructOutline();                    // drop the capture box if its block was broken
+  processPlacementQueue();                  // villages/dungeons assemble a few cells per frame
   updateFallingLeaves(dt);                  // canopy coming down after a tree was felled
 
   // fps

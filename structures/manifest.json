@@ -1,1 +1,43 @@
-["supply_crate.json"]
+{
+ "comment": "Object form of the manifest. \"files\" lists every prefab; \"groups\" declares settlements. A prefab joins a group with a top-level \"group\": \"<name>\". Grouped prefabs never spawn on their own.",
+ "files": [
+  "supply_crate.json",
+  "village_house.json",
+  "village_well.json",
+  "dungeon_room.json",
+  "dungeon_cell.json"
+ ],
+ "groups": {
+  "village": {
+   "type": "village",
+   "chance": 0.01,
+   "biomes": [
+    "Plains",
+    "Forest"
+   ],
+   "minY": 62,
+   "maxY": 140,
+   "count": [
+    4,
+    7
+   ],
+   "radius": 24,
+   "spacing": 2,
+   "path": 19,
+   "_doc": "count = buildings per village, radius = how far they scatter from the centre, spacing = minimum gap between footprints, path = the block paths are paved with."
+  },
+  "catacomb": {
+   "type": "dungeon",
+   "chance": 0.008,
+   "minY": 14,
+   "maxY": 46,
+   "rooms": [
+    4,
+    8
+   ],
+   "corridor": 5,
+   "spread": 26,
+   "_doc": "rooms = how many chambers, corridor = gap between rooms that the tunnel spans, spread = radius of chunks the dungeon claims."
+  }
+ }
+}
