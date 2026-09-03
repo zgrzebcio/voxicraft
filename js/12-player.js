@@ -156,7 +156,11 @@ function raycastVoxel(origin, dir, maxDist) {
   let tEnter = 0;                     // distance along the ray at which we entered the current cell
   for (let i = 0; i < 256; i++) {
     const b = getBlock(x, y, z), id = b & 255, prop = PROPS[id];
-    if (b !== 0 && prop.raycast) {
+    /* `noTarget` blocks are see-through to the crosshair: the ray passes straight on. Kept
+       separate from `raycast:false` because that flag also drops a block from the creative
+       palette (13-actions builds PLACEABLE from it) — grass still has to be placeable, it just
+       must never be what you are aiming at. */
+    if (b !== 0 && prop.raycast && !prop.noTarget) {
       const boxes = rayBoxesAt(x, y, z);                     // neighbour-aware (stair corners) box list
       if (!boxes) return { x, y, z, nx, ny, nz, id, t: tEnter };   // full cube: cell hit is the face hit
       let best = null, bestI = 0;                            // slab etc: refine against sub-boxes

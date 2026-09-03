@@ -645,6 +645,47 @@ function queuePlacement(job) { PLACE_QUEUE.push(Object.assign({ tries: 0, step: 
    turns a freeze into a building that visibly assembles itself over about a second. */
 const PLACE_BUDGET = 48;
 
+/* ---- deferred lighting ----
+   Budgeting the WRITES was only half the problem. Each setBlock that changes opacity starts a
+   sky-light BFS, and hollowing a dungeon room is ~200 of those in a row — spreading them over
+   frames still pays the same total, it just stretches the stutter out.
+
+   So structure writes run with lighting suppressed (`structBulkLight`), the chunks they touched
+   are remembered, and each one is re-lit exactly once afterwards with the same pair of functions
+   chunk loading uses. Hundreds of localised floods collapse into a handful of chunk-wide passes,
+   and those are drained one chunk per frame so even the flush cannot spike. */
+const _lightPending = new Set();          // "cx,cz" awaiting a post-stamp re-light
+
+function _markLightDirty(ox, oz, w, l) {
+  const cx0 = Math.floor(ox / 16), cx1 = Math.floor((ox + w) / 16);
+  const cz0 = Math.floor(oz / 16), cz1 = Math.floor((oz + l) / 16);
+  for (let cz = cz0; cz <= cz1; cz++)
+    for (let cx = cx0; cx <= cx1; cx++) _lightPending.add(cx + ',' + cz);
+}
+
+function _flushOneLight() {
+  const it = _lightPending.values().next();
+  if (it.done) return false;
+  _lightPending.delete(it.value);
+  const [cx, cz] = it.value.split(',').map(Number);
+  const c = getChunk(cx, cz);
+  if (!c || !c.data) return true;         // unloaded since; it will be lit fresh on reload anyway
+  seedSkyForChunk(c);
+  relightForChunk(cx, cz);
+  markDirty(c);
+  return true;
+}
+
+/* Run `fn` with per-cell lighting off, recording the region so it can be re-lit afterwards. */
+function _bulkWrite(ox, oz, w, l, fn) {
+  structBulkLight = true;
+  try { return fn(); }
+  finally {
+    structBulkLight = false;
+    _markLightDirty(ox, oz, w, l);
+  }
+}
+
 /* Drain up to PLACE_BUDGET cells of work. Called from the frame loop AND on chunk arrival, so it
    keeps pace with streaming without needing a timer of its own.
 
@@ -661,48 +702,72 @@ function processPlacementQueue(budget = PLACE_BUDGET) {
     }
     if (j.kind === 'path') {
       const before = j.step;
-      j.step = _layPath(j.cells, j.block, j.step, left);
+      _bulkWrite(j.ox, j.oz, w, l, () => { j.step = _layPath(j.cells, j.block, j.step, left); });
       left -= j.step - before;
       if (j.step >= j.cells.length) PLACE_QUEUE.splice(i--, 1);
       continue;
     }
     if (j.kind === 'corridor') {
       const before = j.step;
-      // one corridor cell hollows the passage AND walls its shell — roughly a dozen writes
-      j.step = _digCorridor(j.cells, j.height, j.step, Math.max(1, (left / 12) | 0));
-      left -= (j.step - before) * 12;
+      /* A corridor cell hollows the passage AND inspects a 5-wide, 5-tall shell around it — about
+         25 reads and up to 25 writes. Charging it 12 let a long tunnel blow through the frame
+         budget twice over. */
+      const CORRIDOR_COST = 25;
+      _bulkWrite(j.ox, j.oz, w, l, () => {
+        j.step = _digCorridor(j.cells, j.height, j.step, Math.max(1, (left / CORRIDOR_COST) | 0));
+      });
+      left -= (j.step - before) * CORRIDOR_COST;
       if (j.step >= j.cells.length) PLACE_QUEUE.splice(i--, 1);
       continue;
     }
     // prefab: phase 0 = carve/blend the site, phase 1 = lay the blocks, then loot + retire
     if (j.phase === 0) {
       if (j.carve) {
+        /* Only hollow the cells the prefab will NOT fill. Clearing the whole box first meant
+           three quarters of a dungeon room's carve writes were immediately overwritten by its
+           own walls — pure waste, and each one still cost a chunk-dirty and an edit-store entry. */
+        if (!j.filled) {
+          j.filled = new Set();
+          for (const b of j.prefab.blocks) if (Array.isArray(b)) j.filled.add(b[0] + ',' + b[1] + ',' + b[2]);
+        }
         const total = w * h * l;
         const end = Math.min(total, j.step + left);
-        for (let k = j.step; k < end; k++) {
-          const dx = k % w, dy = ((k / w) | 0) % h, dz = (k / (w * h)) | 0;
-          setBlock(j.ox + dx, j.oy + dy, j.oz + dz, B.AIR);
-        }
+        _bulkWrite(j.ox, j.oz, w, l, () => {
+          for (let k = j.step; k < end; k++) {
+            const dx = k % w, dy = ((k / w) | 0) % h, dz = (k / (w * h)) | 0;
+            if (j.filled.has(dx + ',' + dy + ',' + dz)) continue;
+            setBlock(j.ox + dx, j.oy + dy, j.oz + dz, B.AIR);
+          }
+        });
         left -= end - j.step;
         j.step = end;
         if (j.step < total) continue;
       } else if (j.blend) {
-        _blendIntoTerrain(j.prefab, j.ox, j.oy, j.oz);
+        _bulkWrite(j.ox, j.oz, w, l, () => _blendIntoTerrain(j.prefab, j.ox, j.oy, j.oz));
         left -= w * l * 2;                             // rough charge for the carve+pillar pass
       }
       j.phase = 1; j.step = 0;
       if (left <= 0) continue;
     }
     const before = j.step;
-    j.step = stampStructureSlice(j.prefab, j.ox, j.oy, j.oz, j.step, left);
+    _bulkWrite(j.ox, j.oz, w, l, () => {
+      j.step = stampStructureSlice(j.prefab, j.ox, j.oy, j.oz, j.step, left);
+    });
     left -= j.step - before;
     if (j.step >= j.prefab.blocks.length) {
       applyStructureLoot(j.prefab, j.ox, j.oy, j.oz);
       PLACE_QUEUE.splice(i--, 1);
     }
   }
+  // one chunk re-lit per call, and only once the writes for this frame are done
+  if (_lightPending.size) _flushOneLight();
 }
-function clearPlacementQueue() { PLACE_QUEUE.length = 0; _groupClaimed.clear(); }
+function clearPlacementQueue() {
+  PLACE_QUEUE.length = 0;
+  _groupClaimed.clear();
+  _lightPending.clear();
+  structBulkLight = false;      // a world swap mid-stamp must not leave lighting suppressed
+}
 
 /* ---- village ---- */
 /* Buildings scatter around a centre on a jittered ring, each dropped onto its own local ground

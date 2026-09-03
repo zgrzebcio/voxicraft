@@ -22,6 +22,13 @@ function setLightWorld(x, y, z, val) {
 const LIGHT_DIRS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
 // effective light emission of a raw voxel value — variant-aware (lit furnace glows, unlit doesn't)
 const FURNACE_GLOW = 5;
+/* Which block IDs can ever emit. Used as a cheap pre-filter in front of blockLightOf on the
+   full-chunk scan at load — see the note there. The furnace is included unconditionally because
+   whether it glows depends on its variant, which this table cannot see. */
+const EMITTER_ID = new Uint8Array(256);
+for (let id = 0; id < 256; id++) if (PROPS[id] && PROPS[id].light > 0) EMITTER_ID[id] = 1;
+EMITTER_ID[B.FURNACE] = 1;
+
 function blockLightOf(val) {
   const id = val & 255;
   if (id === B.FURNACE) return ((val >> 8) & V.FURNACE_ON) ? FURNACE_GLOW : 0;   // lit bit (facing bits below it)
@@ -78,13 +85,11 @@ function propagateLight(gx, gy, gz, level = GLOW_LEVEL) {
 function relight(x, y, z) {
   const R = GLOW_LEVEL;
   const near = [];
-  for (const k of glowLights) {
-    const p = k.split(','), gx = +p[0], gy = +p[1], gz = +p[2];
-    if (Math.abs(gx - x) <= 2 * R && Math.abs(gy - y) <= 2 * R && Math.abs(gz - z) <= 2 * R) {
-      if (!_lightSrcActive(gx, gz)) continue;
-      near.push([gx, gy, gz, glowLevelAt(gx, gy, gz)]);
-    }
-  }
+  forEachGlowNear(x, z, 2 * R, (gx, gy, gz) => {
+    if (Math.abs(gx - x) > 2 * R || Math.abs(gy - y) > 2 * R || Math.abs(gz - z) > 2 * R) return;
+    if (!_lightSrcActive(gx, gz)) return;
+    near.push([gx, gy, gz, glowLevelAt(gx, gy, gz)]);
+  });
   if (_plyGlow) {
     const [gx, gy, gz] = _plyGlow;
     if (Math.abs(gx - x) <= 2 * R && Math.abs(gy - y) <= 2 * R && Math.abs(gz - z) <= 2 * R) near.push(_plyGlow);
@@ -114,13 +119,11 @@ function updatePlayerLight(nx, ny, nz, level) {
   const cx = _plyGlow ? nx : old[0], cy = _plyGlow ? ny : old[1], cz = _plyGlow ? nz : old[2];
   // sources to re-propagate: placed glowLights + new player light. Old is NOT a source — it gets cleared.
   const sources = [];
-  for (const k of glowLights) {
-    const p = k.split(','), gx = +p[0], gy = +p[1], gz = +p[2];
-    if (Math.abs(gx-cx)<=2*R && Math.abs(gy-cy)<=2*R && Math.abs(gz-cz)<=2*R) {
-      if (!_lightSrcActive(gx, gz)) continue;
-      sources.push([gx,gy,gz,glowLevelAt(gx,gy,gz)]);
-    }
-  }
+  forEachGlowNear(cx, cz, 2 * R, (gx, gy, gz) => {
+    if (Math.abs(gx-cx)>2*R || Math.abs(gy-cy)>2*R || Math.abs(gz-cz)>2*R) return;
+    if (!_lightSrcActive(gx, gz)) return;
+    sources.push([gx,gy,gz,glowLevelAt(gx,gy,gz)]);
+  });
   if (_plyGlow) sources.push(_plyGlow);
 
   // bbox: cover new position + old position so old light gets cleared
@@ -141,12 +144,12 @@ function relightForChunk(cx, cz) {
   const half = Math.max(1, viewDist >> 1);
   // skip if the chunk itself is beyond half view distance from player
   if (Math.abs(cx - playerCX) > half || Math.abs(cz - playerCZ) > half) return;
-  for (const k of glowLights) {
-    const p = k.split(','), gx = +p[0], gy = +p[1], gz = +p[2];
-    if (!_lightSrcActive(gx, gz)) continue;
+  // only emitters in the chunks this one can be reached from — not every light in the world
+  forEachGlowNear(cx * 16 + 8, cz * 16 + 8, GLOW_LEVEL + 8, (gx, gy, gz) => {
+    if (!_lightSrcActive(gx, gz)) return;
     const dx = Math.max(cx*16 - gx, gx - (cx*16+15), 0), dz = Math.max(cz*16 - gz, gz - (cz*16+15), 0);
     if (dx <= GLOW_LEVEL && dz <= GLOW_LEVEL) propagateLight(gx, gy, gz, glowLevelAt(gx, gy, gz));
-  }
+  });
   if (_plyGlow) {
     const [gx, gy, gz, lv] = _plyGlow;
     const dx = Math.max(cx*16 - gx, gx - (cx*16+15), 0), dz = Math.max(cz*16 - gz, gz - (cz*16+15), 0);

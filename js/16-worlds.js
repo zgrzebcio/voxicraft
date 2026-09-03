@@ -154,7 +154,7 @@ async function loadWorld(w) {
       f.lit = true;
       FURNACES.set(rec[0], f);
     }
-  glowLights.clear();                        // re-derive glowstone lights from the saved edits
+  glowClear();                               // re-derive glowstone lights from the saved edits
   clearDoors();                              // + rebuild door meshes from saved bottom halves
   clearBeds();                               // and bed meshes from saved FOOT cells
   clearChests();
@@ -167,7 +167,7 @@ async function loadWorld(w) {
     const cxz = k.split(','), gx = cxz[0] * 16, gz = cxz[1] * 16;
     for (const [i, v] of m) {
       if (blockLightOf(v) > 0)
-        glowLights.add((gx + (i & 15)) + ',' + (i >> 8) + ',' + (gz + ((i >> 4) & 15)));
+        glowAdd(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15));
       if ((v & 255) === B.DOOR && !((v >> 8) & 8))
         registerDoor(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3,
                      ((v >> 8) & 4) !== 0, ((v >> 8) & DOOR_HINGE_R) !== 0);

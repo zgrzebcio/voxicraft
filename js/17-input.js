@@ -131,6 +131,15 @@ document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'F1') { e.preventDefault(); toggleFullscreen(); return; }
   if (e.code === 'F2') { e.preventDefault(); if (playing) cycleCameraView(); return; }
+  /* Tab is the inventory key. It has to be handled BEFORE the `!playing` guard below so it also
+     closes an open inventory, and it must preventDefault in both directions: left to the browser,
+     Tab walks focus out of the canvas onto page chrome, and once focus lands there keystrokes
+     stop reaching the game entirely. Menus keep normal Tab navigation. */
+  if (e.code === 'Tab' && (playing || invOpen)) {
+    e.preventDefault();
+    if (!e.repeat) toggleInventory();
+    return;
+  }
   // block all browser defaults while game has input focus; F1 handled above, Escape handled below
   if (playing && e.code !== 'Escape') e.preventDefault();
   if (e.code === 'Backquote' && playing && currentWorld) {  // ~ toggles pause without releasing mouse
@@ -147,7 +156,6 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (!playing) return;
-  if (e.code === 'KeyE' && !e.repeat) { toggleInventory(); return; }
   if (e.code === 'KeyY' && !e.repeat && !invOpen) { dropFromHotbar(e.shiftKey ? 'stack' : 1); return; }
   if (e.code === 'Space' && !e.repeat && !invOpen) jumpTap();
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat && !invOpen) player.fast = !player.fast;

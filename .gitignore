@@ -6,4 +6,5 @@ xd.txt
 *.txt
 *.ini
 *.zip
-.codegraph/
+.codegraph
+.claude

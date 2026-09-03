@@ -6,7 +6,50 @@
    ================================================================================================ */
 const chunks = new Map();      // "cx,cz" -> chunk record
 const editStore = new Map();   // "cx,cz" -> Map(voxelIndex -> value): edits survive unload/reload
-const glowLights = new Set();  // "x,y,z" of placed glowstone blocks (terrain never generates them)
+/* ---- light sources ----
+   `glowLights` is the flat set of every emitter in loaded space. It used to be queried by scanning
+   the WHOLE set and `split(',')`-ing each key — from setBlock (via glowNear), from relight, and
+   once per chunk load. In a world with lava that set holds thousands of entries, so every block
+   edit and every chunk arrival was doing thousands of string splits. That was the single largest
+   contributor to the chunk-streaming stutter.
+
+   `glowByChunk` indexes the same data by chunk column and stores decoded coordinates, so a query
+   visits only the 3x3 chunks a light could possibly reach from and never parses a string. Both
+   structures are maintained together — always go through glowAdd / glowDel / glowClear. */
+const glowLights = new Set();  // "x,y,z" of every active emitter
+const glowByChunk = new Map(); // "cx,cz" -> Map("x,y,z" -> [x, y, z])
+
+const _glowChunkKey = (x, z) => Math.floor(x / 16) + ',' + Math.floor(z / 16);
+function glowAdd(x, y, z) {
+  const k = x + ',' + y + ',' + z;
+  if (glowLights.has(k)) return;
+  glowLights.add(k);
+  const ck = _glowChunkKey(x, z);
+  let m = glowByChunk.get(ck);
+  if (!m) glowByChunk.set(ck, m = new Map());
+  m.set(k, [x, y, z]);
+}
+function glowDel(x, y, z) {
+  const k = x + ',' + y + ',' + z;
+  if (!glowLights.delete(k)) return;
+  const ck = _glowChunkKey(x, z);
+  const m = glowByChunk.get(ck);
+  if (m) { m.delete(k); if (!m.size) glowByChunk.delete(ck); }
+}
+function glowClear() { glowLights.clear(); glowByChunk.clear(); }
+
+/* Visit every emitter whose column lies within `r` blocks of (x, z). Callers still do their own
+   Y and exact-distance tests; this only narrows the candidate set. */
+function forEachGlowNear(x, z, r, fn) {
+  const cx0 = Math.floor((x - r) / 16), cx1 = Math.floor((x + r) / 16);
+  const cz0 = Math.floor((z - r) / 16), cz1 = Math.floor((z + r) / 16);
+  for (let cz = cz0; cz <= cz1; cz++)
+    for (let cx = cx0; cx <= cx1; cx++) {
+      const m = glowByChunk.get(cx + ',' + cz);
+      if (!m) continue;
+      for (const p of m.values()) if (fn(p[0], p[1], p[2]) === false) return;
+    }
+}
 const genQueue = [];           // {cx, cz, d2}
 const meshQueue = [];
 const meshResults = [];        // finished meshes waiting for capped main-thread upload
@@ -174,6 +217,46 @@ function pump() {
   }
 }
 
+/* Chunks whose data has landed but whose lighting/decoration pass has not run yet. Drained a few
+   per frame from the main loop so the per-chunk cost is spread instead of arriving in bursts. */
+const genFinishQueue = [];
+
+function finishChunkGen(c) {
+  if (!c.data || !chunks.has(key(c.cx, c.cz))) return;      // unloaded while it waited
+  /* Register world-generated emitters (lava, natural glowstone) so they actually cast light.
+
+     This walks all 102,400 voxels of the chunk, so what it does PER voxel dominates the pass. It
+     used to call blockLightOf(), which masks the id, compares against the furnace and then walks
+     a `PROPS[id]?.light` property chain — several times the cost of the test itself. EMITTER_ID
+     is a flat 256-entry lookup built once at boot, so the overwhelmingly common case (air, stone,
+     dirt — cells that can never emit) is one typed-array read. */
+  const wx0 = c.cx * 16, wz0 = c.cz * 16, d = c.data;
+  for (let i = 0; i < d.length; i++) {
+    const v = d[i];
+    if (!EMITTER_ID[v & 255]) continue;
+    if (blockLightOf(v) > 0) glowAdd(wx0 + (i & 15), i >> 8, wz0 + ((i >> 4) & 15));
+  }
+  relightForChunk(c.cx, c.cz);             // pour in any nearby glowstone before this meshes
+  seedSkyForChunk(c);                      // daylight columns + spread into caves/overhangs
+  // structures are stamped AFTER terrain, on the main thread — see the header of 34-structures.js
+  trySpawnStructureInChunk(c.cx, c.cz);
+  // this chunk (and each neighbour that was waiting on it) may be meshable now
+  const R2 = viewDist * viewDist;
+  for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    const n = getChunk(c.cx + dx, c.cz + dz);
+    if (!n || !n.data || n.meshes[0] || n.meshes[1] || n.meshes[2] || n.meshes[3] || n.meshing || n.queuedMesh) continue;
+    const ddx = n.cx - playerCX, ddz = n.cz - playerCZ, d2 = ddx * ddx + ddz * ddz;
+    if (d2 <= R2) tryQueueMesh(n, d2);
+  }
+  meshQueue.sort((a, b) => a.d2 - b.d2);
+  pump();
+}
+
+function processGenFinish(maxPerFrame) {
+  let n = 0;
+  while (genFinishQueue.length && n < maxPerFrame) { finishChunkGen(genFinishQueue.shift()); n++; }
+}
+
 function onWorkerMessage(m) {
   if (m.type === 'error') { console.error('[worker]', m.message); return; }
   const c = getChunk(m.cx, m.cz);
@@ -185,28 +268,12 @@ function onWorkerMessage(m) {
       idbPut('terrain:' + currentWorld.id + ':' + key(m.cx, m.cz), c.data.buffer.slice()).catch(() => {});
     const edits = editStore.get(key(m.cx, m.cz));
     if (edits) for (const [i, v] of edits) c.data[i] = v;   // re-apply player edits
-    // register world-generated light emitters (lava, natural glowstone) into glowLights so they
-    // actually cast light — otherwise only player-placed emitters would light the world.
-    {
-      const wx0 = m.cx * 16, wz0 = m.cz * 16;
-      for (let i = 0; i < c.data.length; i++) {
-        if (blockLightOf(c.data[i]) > 0)
-          glowLights.add((wx0 + (i & 15)) + ',' + (i >> 8) + ',' + (wz0 + ((i >> 4) & 15)));
-      }
-    }
-    relightForChunk(m.cx, m.cz);             // pour in any nearby glowstone before this meshes
-    seedSkyForChunk(c);                      // daylight columns + spread into caves/overhangs
-    // structures are stamped AFTER terrain, on the main thread — see the header of 34-structures.js
-    trySpawnStructureInChunk(m.cx, m.cz);
-    // this chunk (and each neighbour that was waiting on it) may be meshable now
-    const R2 = viewDist * viewDist;
-    for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
-      const n = getChunk(m.cx + dx, m.cz + dz);
-      if (!n || !n.data || n.meshes[0] || n.meshes[1] || n.meshes[2] || n.meshes[3] || n.meshing || n.queuedMesh) continue;
-      const ddx = n.cx - playerCX, ddz = n.cz - playerCZ, d2 = ddx * ddx + ddz * ddz;
-      if (d2 <= R2) tryQueueMesh(n, d2);
-    }
-    meshQueue.sort((a, b) => a.d2 - b.d2);
+    /* The voxel data is installed immediately — it is only a typed-array wrap and the edit
+       replay, and neighbours need it present to know they can mesh. Everything AFTER that (the
+       full-chunk emitter scan, the sky seed, glow propagation, structure rolls) is queued, so
+       four workers finishing in the same frame no longer means four of those passes back to
+       back. That burst was what showed up as periodic stutter while flying. */
+    genFinishQueue.push(c);
   } else if (m.type === 'mesh') {
     if (!c) return;
     c.meshing = false;
@@ -310,6 +377,8 @@ function rayBoxesAt(x, y, z) {
 }
 
 let editRushing = false;   // true while a player edit runs: marks its re-meshes for grouped apply
+// set by 34-structures.js around bulk stamping; see the lighting note inside setBlock
+let structBulkLight = false;
 function setBlock(x, y, z, val) {
   if (y < 0 || y > 199) return;
   const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
@@ -322,8 +391,8 @@ function setBlock(x, y, z, val) {
   const oldVal = c.data[i], oldId = oldVal & 255, newId = val & 255;
   c.data[i] = val;
   const oldLit = blockLightOf(oldVal) > 0, newLit = blockLightOf(val) > 0;
-  if (oldLit && !newLit) glowLights.delete(x + ',' + y + ',' + z);
-  if (newLit && !oldLit) glowLights.add(x + ',' + y + ',' + z);
+  if (oldLit && !newLit) glowDel(x, y, z);
+  if (newLit && !oldLit) glowAdd(x, y, z);
   let edits = editStore.get(key(cx, cz));
   if (!edits) editStore.set(key(cx, cz), edits = new Map());
   edits.set(i, val);
@@ -333,11 +402,18 @@ function setBlock(x, y, z, val) {
   if (lx === 15) markDirty(getChunk(cx + 1, cz));
   if (lz === 0)  markDirty(getChunk(cx, cz - 1));
   if (lz === 15) markDirty(getChunk(cx, cz + 1));
-  // re-flood block light if this change is/was a light source or sits within reach of one
-  // (oldLit matters: a removed source is already out of glowLights, so glowNear misses it)
-  if (oldLit || newLit || glowNear(x, y, z)) relight(x, y, z);
-  // sky light changes on ANY opacity edit (dig opens daylight in, place casts shade)
-  if (PROPS[oldId].opaque !== PROPS[newId].opaque) reskyAround(x, y, z);
+  /* Lighting is by far the most expensive part of a setBlock: a single opacity change kicks off a
+     sky-light BFS, and carving a dungeon room is a couple of hundred of them back to back. While
+     a structure is being stamped the flag below suppresses the per-cell work, and 34-structures.js
+     re-lights each affected chunk ONCE when the job finishes. Everything else in setBlock still
+     runs, so the world data and the edit store stay correct either way. */
+  if (!structBulkLight) {
+    // re-flood block light if this change is/was a light source or sits within reach of one
+    // (oldLit matters: a removed source is already out of glowLights, so glowNear misses it)
+    if (oldLit || newLit || glowNear(x, y, z)) relight(x, y, z);
+    // sky light changes on ANY opacity edit (dig opens daylight in, place casts shade)
+    if (PROPS[oldId].opaque !== PROPS[newId].opaque) reskyAround(x, y, z);
+  }
   // snow-on-grass: the grass directly under a snow block wears snowy sides (variant), and reverts
   // to plain grass when the snow is removed. Recursive setBlock is safe (grass fires no snow hook).
   // snow carpet counts as snow cover here too — a trunk replacing a carpet must clear the rim
@@ -442,10 +518,14 @@ function setBlock(x, y, z, val) {
 }
 // is any glowstone within light range of (x,y,z)? (so opaque edits there re-shadow correctly)
 function glowNear(x, y, z) {
-  for (const k of glowLights) {
-    const p = k.split(',');
-    if (Math.abs(+p[0] - x) <= GLOW_LEVEL && Math.abs(+p[1] - y) <= GLOW_LEVEL && Math.abs(+p[2] - z) <= GLOW_LEVEL) return true;
-  }
+  let hit = false;
+  forEachGlowNear(x, z, GLOW_LEVEL, (gx, gy, gz) => {
+    if (Math.abs(gx - x) <= GLOW_LEVEL && Math.abs(gy - y) <= GLOW_LEVEL && Math.abs(gz - z) <= GLOW_LEVEL) {
+      hit = true;
+      return false;                       // found one — stop walking
+    }
+  });
+  if (hit) return true;
   if (_plyGlow && Math.abs(_plyGlow[0]-x) <= GLOW_LEVEL && Math.abs(_plyGlow[1]-y) <= GLOW_LEVEL && Math.abs(_plyGlow[2]-z) <= GLOW_LEVEL) return true;
   return false;
 }

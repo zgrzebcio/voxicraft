@@ -988,6 +988,9 @@ function frame(now) {
     playerCX = cx; playerCZ = cz;
     rebuildQueues();
   }
+  // finish arrived chunks before uploading meshes — a chunk must be lit before it is meshed.
+  // Generous while the loading screen is up (nothing is on screen to stutter), tight in play.
+  processGenFinish(_loadingWorld ? 8 : 2);
   applyMeshResults(_loadingWorld ? 48 : 12);
   pump();
 
@@ -1002,7 +1005,8 @@ function frame(now) {
         if (!nc || !nc.data || nc.meshing || nc.queuedMesh) { _ldDone = false; break outer; }
       }
     }
-    if (_ldDone && meshResults.length === 0) {
+    // genFinishQueue too: a chunk with data but no lighting pass yet is not actually ready
+    if (_ldDone && meshResults.length === 0 && genFinishQueue.length === 0) {
       _loadingWorld = false;
       worldLoadingEl.style.display = 'none';
     }

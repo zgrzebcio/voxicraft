@@ -40,7 +40,7 @@ function buildInventory() {
 
   invEl.innerHTML =
     '<div class="title">Inventory</div>' +
-    '<div class="hint">drag: hold <b>LMB</b>/<b>A</b> &middot; quick-move: <b>Shift+LMB</b>/<b>Y</b> &middot; sort: <b>MMB</b> &middot; close: <b>E</b>/<b>B</b></div>';
+    '<div class="hint">drag: hold <b>LMB</b>/<b>A</b> &middot; quick-move: <b>Shift+LMB</b>/<b>Y</b> &middot; sort: <b>MMB</b> &middot; close: <b>Tab</b>/<b>B</b></div>';
   // one N×9 grid bound to a slot array + region; DOM order == slot index (slot 0 = bottom-left)
   const mkGrid = (arr, region) => {
     const grid = document.createElement('div');

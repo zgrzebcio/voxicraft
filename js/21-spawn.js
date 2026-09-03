@@ -7,11 +7,11 @@ function resetWorld(seed, terrainType) {
   TERRAIN_TYPE = terrainType || 'default';
   mainGen = CORE.makeGen(seed, TERRAIN_TYPE);
   history.replaceState(null, '', '?seed=' + encodeURIComponent(seed));
-  genQueue.length = 0; meshQueue.length = 0; meshResults.length = 0;
+  genQueue.length = 0; meshQueue.length = 0; meshResults.length = 0; genFinishQueue.length = 0;
   for (const [, c] of chunks) disposeChunkMeshes(c);
   chunks.clear();
   editStore.clear();
-  glowLights.clear();
+  glowClear();
   _plyGlow = null;
   clearDrops();
   clearFallingLeaves();
