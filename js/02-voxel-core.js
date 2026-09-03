@@ -39,7 +39,8 @@ function VOXEL_CORE() {
               SULFUR_UP_TIP:67, TNT_LIT:68, OAK_SAPLING:69, BIRCH_SAPLING:70, SUGAR_CANE:71,
               STRIPPED_LOG:72, STRIPPED_LOG_TOP:73, STRIPPED_BIRCH_LOG:74, STRIPPED_BIRCH_LOG_TOP:75,
               SPRUCE_LOG:76, SPRUCE_LOG_TOP:77, SPRUCE_PLANKS:78, SPRUCE_LEAVES:79, SPRUCE_SAPLING:80,
-              STRIPPED_SPRUCE_LOG:81, STRIPPED_SPRUCE_LOG_TOP:82, PINCUSHION:83, STRUCTURE_BLOCK:84 };
+              STRIPPED_SPRUCE_LOG:81, STRIPPED_SPRUCE_LOG_TOP:82, PINCUSHION:83, STRUCTURE_BLOCK:84,
+              BERRY_BUSH_EMPTY:85, BERRY_BUSH_FRUITLING:86, BERRY_BUSH:87 };
   const B = { AIR:0, GRASS:1, DIRT:2, STONE:3, LOG:4, PLANKS:5, LEAVES:6, SAND:7,
               GLASS:8, BEDROCK:9, WATER:10, GLOWSTONE:11, OAKSLAB:12, CLAY:13, SNOW:14, COBBLE:15,
               COAL_ORE:16, IRON_ORE:17, DIAMOND_ORE:18, GRAVEL:19, RED_MUSHROOM:20, BROWN_MUSHROOM:21,
@@ -55,7 +56,9 @@ function VOXEL_CORE() {
               SPRUCE_LOG:73, STRIPPED_SPRUCE_LOG:74, SPRUCE_PLANKS:75, SPRUCE_LEAVES:76,
               SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, STRUCTURE_BLOCK:80,
               // one cell, many carpet layers of mixed material (0.69) — see CARPET_MAT below
-              CARPET:81, };
+              CARPET:81,
+              // berry bush (0.698): one block, variant 0 = empty, 1 = fruitling, 2 = grown
+              BERRY_BUSH:82, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -144,7 +147,7 @@ function VOXEL_CORE() {
   // Break yields a single carpet regardless of stack height.
   const CARPET_VAR = [];
   for (let v = 0; v < 6; v++) CARPET_VAR[v] = [[0, 0, 0, 1, (v + 1) / 6, 1]];
-  PROPS[B.SNOW_CARPET] = { name:'Snow carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.3, type:'snow', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
+  PROPS[B.SNOW_CARPET] = { name:'Snow carpet', solid:false, opaque:false, raycast:true, pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.3, type:'snow', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
 
   /* ---- layered carpet (B.CARPET) — the reason the voxel grew to 32 bits ----
      The old carpets could stack, but every layer in a cell had to be the SAME block, because the
@@ -185,7 +188,8 @@ function VOXEL_CORE() {
   CARPET_MAT_OF[B.SPRUCE_LEAF_CARPET] = CARPET_MAT.SPRUCE_LITTER;
   const CARPET_LITTER = new Set([CARPET_MAT.OAK_LITTER, CARPET_MAT.BIRCH_LITTER, CARPET_MAT.SPRUCE_LITTER]);
   // noInv: you never hold "carpet", you hold a snow carpet or one of the leaf litters
-  PROPS[B.CARPET] = { name:'Carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet_stack',
+  // solid:false (0.695) — every carpet stack is walk-through; drag is what makes it felt
+  PROPS[B.CARPET] = { name:'Carpet', solid:false, opaque:false, raycast:true, pass:0, model:'carpet_stack',
                       topOnly:true, noInv:true, stack:60, hardness:0.25, type:'snow',
                       boxes:[[0, 0, 0, 1, 1 / CARPET_MAX, 1]], boxesOf:carpetBoxes,
                       faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
@@ -364,6 +368,16 @@ function VOXEL_CORE() {
   /* Build tool, not a material: it has no recipe, so it only ever reaches a player through the
      creative palette. Left fully solid so a capture volume can be lined up against it. */
   PROPS[B.STRUCTURE_BLOCK] = { name:'Structure block', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:1, hardness:1.0, type:'stone', faces:[T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK], desc: '' };
+  /* Berry bush — cross billboard, three growth stages in the variant byte (0 empty, 1 fruitling,
+     2 grown). `noTarget` like the grass billboards, so the crosshair passes through it and the
+     ONLY way to work it is bush pickup: a grown bush hands over berries and drops back to empty,
+     then regrows on its own. tilesByVar swaps the texture per stage. */
+  const BERRY_STAGE = { EMPTY: 0, FRUITLING: 1, GROWN: 2 };
+  PROPS[B.BERRY_BUSH] = { name:'Berry bush', solid:false, opaque:false, raycast:true, noTarget:true,
+                          pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass',
+                          boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.BERRY_BUSH_EMPTY],
+                          tilesByVar:[T.BERRY_BUSH_EMPTY, T.BERRY_BUSH_FRUITLING, T.BERRY_BUSH],
+                          desc: '' };
   PROPS[B.PINCUSHION] = { name:'Pincushion', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.7,0.75]], faces:[T.PINCUSHION], desc: '' };
   PROPS[B.COBBLESLAB]    = { name:'Cobblestone slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:8, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
   PROPS[B.BRICKS]    = { name:'Bricks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:6.5, type:'stone', faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
@@ -1612,8 +1626,14 @@ function VOXEL_CORE() {
           if (hh < 1 || hh > 198) continue;
           const gv = data[idx(x, hh, z)];
           if ((gv & 255) !== B.GRASS || ((gv >> 8) & 255) !== V.GRASS_SNOWY) continue;
-          const above = data[idx(x, hh + 1, z)] & 255;
-          if (above !== B.SNOW && above !== B.SNOW_CARPET) data[idx(x, hh, z)] = B.GRASS;
+          // 0.6951: snow cover is a CARPET stack now, not B.SNOW_CARPET — check its layers too,
+          // otherwise every carpeted column got its white rim swept off here.
+          const av = data[idx(x, hh + 1, z)], above = av & 255;
+          let snowAbove = above === B.SNOW || above === B.SNOW_CARPET;
+          if (!snowAbove && above === B.CARPET)
+            for (let i = carpetTop(av) - 1; i >= 0; i--)
+              if (carpetMat(av, i) === CARPET_MAT.SNOW) { snowAbove = true; break; }
+          if (!snowAbove) data[idx(x, hh, z)] = B.GRASS;
         }
 
       /* ---- red mushrooms: cave floors + shadowed ground under leaves ---- */
@@ -1736,12 +1756,18 @@ function VOXEL_CORE() {
           const grassCh  = 0.22 * (1 - alt * 0.75);
           // two-block tall grass: a slice of the short-grass budget, plains-heavier, needs 2 air
           const tallCh   = (isPlains ? 0.05 : 0.015) * (1 - alt * 0.75);
+          /* Berry bushes are scattered thinly and land in a RANDOM growth stage, so a fresh world
+             already has some ripe and some bare — the regrow timer takes over from there. */
+          const berryCh = (isPlains ? 0.006 : 0.010) * (1 - alt * 0.75);
           if (r < flowerCh) {
             data[idx(lx, h + 1, lz)] = hash3(cx * 31 + lx + 12, 19, cz * 29 + lz + 7) < 0.5 ? B.POPPY : B.ORCHID;
-          } else if (r < flowerCh + tallCh && h + 2 < CY && (data[idx(lx, h + 2, lz)] & 255) === B.AIR) {
+          } else if (r < flowerCh + berryCh) {
+            const stage = Math.min(2, (hash3(cx * 41 + lx + 909, 37, cz * 43 + lz + 606) * 3) | 0);
+            data[idx(lx, h + 1, lz)] = B.BERRY_BUSH | (stage << 8);
+          } else if (r < flowerCh + berryCh + tallCh && h + 2 < CY && (data[idx(lx, h + 2, lz)] & 255) === B.AIR) {
             data[idx(lx, h + 1, lz)] = B.TALL_LOWER;
             data[idx(lx, h + 2, lz)] = B.TALL_UPPER;
-          } else if (r < flowerCh + tallCh + grassCh) {
+          } else if (r < flowerCh + berryCh + tallCh + grassCh) {
             data[idx(lx, h + 1, lz)] = B.TALLGRASS;
           }
         }
@@ -2178,6 +2204,9 @@ function VOXEL_CORE() {
       // sulfur tip: variant 1 = flipped/down orientation, swap tile to the down-tip texture
       let tile = PROPS[blockId].faces[0];
       if (blockId === B.SULFUR_UP_TIP && (varb & 1)) tile = T.SULFUR_DOWN_TIP;
+      // per-variant billboard texture (berry bush growth stages)
+      const tv = PROPS[blockId].tilesByVar;
+      if (tv && tv[varb] != null) tile = tv[varb];
       const lite = gl(x, y + 1, z);
       const sh = 210;
       quad(1,[x,y,z+1],[x+1,y,z],[x+1,y+1,z],[x,y+1,z+1], [0,0],[1,0],[1,1],[0,1],tile,sh,lite);
@@ -2440,7 +2469,7 @@ function VOXEL_CORE() {
 
   return { B, T, V, PROPS, SLAB_IDS, stairBoxesAt, makeGen, meshChunk, idx,
            logWidthOf, logWidthPx, LOG_W_MIN, LOG_W_MAX, LOG_W_NORMAL, LOG_W_BLOCK,
-           CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER,
+           CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER, BERRY_STAGE,
            carpetMat, carpetSet, carpetTop, carpetPush, carpetPop, carpetFill, carpetRemoveAt };
 }
 
@@ -2469,7 +2498,7 @@ function WORKER_MAIN() {
 
 const CORE = VOXEL_CORE();
 const { B, V, PROPS, SLAB_IDS, logWidthOf, LOG_W_MIN, LOG_W_NORMAL } = CORE;
-const { CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER,
+const { CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER, BERRY_STAGE,
         carpetMat, carpetSet, carpetTop, carpetPush, carpetPop, carpetFill, carpetRemoveAt } = CORE;
 
 // Items (IDs >= 256) — separate registry from blocks
@@ -2493,7 +2522,7 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                IRON_HELMET: 331, IRON_CHESTPLATE: 332, IRON_LEGGINGS: 333, IRON_BOOTS: 334,
                GOLDEN_HELMET: 335, GOLDEN_CHESTPLATE: 336, GOLDEN_LEGGINGS: 337, GOLDEN_BOOTS: 338,
                DIAMOND_HELMET: 339, DIAMOND_CHESTPLATE: 340, DIAMOND_LEGGINGS: 341, DIAMOND_BOOTS: 342,
-               IRON_GLOVES: 343, BELT: 344, BARK: 345, FIBER: 346, CLOTH: 347 };
+               IRON_GLOVES: 343, BELT: 344, BARK: 345, FIBER: 346, CLOTH: 347, BERRIES: 348 };
 const ITEM_PROPS = {
   [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: 'Used as crafting ingredient' },
   [ITEM.BARK]:          { name: 'Bark',          stack: 99, icon: 'bark', desc: 'Used as fuel for 0.75 smelt' },
@@ -2568,6 +2597,7 @@ const ITEM_PROPS = {
 // Consumables
   [ITEM.APPLE]:         { name: 'Apple',          stack: 99, icon: 'apple',         foodSatFull: 3, food: 5,  foodSat: 8,  eatTime: 1.4, desc: '' },
   [ITEM.MELON_SLICE]:   { name: 'Melon slice',    stack: 40, icon: 'melon_slice',   foodSatFull: 1, food: 1,  foodSat: 2,  eatTime: 1.0, desc: '' },
+  [ITEM.BERRIES]:       { name: 'Berries',        stack: 60, icon: 'berries',       foodSatFull: 1, food: 2,  foodSat: 2,  eatTime: 0.9, desc: '' },
   [ITEM.PUMPKIN_PIE]:   { name: 'Pumpkin Pie',    stack: 10, icon: 'pumpkin_pie',   foodSatFull: 6, food: 10, foodSat: 12, eatTime: 4, desc: '' },
   [ITEM.MUSHROOM_STEW]: { name: 'Mushroom stew',  stack: 20, icon: 'mushroom_stew', foodSatFull: 5, food: 8,  foodSat: 10, eatTime: 2.2, foodReturn: 265, desc: '' },
   [ITEM.BREAD]:         { name: 'Bread',          stack: 99, icon: 'bread',         foodSatFull: 4, food: 7,  foodSat: 8,  eatTime: 1.7, desc: '' },
@@ -2702,11 +2732,15 @@ function blockDrop(blockId, isNatural = false) {
   }
   if (blockId === B.MELON) return [{ id: ITEM.MELON_SLICE, count: 2 + Math.floor(Math.random() * 5) }];
   if (blockId === B.WHEAT) return [{ id: ITEM.WHEAT, count: 1 + Math.floor(Math.random() * 2) }];
-  if (blockId === B.TALLGRASS || blockId === B.TALL_LOWER || blockId === B.TALL_UPPER) return [];   // grass drops nothing
+  // grass and berry bushes drop nothing when destroyed — bush pickup is the only way to work them
+  if (blockId === B.TALLGRASS || blockId === B.TALL_LOWER || blockId === B.TALL_UPPER ||
+      blockId === B.BERRY_BUSH) return [];
   if (blockId === B.GLASS) return [{ id: ITEM.GLASS_SHARD, count: 2 + Math.floor(Math.random() * 3) }];
   if (blockId === B.CLAY)  return [{ id: ITEM.CLAY_BALL, count: 4 }];
   if (blockId === B.SNOW)  return [{ id: ITEM.SNOWBALL,  count: 2 + Math.floor(Math.random() * 3) }];
-  if (blockId === B.SNOW_CARPET) return [{ id: B.SNOW_CARPET, count: 1 }];   // full carpet regardless of layers
+  // 0.6961: snow carpet never drops itself. A shovel packs a layer into a snowball; anything
+  // else (explosions, fluids, bare hands) just destroys it. Handled at the break site.
+  if (blockId === B.SNOW_CARPET) return [];
   if (blockId === B.SUGAR_CANE) return [{ id: ITEM.SUGAR_CANE, count: 1 }];
   if (blockId === B.OAK_SAPLING || blockId === B.BIRCH_SAPLING || blockId === B.SPRUCE_SAPLING)
     return [{ id: blockId, count: 1 }];

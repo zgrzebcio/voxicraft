@@ -182,6 +182,14 @@ const BUSH_NAME = [];
 BUSH_NAME[B.TALLGRASS] = 'grass';
 BUSH_NAME[B.TALL_LOWER] = BUSH_NAME[B.TALL_UPPER] = 'tall grass';
 BUSH_NAME[B.WHEAT] = 'wheat';
+BUSH_NAME[B.BERRY_BUSH] = 'berry bush';
+/* Berry bush (0.698). Picking a GROWN bush takes the fruit and leaves the plant standing at
+   `empty`, so it regrows (33-felling.js) instead of being consumed — a bush is a renewable
+   patch, not a one-shot pickup. An unripe bush yields nothing but a better fiber roll, since
+   all you did was strip leaves off it. */
+const BERRY_PICK_MIN = 1, BERRY_PICK_MAX = 3;
+const BERRY_FIBER_CHANCE = 0.10;                 // ripe pick: fruit is the reward, fiber is a bonus
+const BERRY_LEAF_FIBER_CHANCE = 0.30;            // unripe pick: fiber is the whole point
 /* Yield goes STRAIGHT into the inventory — no dropped entity to walk back over. That is what
    makes it work at a sprint: hold the key through a field and every bush lands in a slot as you
    pass. Only when there is genuinely no room does it fall on the ground instead of vanishing. */
@@ -206,33 +214,60 @@ function findBushPickup() {
   for (let y = y0; y <= y0 + 1; y++)
     for (let z = z0; z <= z1; z++)
       for (let x = x0; x <= x1; x++) {
-        const id = getBlock(x, y, z) & 255;
+        const val = getBlock(x, y, z), id = val & 255;
         if (!BUSH_NAME[id]) continue;
         const dx = (x + 0.5) - p.x, dz = (z + 0.5) - p.z;
         const d = dx * dx + dz * dz;
         if (d >= bestD) continue;
         bestD = d;
-        best = { x, y, z, id, name: BUSH_NAME[id] };
+        const v = (val >> 8) & 255;
+        // the prompt says what you would actually get, so a bare bush reads as bare
+        const name = id === B.BERRY_BUSH && v !== BERRY_STAGE.GROWN ? 'berry bush (unripe)' : BUSH_NAME[id];
+        best = { x, y, z, id, v, name };
       }
   return best;
 }
+/* Returns the cooldown to arm (seconds) on a successful pick, or 0 when nothing was taken. */
 function harvestAtPlayer() {
   const t = findBushPickup();
-  if (!t) return false;
+  if (!t) return 0;
   const { x, z, id } = t;
   handPickSwing = true;                          // 24-hands.js plays the grab on the next frame
+  if (id === B.BERRY_BUSH) {
+    if (t.v === BERRY_STAGE.GROWN) {
+      // first pick on a ripe bush: take the fruit, leave the plant standing and empty
+      setBlock(x, t.y, z, B.BERRY_BUSH | (BERRY_STAGE.EMPTY << 8));
+      const n = BERRY_PICK_MIN + Math.floor(Math.random() * (BERRY_PICK_MAX - BERRY_PICK_MIN + 1));
+      for (let i = 0; i < n; i++) bushGive(ITEM.BERRIES, x, t.y, z);
+      if (!player.canFly && Math.random() < BERRY_FIBER_CHANCE) bushGive(ITEM.FIBER, x, t.y, z);
+      queueBerryGrow(x, t.y, z);
+    } else if (t.v === BERRY_STAGE.FRUITLING) {
+      // half-grown: the unripe fruit is lost, the plant survives at empty
+      setBlock(x, t.y, z, B.BERRY_BUSH | (BERRY_STAGE.EMPTY << 8));
+      if (!player.canFly && Math.random() < BERRY_LEAF_FIBER_CHANCE) bushGive(ITEM.FIBER, x, t.y, z);
+      queueBerryGrow(x, t.y, z);
+    } else {
+      /* Nothing left to strip, so this pick takes the whole plant. That is the SECOND pick on a
+         bush you just picked — and the 1.1s cooldown between them is what keeps one held key from
+         stripping and uprooting a bush in the same motion. */
+      setBlock(x, t.y, z, B.AIR);
+      if (!player.canFly && Math.random() < BERRY_LEAF_FIBER_CHANCE) bushGive(ITEM.FIBER, x, t.y, z);
+    }
+    playBlockSound(B.TALLGRASS, 'break', x, t.y, z);
+    return BERRY_REPEAT;
+  }
   if (id === B.WHEAT) {
     setBlock(x, t.y, z, B.AIR);
     playBlockSound(B.WHEAT, 'break', x, t.y, z);
     for (const d of blockDrop(B.WHEAT)) for (let n = 0; n < d.count; n++) bushGive(d.id, x, t.y, z);
     _harvestFiber(x, t.y, z, 1);                 // wheat straw yields fiber as well
-    return true;
+    return BUSH_REPEAT;
   }
   if (id === B.TALLGRASS) {
     setBlock(x, t.y, z, B.AIR);
     playBlockSound(B.TALLGRASS, 'break', x, t.y, z);
     _harvestFiber(x, t.y, z, 1);
-    return true;
+    return BUSH_REPEAT;
   }
   // take the whole two-cell plant however you met it, and roll once for each half
   const ly = id === B.TALL_LOWER ? t.y : t.y - 1;
@@ -240,7 +275,7 @@ function harvestAtPlayer() {
   setBlock(x, ly, z, B.AIR);
   playBlockSound(B.TALL_LOWER, 'break', x, ly, z);
   _harvestFiber(x, ly, z, 2);
-  return true;
+  return BUSH_REPEAT;
 }
 /* Held, not tapped: the first pick fires the instant the key goes down, then it repeats on a
    short cooldown for as long as you hold it. Releasing clears the cooldown so a deliberate tap
@@ -251,12 +286,17 @@ function harvestAtPlayer() {
    that actually TOOK something — holding the key while walking up to a bush must not eat the
    first one, so an empty attempt costs nothing. */
 const BUSH_REPEAT = 0.3;                         // seconds between picks while the key is held
+/* A berry bush is not consumed by a pick — it drops a stage and stays there — so the plain 0.3s
+   repeat would let one held key strip a ripe bush AND immediately re-pick the empty one it just
+   became, in the same breath. The longer cooldown makes each stage a deliberate, separate pick. */
+const BERRY_REPEAT = 1.1;
 let _bushCd = 0;
 function updateBushPickup(dt, wantPick) {
   if (!wantPick) { _bushCd = 0; return; }
   _bushCd -= dt;
   if (_bushCd > 0) return;
-  if (harvestAtPlayer()) _bushCd = BUSH_REPEAT;
+  const cd = harvestAtPlayer();
+  if (cd) _bushCd = cd;
 }
 let handPlaceSwing = false;   // set on a SUCCESSFUL place; 24-hands consumes it for the swing
 let handPickSwing  = false;   // same, for a successful bush pickup

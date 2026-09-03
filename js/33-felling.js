@@ -151,6 +151,135 @@ function updateLitterRot(dt) {
 }
 function clearLitterRot() { litterRot.clear(); _litterSweep = 0; }
 
+/* ---- snow melt (0.696) ----
+   Snow that ends up outside a cold biome is temporary: a drift blown over the seam, a carpet the
+   player carried south, whatever the generator feathered across a border. Same shape as the litter
+   rot above — each cell gets its own countdown when first noticed and loses ONE layer per firing,
+   so a drift thins unevenly instead of vanishing in one frame. Cold biomes are left alone. */
+const snowMelt = new Map();         // "x,y,z" -> seconds until this cell loses its next snow layer
+const MELT_LIFE = 0.35, MELT_LIFE_JITTER = 0.5;                   // in-game days per layer
+const MELT_TICK = 1.0, MELT_SWEEP_TICK = 4.0, MELT_SWEEP_TRIES = 24;
+let _meltTimer = 0, _meltSweep = 0;
+const _warmCol = new Map();         // "x,z" -> is this column warm? (biomeAt is not cheap)
+function _isWarmColumn(x, z) {
+  const k = x + ',' + z;
+  let w = _warmCol.get(k);
+  if (w === undefined) {
+    w = !mainGen.biomeAt(x, z).startsWith('Snow');
+    if (_warmCol.size > 4096) _warmCol.clear();
+    _warmCol.set(k, w);
+  }
+  return w;
+}
+/* Heat sources melt snow regardless of biome: lava is fierce, a torch is a slow thaw ring.
+   Sampled per tick rather than latched at queue time so lighting a torch starts a melt straight
+   away, and putting it out stops one. */
+const MELT_HEAT_R = 2, MELT_HEAT_LAVA = 8, MELT_HEAT_TORCH = 4;
+function snowHeat(x, y, z) {
+  let heat = 1;
+  for (let dy = -MELT_HEAT_R; dy <= MELT_HEAT_R; dy++)
+    for (let dz = -MELT_HEAT_R; dz <= MELT_HEAT_R; dz++)
+      for (let dx = -MELT_HEAT_R; dx <= MELT_HEAT_R; dx++) {
+        const id = getBlock(x + dx, y + dy, z + dz) & 255;
+        if (id === B.LAVA) return MELT_HEAT_LAVA;                 // nothing beats lava — stop here
+        if (id === B.TORCH && heat < MELT_HEAT_TORCH) heat = MELT_HEAT_TORCH;
+      }
+  return heat;
+}
+// index of the topmost SNOW layer in this cell, or -1 if it holds none
+function snowLayerTop(val) {
+  const id = val & 255;
+  if (id !== B.CARPET) return id === B.SNOW_CARPET ? 0 : -1;      // legacy pre-0.69 snow carpet
+  for (let i = carpetTop(val) - 1; i >= 0; i--) if (carpetMat(val, i) === CARPET_MAT.SNOW) return i;
+  return -1;
+}
+function sweepSnowMelt() {
+  if (typeof player === 'undefined' || !player.spawned || menuScene) return;
+  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  for (let i = 0; i < MELT_SWEEP_TRIES; i++) {
+    const x = px + (Math.random() * 48 | 0) - 24;
+    const z = pz + (Math.random() * 48 | 0) - 24;
+    const y = py + (Math.random() * 12 | 0) - 6;
+    if (snowLayerTop(getBlock(x, y, z)) < 0) continue;
+    const k = x + ',' + y + ',' + z;
+    if (snowMelt.has(k)) continue;
+    if (!_isWarmColumn(x, z) && snowHeat(x, y, z) === 1) continue;   // cold and no heat source: keep it
+    snowMelt.set(k, (MELT_LIFE + Math.random() * MELT_LIFE_JITTER) * _dayLen());
+  }
+}
+function updateSnowMelt(dt) {
+  _meltSweep += dt;
+  if (_meltSweep >= MELT_SWEEP_TICK) { _meltSweep = 0; sweepSnowMelt(); }
+  _meltTimer += dt;
+  if (_meltTimer < MELT_TICK) return;
+  const step = _meltTimer * (typeof tickFactor === 'function' ? tickFactor() : 1);
+  _meltTimer = 0;
+  for (const [k, t] of snowMelt) {
+    const [x, y, z] = k.split(',').map(Number);
+    const val = getBlock(x, y, z);
+    const si = snowLayerTop(val);
+    if (si < 0) { snowMelt.delete(k); continue; }                 // mined, replaced, or already gone
+    const heat = snowHeat(x, y, z);
+    if (!_isWarmColumn(x, z) && heat === 1) { snowMelt.delete(k); continue; }  // heat removed, cold biome
+    const left = t - step * heat;
+    if (left > 0) { snowMelt.set(k, left); continue; }
+    const cur = (val & 255) === B.CARPET ? val : carpetFill(CARPET_MAT_OF[val & 255], ((val >> 8) & 255) + 1);
+    setBlock(x, y, z, carpetRemoveAt(cur, si));
+    if (snowLayerTop(getBlock(x, y, z)) < 0) snowMelt.delete(k);
+    else snowMelt.set(k, (MELT_LIFE + Math.random() * MELT_LIFE_JITTER) * _dayLen());
+  }
+}
+function clearSnowMelt() { snowMelt.clear(); _meltSweep = 0; _warmCol.clear(); }
+
+/* ---- berry bush regrowth (0.698) ----
+   A bush below `grown` climbs one stage at a time, empty -> fruitling -> grown, each stage on its
+   own jittered countdown. Same adoption sweep as litter rot and snow melt: bushes the generator
+   placed (or a save restored) are picked up the first time the sweep sees them, and a bush you
+   just picked is queued immediately so its clock starts on the pick rather than on a later sweep. */
+const berryGrow = new Map();        // "x,y,z" -> seconds until this bush advances one stage
+const BERRY_STAGE_LIFE = 0.8, BERRY_STAGE_JITTER = 0.9;           // in-game days per stage
+const BERRY_TICK = 1.0, BERRY_SWEEP_TICK = 5.0, BERRY_SWEEP_TRIES = 20;
+let _berryTimer = 0, _berrySweep = 0;
+const _berryLife = () => (BERRY_STAGE_LIFE + Math.random() * BERRY_STAGE_JITTER) * _dayLen();
+// stage of the bush at this cell, or -1 when it is not a bush (or already fully grown)
+function berryStageAt(val) {
+  if ((val & 255) !== B.BERRY_BUSH) return -1;
+  const v = (val >> 8) & 255;
+  return v >= BERRY_STAGE.GROWN ? -1 : v;
+}
+function queueBerryGrow(x, y, z) { berryGrow.set(x + ',' + y + ',' + z, _berryLife()); }
+function sweepBerryGrow() {
+  if (typeof player === 'undefined' || !player.spawned || menuScene) return;
+  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  for (let i = 0; i < BERRY_SWEEP_TRIES; i++) {
+    const x = px + (Math.random() * 48 | 0) - 24;
+    const z = pz + (Math.random() * 48 | 0) - 24;
+    const y = py + (Math.random() * 12 | 0) - 6;
+    if (berryStageAt(getBlock(x, y, z)) < 0) continue;
+    const k = x + ',' + y + ',' + z;
+    if (!berryGrow.has(k)) berryGrow.set(k, _berryLife());
+  }
+}
+function updateBerryGrow(dt) {
+  _berrySweep += dt;
+  if (_berrySweep >= BERRY_SWEEP_TICK) { _berrySweep = 0; sweepBerryGrow(); }
+  _berryTimer += dt;
+  if (_berryTimer < BERRY_TICK) return;
+  const step = _berryTimer * (typeof tickFactor === 'function' ? tickFactor() : 1);
+  _berryTimer = 0;
+  for (const [k, t] of berryGrow) {
+    const [x, y, z] = k.split(',').map(Number);
+    const stage = berryStageAt(getBlock(x, y, z));
+    if (stage < 0) { berryGrow.delete(k); continue; }             // picked clean, mined, or ripe
+    const left = t - step;
+    if (left > 0) { berryGrow.set(k, left); continue; }
+    setBlock(x, y, z, B.BERRY_BUSH | ((stage + 1) << 8));
+    if (stage + 1 >= BERRY_STAGE.GROWN) berryGrow.delete(k);
+    else berryGrow.set(k, _berryLife());
+  }
+}
+function clearBerryGrow() { berryGrow.clear(); _berrySweep = 0; }
+
 /* Cells a falling block passes straight through. Billboards are included so a torch or a flower
    never stops a falling leaf in mid-air — it gets crushed on the way, the same rule sand and
    gravel use in 22-main-loop.js. */

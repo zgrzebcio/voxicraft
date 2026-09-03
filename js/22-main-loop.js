@@ -150,10 +150,17 @@ function processGrassSpread(dt) {
 }
 
 /* ---- throwing ---- */
+// blocks whose right-click opens a GUI or actuates something; throwing must yield to them
+const THROW_BLOCKED_BY = new Set([B.CRAFTING_BENCH, B.FURNACE, B.CHEST, B.DOOR, B.BED,
+                                  B.STRUCTURE_BLOCK]);
 function tryThrow() {
   if (!playing || player.canFly || invOpen || menuScene) return false;
   const slot = HOTBAR[hotbarSel];
   if (!slot || !ITEM_PROPS[slot.id]?.throwable) return false;
+  /* A right-click aimed at something that OPENS must interact, not throw — otherwise a stack of
+     snowballs in hand locks you out of your own furnace. doPlace() handles these same ids. */
+  const aimed = currentRay();
+  if (aimed && THROW_BLOCKED_BY.has(aimed.id)) return false;
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   spawnProjectile(slot.id,
     player.pos.x + fwd.x * 0.3,
@@ -693,6 +700,8 @@ function frame(now) {
   updateMusic();                            // menu track on/off follows menuScene
   updateFelling(dt);                        // felled trunks come apart a few cells per tick
   updateLitterRot(dt);                      // fallen leaves rot off the forest floor
+  updateSnowMelt(dt);                       // snow outside a cold biome thins away a layer at a time
+  updateBerryGrow(dt);                      // picked berry bushes ripen again, one stage at a time
   updateStructOutline();                    // drop the capture box if its block was broken
   processPlacementQueue();                  // villages/dungeons assemble a few cells per frame
   updateFallingLeaves(dt);                  // canopy coming down after a tree was felled
@@ -757,7 +766,8 @@ function frame(now) {
     }
     dy = player.vy * dt;
     hSpeed = player.walkSpeed * (player.sneaking ? 0.3 : fast ? (inWater ? 1.9 : 1.6) : 1) * (inWater ? 0.45 : 1)
-           * playerMoveSpeedMul();               // heavy armor slows you down
+           * playerMoveSpeedMul()                // heavy armor slows you down
+           * terrainSpeedMul();                  // leaves/litter -40%, snow carpet -70%
   }
   if (!player.spawned) { player.vy = 0; dy = 0; }   // hold still until the spawn chunk exists
   if (menuScene) { fwd = 0; str = 0; dy = 0; player.vy = 0; }   // title camera: rotation only
@@ -957,7 +967,13 @@ function frame(now) {
           /* felling already did everything */
         } else if (inf) {
           setBlock(mx, my, mz, inf.remainVal);
-          if (dropsOk) spawnDrop(inf.dropId, mx, my, mz);
+          if (dropsOk) {
+            // a snow layer never hands back a carpet — only a shovel packs it into a snowball
+            if (inf.mat === CARPET_MAT.SNOW) {
+              if (ITEM_PROPS[slotId(HOTBAR[hotbarSel])]?.tool === 'shovel')
+                spawnDrop(ITEM.SNOWBALL, mx, my, mz);
+            } else spawnDrop(inf.dropId, mx, my, mz);
+          }
         } else {
           setBlock(mx, my, mz, B.AIR);
           queueWaterAround(mx, my, mz);

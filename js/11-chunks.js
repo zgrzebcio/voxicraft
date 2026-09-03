@@ -577,7 +577,8 @@ function carpetBreakInfo(val) {
   const cur = id === B.CARPET ? val : carpetFill(CARPET_MAT_OF[id], Math.min(CARPET_MAX, ((val >> 8) & 255) + 1));
   const top = carpetTop(cur);
   if (!top) return null;
-  return { dropId: CARPET_MAT_ITEM[carpetMat(cur, top - 1)] || B.SNOW_CARPET, remainVal: carpetPop(cur) };
+  const mat = carpetMat(cur, top - 1);
+  return { dropId: CARPET_MAT_ITEM[mat] || B.SNOW_CARPET, mat, remainVal: carpetPop(cur) };
 }
 // is any glowstone within light range of (x,y,z)? (so opaque edits there re-shadow correctly)
 function glowNear(x, y, z) {

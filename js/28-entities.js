@@ -660,6 +660,28 @@ function attackDamageFor(id) {
   // strength from equipment is flat bonus damage (diamond sword 7 + iron gloves 0.75 = 7.75)
   return base + (typeof playerStrength === 'function' ? playerStrength() : 0);
 }
+/* ---- snowballs (0.6962) ----
+   A thrown snowball is a shove, not an attack: it staggers whatever it lands on and pushes it
+   along the flight direction, but deals no damage and deliberately touches NEITHER `aggroT`/
+   `state` (hostiles stay neutral) NOR `fleeT` (sheep don't bolt). Pelting a cow is harmless fun. */
+function projectileHitEntity(x, y, z) {
+  for (const e of ENTITIES) {
+    if (e.hp <= 0) continue;
+    if (Math.abs(x - e.x) > ENT_R + 0.2 || Math.abs(z - e.z) > ENT_R + 0.2) continue;
+    if (y < e.y - 0.1 || y > e.y + ENT_H) continue;
+    return e;
+  }
+  return null;
+}
+function entitySnowballHit(ent, vx, vy, vz) {
+  ent.hurtT = 0.25;                              // the white flash, so the hit reads
+  ent.flailT = ENT_FLAIL_TIME;
+  const m = Math.hypot(vx, vz) || 1;
+  ent.kx = vx / m * ENT_KNOCK * 7;               // lighter than a melee hit
+  ent.kz = vz / m * ENT_KNOCK * 7;
+  if (_entBlocked(ent.x, ent.y - 0.02, ent.z)) ent.vy = ENT_KNOCK_HOP * 0.5;
+  playSound('hit', { gain: 0.5, rate: 1.3 + Math.random() * 0.1, pos: { x: ent.x, y: ent.y + 1, z: ent.z } });
+}
 function tryAttackEntity(ent) {
   if (_atkCooldown > 0) return false;
   if (!ent) ent = pickEntity();
@@ -894,6 +916,7 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
   let moved = 0;
   const stunned = (e.kx !== 0 || e.kz !== 0);
   if (moveSpeed > 0 && !stunned) {
+    moveSpeed *= boxDragMul(e.x, e.y, e.z, ENT_R, ENT_H);   // leaves/litter -40%, snow -70%
     const sx = Math.sin(e.yaw) * moveSpeed * dt, sz = Math.cos(e.yaw) * moveSpeed * dt;
     const bad = (nx, nz) => _entBlocked(nx, e.y, nz) || (!inWater && _entHazard(nx, e.y, nz));
     let blocked = false;
@@ -1096,6 +1119,7 @@ function updateEntities(dt) {
     // stride back through its own knockback and cancel it out
     const stunned = (e.kx !== 0 || e.kz !== 0);
     if (moveSpeed > 0 && !stunned) {
+      moveSpeed *= boxDragMul(e.x, e.y, e.z, ENT_R, ENT_H);  // leaves/litter -40%, snow -70%
       const sx = Math.sin(e.yaw) * moveSpeed * dt;
       const sz = Math.cos(e.yaw) * moveSpeed * dt;
       // while swimming, water is the medium rather than an obstacle

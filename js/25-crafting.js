@@ -27,10 +27,9 @@ const RECIPES_BASIC = [
   { in: [[ITEM.WHEAT, 9]],                                                   out: [B.HAY, 1] },
   { in: [[ITEM.CLAY_BALL, 4]],                                               out: [B.CLAY, 1] },
   { in: [[ITEM.COAL, 1]],                                                    out: [ITEM.COAL_CHUNK, 8] },
-  { in: [[V_PLANKS, 5]],                                                     out: [B.CRAFTING_BENCH, 1] },
-  { in: [[V_PLANKS, 10]],                                                    out: [B.CHEST, 1] },
+  { in: [[V_PLANKS, 5], [ITEM.FIBER, 5]],                                    out: [B.CRAFTING_BENCH, 1] },
   { in: [[ITEM.BOWL, 1], [B.RED_MUSHROOM, 1], [B.BROWN_MUSHROOM, 1]],        out: [ITEM.MUSHROOM_STEW, 1] },
-  { in: [[ITEM.COAL, 1], [ITEM.STICK, 1]],                                   out: [B.TORCH, 4] },
+  { in: [[ITEM.COAL, 1], [ITEM.STICK, 1], [ITEM.FIBER, 1]],                  out: [B.TORCH, 4] },
   { in: [[ITEM.GLASS_SHARD, 4]],                                             out: [B.GLASS, 1] },
   { in: [[ITEM.SUGAR_CANE, 1]],                                              out: [ITEM.SUGAR, 2] },
   { in: [[B.STONE, 1]],                                                      out: [B.STONE_BRICK, 1] },
@@ -51,8 +50,11 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.TIN_NUGGET, 9]],                                              out: [ITEM.TIN_INGOT, 1] },
   { in: [[ITEM.COPPER_INGOT, 1]],                                            out: [ITEM.COPPER_NUGGET, 9] },
   { in: [[ITEM.COPPER_NUGGET, 9]],                                           out: [ITEM.COPPER_INGOT, 1] },
-  { in: [[B.WOOL, 4], [V_PLANKS, 4]],                                        out: [B.BED, 1] },
-  { in: [[V_PLANKS, 6]],                                                     out: [B.DOOR, 1] },
+  /* Cloth is spun from fiber, so anything soft or lashed together now costs bush harvest. */
+  { in: [[ITEM.FIBER, 10]],                                                  out: [ITEM.CLOTH, 1] },
+  { in: [[V_PLANKS, 10], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 10]],            out: [B.CHEST, 1] },
+  { in: [[B.WOOL, 4], [V_PLANKS, 4], [ITEM.CLOTH, 5], [ITEM.FIBER, 10]],     out: [B.BED, 1] },
+  { in: [[V_PLANKS, 6], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 4]],              out: [B.DOOR, 1] },
   { in: [[V_PLANKS, 3]],                                                     out: [B.STAIRS, 2] },
   /* Every tool head is lashed to its handle with fiber, so all five tool lines take the same
      5 fiber on top of head material + sticks. Fiber comes only from bush pickup, which makes
@@ -89,10 +91,13 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.GUNPOWDER, 7], [B.SAND, 10]],                                 out: [B.TNT, 1] },
   { in: [[ITEM.SUGAR_CANE, 3]],                                              out: [ITEM.PAPER, 1] },
   { in: [[ITEM.GOLD_INGOT, 10], [ITEM.APPLE, 1]],                            out: [ITEM.GOLDEN_APPLE, 1] },
-  { in: [[ITEM.IRON_INGOT, 10]],                                             out: [ITEM.IRON_HELMET, 1] },
-  { in: [[ITEM.IRON_INGOT, 18]],                                             out: [ITEM.IRON_CHESTPLATE, 1] },
-  { in: [[ITEM.IRON_INGOT, 14]],                                             out: [ITEM.IRON_LEGGINGS, 1] },
-  { in: [[ITEM.IRON_INGOT, 8]],                                              out: [ITEM.IRON_BOOTS, 1] },
+  /* Armor is plate over a padded liner: the fiber lashes it, the cloth pads it, and both scale
+     with how much of you the piece covers (gloves 4/1 up to chestplate 8/3). */
+  { in: [[ITEM.IRON_INGOT, 6],  [ITEM.FIBER, 4], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_GLOVES, 1] },
+  { in: [[ITEM.IRON_INGOT, 8],  [ITEM.FIBER, 5], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_BOOTS, 1] },
+  { in: [[ITEM.IRON_INGOT, 10], [ITEM.FIBER, 6], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_HELMET, 1] },
+  { in: [[ITEM.IRON_INGOT, 14], [ITEM.FIBER, 7], [ITEM.CLOTH, 2]],           out: [ITEM.IRON_LEGGINGS, 1] },
+  { in: [[ITEM.IRON_INGOT, 18], [ITEM.FIBER, 8], [ITEM.CLOTH, 3]],           out: [ITEM.IRON_CHESTPLATE, 1] },
 ];
 
 // which list is shown: 'basic' (E / pocket) or 'advanced' (crafting bench = basic + advanced)

@@ -97,6 +97,11 @@ const TEXTURES = {
   stripped_spruce_log_top:  'textures/Blocks/Woods/stripped_spruce_log_top.png',
   pincushions:              'textures/Billboards/Plants/Flowers/pincushions.png',
   structure_block:          'textures/Blocks/Interactables/Structure_block.png',
+  // berry bush: three growth stages, all one block driven by its variant byte
+  berry_bush_empty:         'textures/Billboards/Plants/empty_berry_bush_.png',
+  berry_bush_fruitling:     'textures/Billboards/Plants/fruitling_berry_bush_.png',
+  berry_bush:               'textures/Billboards/Plants/berry_bush.png',
+  berries:                  'textures/Items/Consumables/berries.png',
 };
 
 const ITEM_TEXTURES = {

@@ -65,6 +65,58 @@ function onGroundAt(px, py, pz) {
          ground1(Math.floor(px + R), y, Math.floor(pz + R), py);
 }
 
+/* Soft-ground drag (0.695, per-layer since 0.696). Leaves, leaf litter and snow carpets are all
+   walk-through, so the only thing that makes them matter is the slowdown, and it scales with how
+   deep the stack is: -10% per snow layer (a full 8-layer drift = -80%), -5% per leaf layer (a
+   whole leaf block = -40%). Worst overlapping cell wins, checked feet-to-head over the body box. */
+const DRAG_PER_SNOW = 0.10, DRAG_PER_LEAF = 0.05, DRAG_FLOOR = 0.2;
+const LEAF_DRAG_IDS = new Set([B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES]);
+// how tall the carpet in this cell stands, in block units (0 = not a carpet)
+function _carpetHeight(val) {
+  const id = val & 255;
+  if (id === B.CARPET) return carpetTop(val) / CARPET_MAX;
+  if (CARPET_MAT_OF[id]) return Math.min(CARPET_MAX, ((val >> 8) & 255) + 1) / CARPET_MAX;
+  return 0;
+}
+// speed multiplier this cell imposes, given how far the feet sit above the cell floor
+function _cellDrag(val, feetOff) {
+  const id = val & 255;
+  // a leaf block is a full cell of foliage: the whole CARPET_MAX worth of leaf layers
+  if (LEAF_DRAG_IDS.has(id)) return Math.max(DRAG_FLOOR, 1 - DRAG_PER_LEAF * CARPET_MAX);
+  const h = _carpetHeight(val);
+  if (!h || feetOff >= h) return 1;                    // airborne above a thin layer: no drag
+  let snow = 0, leaf = 0;
+  if (id === B.CARPET) {
+    for (let i = carpetTop(val) - 1; i >= 0; i--) {
+      const m = carpetMat(val, i);
+      if (m === CARPET_MAT.SNOW) snow++;
+      else if (CARPET_LITTER.has(m)) leaf++;
+    }
+  } else {                                              // legacy single-material carpet
+    const n = Math.min(CARPET_MAX, ((val >> 8) & 255) + 1);
+    if (CARPET_MAT_OF[id] === CARPET_MAT.SNOW) snow = n; else leaf = n;
+  }
+  return Math.max(DRAG_FLOOR, 1 - DRAG_PER_SNOW * snow - DRAG_PER_LEAF * leaf);
+}
+// worst drag over an axis-aligned body box (feet at cy, half-width R, height H). Mobs use it too.
+function boxDragMul(cx, cy, cz, R, H) {
+  let mul = 1;
+  const maxY = Math.floor(cy + H);
+  for (let y = Math.floor(cy); y <= maxY; y++) {
+    const feetOff = Math.max(0, cy - y);
+    for (let z = Math.floor(cz - R); z <= Math.floor(cz + R); z++)
+      for (let x = Math.floor(cx - R); x <= Math.floor(cx + R); x++) {
+        const m = _cellDrag(getBlock(x, y, z), feetOff);
+        if (m < mul) mul = m;
+      }
+  }
+  return mul;
+}
+function terrainSpeedMul() {
+  const p = player.pos;
+  return boxDragMul(p.x, p.y, p.z, player.R - 0.02, player.H);
+}
+
 function collideAxis(axis, delta) {
   if (delta === 0) return;
   const p = player.pos, R = player.R, H = player.H, EPS = 0.001;

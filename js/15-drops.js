@@ -237,7 +237,7 @@ function spawnProjectile(id, x, y, z, vx, vy, vz) {
   group.scale.setScalar(DROP_SCALE * 0.75);
   group.position.set(x, y, z);
   scene.add(group);
-  PROJECTILES.push({ group, vx, vy, vz, age: 0 });
+  PROJECTILES.push({ id, group, vx, vy, vz, age: 0 });
 }
 function updateProjectiles(dt) {
   for (let i = PROJECTILES.length - 1; i >= 0; i--) {
@@ -249,6 +249,14 @@ function updateProjectiles(dt) {
     const nx = pos.x + pr.vx * dt;
     const ny = pos.y + pr.vy * dt;
     const nz = pos.z + pr.vz * dt;
+    // mob hit: a snowball shoves whatever it lands on without hurting or provoking it
+    const struck = projectileHitEntity(nx, ny, nz);
+    if (struck) {
+      entitySnowballHit(struck, pr.vx, pr.vy, pr.vz);
+      scene.remove(pr.group);
+      PROJECTILES.splice(i, 1);
+      continue;
+    }
     if (isSolid(Math.floor(nx), Math.floor(ny), Math.floor(nz)) || pr.age > 10 || ny < -30) {
       scene.remove(pr.group);
       PROJECTILES.splice(i, 1);
