@@ -172,6 +172,8 @@ const ITEM_TEXTURES = {
   golden_sword:    'textures/Items/Weapons/golden_sword.png',
   diamond_sword:   'textures/Items/Weapons/diamond_sword.png',
   string:          'textures/Items/Materials/string.png',
+  fiber:           'textures/Items/Materials/fiber.png',
+  cloth:           'textures/Items/Materials/cloth.png',
   iron_shears:     'textures/Items/Tools/iron_shears.png',
   feather:         'textures/Items/Materials/feather.png',
   mutton:          'textures/Items/Consumables/mutton.png',

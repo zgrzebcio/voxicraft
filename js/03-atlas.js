@@ -117,6 +117,27 @@ async function buildAtlas() {
     if (px[i + 1] > px[i] + 8 && px[i + 1] > px[i + 2] + 8) { r += px[i]; g += px[i + 1]; b += px[i + 2]; cnt++; }
   const tint = cnt ? `rgb(${(r / cnt) | 0},${(g / cnt) | 0},${(b / cnt) | 0})` : 'rgb(110,190,74)';
 
+  /* tall_grass.png ships grayscale, so it reads as white in the world. Tint the two halves HERE,
+     on the source image, rather than inside the atlas loop: that loop stamps every tile as 3x3
+     wrapped copies, and `destination-in` run once per copy intersects the alpha nine times over
+     at nine different offsets — which is empty, i.e. invisible tall grass. Doing it on the 64x64
+     source means exactly one multiply and one alpha restore. */
+  for (const name of ['tallgrass_bottom', 'tallgrass_top']) {
+    const src = IMAGES[name];
+    if (!src) continue;
+    const c = document.createElement('canvas');
+    c.width = src.width; c.height = src.height;
+    const g2 = c.getContext('2d');
+    g2.imageSmoothingEnabled = false;
+    g2.drawImage(src, 0, 0);
+    g2.globalCompositeOperation = 'multiply';          // keeps the blade shading, colours it
+    g2.fillStyle = tint;
+    g2.fillRect(0, 0, c.width, c.height);
+    g2.globalCompositeOperation = 'destination-in';    // the fill also painted the gaps — undo that
+    g2.drawImage(src, 0, 0);
+    IMAGES[name] = c;
+  }
+
   const cvs = document.createElement('canvas');
   cvs.width = cvs.height = ATLAS_COLS * 128;
   const ctx = cvs.getContext('2d');

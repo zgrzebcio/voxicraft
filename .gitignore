@@ -8,3 +8,4 @@ xd.txt
 *.zip
 .codegraph
 .claude
+.mcp.json

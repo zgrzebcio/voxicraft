@@ -13,10 +13,14 @@ function VOXEL_CORE() {
   'use strict';
 
   /* ---------- block registry ----------
-     Every block = numeric ID + properties. A voxel in storage is a uint16:
-       low byte  = block ID
-       high byte = variant/metadata (wool colour, wood type, rotation bits... reserved for
-                   future use — it is carried through storage and the mesher already).
+     Every block = numeric ID + properties. A voxel in storage is a uint32 (0.69; it was a
+     uint16 until then):
+       bits 0-7   = block ID
+       bits 8-31  = variant/metadata — 24 bits, not 8. Every block that existed before 0.69 uses
+                    only bits 8-15, so `(val >> 8) & 255` still reads its variant byte unchanged
+                    and old saves load as-is. The extra 16 bits are what lets ONE cell describe a
+                    whole stack of different materials (see the carpet layout below) instead of
+                    just one number.
      `model` describes geometry: 'cube' is the only model implemented, but the mesher
      dispatches on it so slabs/stairs/torches can be added without touching cube code.
      `faces` = atlas tile per face, ordered [+X, -X, +Y(top), -Y(bottom), +Z, -Z].          */
@@ -49,7 +53,9 @@ function VOXEL_CORE() {
               // felling: a log is stripped before it can be cut through; leaves land as carpet
               STRIPPED_LOG:69, STRIPPED_BIRCH_LOG:70, LEAF_CARPET:71, BIRCH_LEAF_CARPET:72,
               SPRUCE_LOG:73, STRIPPED_SPRUCE_LOG:74, SPRUCE_PLANKS:75, SPRUCE_LEAVES:76,
-              SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, STRUCTURE_BLOCK:80, };
+              SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, STRUCTURE_BLOCK:80,
+              // one cell, many carpet layers of mixed material (0.69) — see CARPET_MAT below
+              CARPET:81, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -139,6 +145,50 @@ function VOXEL_CORE() {
   const CARPET_VAR = [];
   for (let v = 0; v < 6; v++) CARPET_VAR[v] = [[0, 0, 0, 1, (v + 1) / 6, 1]];
   PROPS[B.SNOW_CARPET] = { name:'Snow carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.3, type:'snow', boxes:CARPET_VAR[0], boxesByVar:CARPET_VAR, faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
+
+  /* ---- layered carpet (B.CARPET) — the reason the voxel grew to 32 bits ----
+     The old carpets could stack, but every layer in a cell had to be the SAME block, because the
+     cell only had a layer COUNT to work with. This one stores a material per layer, so snow and
+     the three leaf litters pile up in one cell in whatever order they fell.
+
+       bits 8-31: 8 layer slots, 3 bits each. Layer i (0 = ground) sits at bit 8 + 3i.
+       Material 0 = empty slot; 1..7 = a material, so 7 material types with 8 stacked layers.
+       4 are used today (snow + oak/birch/spruce litter); 3 slots are free for later.
+
+     Layers always fill from the bottom, so the stack height is just the highest non-empty slot.
+     `>>> 0` on every write: slot 7's top bit is bit 31, which signed `|` would turn negative. */
+  const CARPET_MAX = 8;                                       // layers per cell
+  const CARPET_MAT = { SNOW:1, OAK_LITTER:2, BIRCH_LITTER:3, SPRUCE_LITTER:4 };
+  const carpetMat  = (val, i) => (val >>> (8 + i * 3)) & 7;
+  const carpetSet  = (val, i, m) => ((val & ~(7 << (8 + i * 3))) | ((m & 7) << (8 + i * 3))) >>> 0;
+  const carpetTop  = (val) => { for (let i = CARPET_MAX - 1; i >= 0; i--) if (carpetMat(val, i)) return i + 1; return 0; };
+  const carpetPush = (val, m) => { const n = carpetTop(val); return n >= CARPET_MAX ? val : carpetSet(val, n, m); };
+  const carpetPop  = (val) => { const n = carpetTop(val); return n <= 1 ? B.AIR : carpetSet(val, n - 1, 0); };
+  // pull layer i out and let everything above it settle down one slot (a rotted leaf layer)
+  const carpetRemoveAt = (val, i) => {
+    const n = carpetTop(val);
+    if (n <= 1) return B.AIR;
+    let v = val;
+    for (let k = i; k < n - 1; k++) v = carpetSet(v, k, carpetMat(v, k + 1));
+    return carpetSet(v, n - 1, 0);
+  };
+  const carpetFill = (m, n) => { let v = B.CARPET; for (let i = 0; i < n && i < CARPET_MAX; i++) v = carpetSet(v, i, m); return v; };
+  const carpetBoxes = (val) => [[0, 0, 0, 1, Math.max(1, carpetTop(val)) / CARPET_MAX, 1]];
+  // material <-> the carpet block you hold and get back when a layer is broken off
+  const CARPET_MAT_TILE = [0, T.SNOW, T.LEAVES, T.BIRCH_LEAVES, T.SPRUCE_LEAVES, T.SNOW, T.SNOW, T.SNOW];
+  const CARPET_MAT_FACES = CARPET_MAT_TILE.map(t => [t, t, t, t, t, t]);
+  const CARPET_MAT_ITEM = [0, B.SNOW_CARPET, B.LEAF_CARPET, B.BIRCH_LEAF_CARPET, B.SPRUCE_LEAF_CARPET];
+  const CARPET_MAT_OF = [];                                   // legacy carpet block id -> material
+  CARPET_MAT_OF[B.SNOW_CARPET] = CARPET_MAT.SNOW;
+  CARPET_MAT_OF[B.LEAF_CARPET] = CARPET_MAT.OAK_LITTER;
+  CARPET_MAT_OF[B.BIRCH_LEAF_CARPET] = CARPET_MAT.BIRCH_LITTER;
+  CARPET_MAT_OF[B.SPRUCE_LEAF_CARPET] = CARPET_MAT.SPRUCE_LITTER;
+  const CARPET_LITTER = new Set([CARPET_MAT.OAK_LITTER, CARPET_MAT.BIRCH_LITTER, CARPET_MAT.SPRUCE_LITTER]);
+  // noInv: you never hold "carpet", you hold a snow carpet or one of the leaf litters
+  PROPS[B.CARPET] = { name:'Carpet', solid:true, opaque:false, raycast:true, pass:0, model:'carpet_stack',
+                      topOnly:true, noInv:true, stack:60, hardness:0.25, type:'snow',
+                      boxes:[[0, 0, 0, 1, 1 / CARPET_MAX, 1]], boxesOf:carpetBoxes,
+                      faces:[T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW,T.SNOW], desc: '' };
   /* Stripped logs: what a log becomes after the first axe hit. Same 'log' model so the 0.6692
      gap-fill still welds them to their neighbours, and softer than a live log because the bark
      is already off. */
@@ -190,7 +240,7 @@ function VOXEL_CORE() {
   PROPS[B.GRAVEL]      = { name:'Gravel',      solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'ground',  faces:[T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL,T.GRAVEL], desc: '' };
   PROPS[B.RED_MUSHROOM]  = { name:'Red mushroom',  solid:false,opaque:false,raycast:true, pass:1, model:'cross',stack:99, hardness:0, type:'grass', boxes:[[0.3,0,0.3,0.7,0.8,0.7]], faces:[T.RED_MUSHROOM], desc: '' };
   PROPS[B.BROWN_MUSHROOM]= { name:'Brown mushroom',solid:false,opaque:false,raycast:true, pass:1, model:'cross',stack:99, hardness:0, type:'grass', boxes:[[0.3,0,0.3,0.7,0.8,0.7]], faces:[T.BROWN_MUSHROOM], desc: '' };
-  PROPS[B.TALLGRASS]     = { name:'Grass',   solid:false,opaque:false,raycast:true, noTarget:true, pass:1, model:'cross',rot:'all',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.GRASS_PLANT], desc: '' };
+  PROPS[B.TALLGRASS]     = { name:'Short grass',   solid:false,opaque:false,raycast:true, noTarget:true, pass:1, model:'cross',rot:'all',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.GRASS_PLANT], desc: '' };
   PROPS[B.POPPY]         = { name:'Poppy',   solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.85,0.75]], faces:[T.POPPY], desc: '' };
   PROPS[B.ORCHID]        = { name:'Blue orchid',solid:false,opaque:false,raycast:true, pass:1, model:'cross',topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.85,0.75]], faces:[T.ORCHID], desc: '' };
   PROPS[B.TALL_LOWER]    = { name:'Tall grass', solid:false,opaque:false,raycast:true, noTarget:true, pass:1, model:'cross',topOnly:true, noInv:true, stack:99, type:'grass', hardness:0, boxes:[[0.05,0,0.05,0.95,1,0.95]], faces:[T.TALL_BOT], desc: '' };
@@ -321,7 +371,7 @@ function VOXEL_CORE() {
   PROPS[B.BRICKSSTAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
   PROPS[B.MELON]    = { name:'Watermelon', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.MELON_SIDE,T.MELON_SIDE,T.MELON_TOP,T.MELON_TOP,T.MELON_SIDE,T.MELON_SIDE], desc: '' };
   PROPS[B.PUMPKIN]  = { name:'Pumpkin', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.PUMPKIN_SIDE,T.PUMPKIN_SIDE,T.PUMPKIN_TOP,T.PUMPKIN_TOP,T.PUMPKIN_SIDE,T.PUMPKIN_SIDE], desc: '' };
-  PROPS[B.WHEAT]    = { name:'Wheat', solid:false, opaque:false, raycast:true, pass:1, model:'cross', stack:99, hardness:0, type:'grass', boxes:[[0.15,0,0.15,0.85,0.9,0.85]], faces:[T.WHEAT], desc: '' };
+  PROPS[B.WHEAT]    = { name:'Wheat', solid:false, opaque:false, raycast:true, noTarget:true, pass:1, model:'cross', stack:99, hardness:0, type:'grass', boxes:[[0.15,0,0.15,0.85,0.9,0.85]], faces:[T.WHEAT], desc: '' };
   PROPS[B.STONE_BRICK]    = { name:'Stone brick', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60,  hardness:8.5, type:'stone', faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
   PROPS[B.STONE_BRICKSLAB]    = { name:'Stone brick slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
   PROPS[B.STONESLAB]    = { name:'Stone slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.0, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE,T.STONE,T.STONE,T.STONE,T.STONE,T.STONE], desc: '' };
@@ -647,7 +697,7 @@ function VOXEL_CORE() {
        Trees are stamped from a 2-block margin so canopies cross chunk borders seamlessly
        (placement is a pure function of world position, so every chunk agrees).            */
     function genChunk(cx, cz) {
-      const data = new Uint16Array(CX * CY * CZ);
+      const data = new Uint32Array(CX * CY * CZ);
       const H = new Int16Array(400);                           // heights incl. 2-block margin
       const DES = new Uint8Array(400);                         // desert surface flag
       const RED = new Uint8Array(400);                         // red-sand desert flag
@@ -751,10 +801,10 @@ function VOXEL_CORE() {
               if (Math.abs(H[ngi] - h) >= 2) steep = true;
             }
             if (bioEdge) {
-              data[idx(x, h + 1, z)] = B.SNOW_CARPET;             // variant 0 = 1 layer
+              data[idx(x, h + 1, z)] = carpetFill(CARPET_MAT.SNOW, 1);
             } else if (steep) {
-              const thick = 4 + Math.floor(hash2(wx * 17 + 331, wz * 19 + 733) * 2);   // 4 or 5
-              data[idx(x, h + 1, z)] = B.SNOW_CARPET | ((thick - 1) << 8);
+              const thick = 5 + Math.floor(hash2(wx * 17 + 331, wz * 19 + 733) * 3);   // 5..7 of 8
+              data[idx(x, h + 1, z)] = carpetFill(CARPET_MAT.SNOW, thick);
             } else {
               /* Solid snow is now an ALTITUDE feature, not the default filler. At sea level a
                  snow biome is almost entirely carpet — the ground still reads white but you can
@@ -767,9 +817,9 @@ function VOXEL_CORE() {
               if (patch < solidCut) {
                 data[idx(x, h + 1, z)] = B.SNOW;                  // solid snowfield
               } else {
-                // taper: just above the cut -> 5 layers (blends into neighbouring full blocks)
-                const layers = Math.min(5, Math.max(1, 5 - Math.floor((patch - solidCut) * 8)));
-                data[idx(x, h + 1, z)] = B.SNOW_CARPET | ((layers - 1) << 8);
+                // taper: just above the cut -> 7 layers (blends into neighbouring full blocks)
+                const layers = Math.min(7, Math.max(1, 7 - Math.floor((patch - solidCut) * 10)));
+                data[idx(x, h + 1, z)] = carpetFill(CARPET_MAT.SNOW, layers);
               }
             }
           }
@@ -1406,7 +1456,7 @@ function VOXEL_CORE() {
                 }
             }
             for (let t2 = 1; t2 <= 2; t2++) put(tx, topY + t2, tz, LEAF, false);   // spire
-            const SLIT = B.SPRUCE_LEAF_CARPET;
+            const SLIT = carpetFill(CARPET_MAT.SPRUCE_LITTER, 1);
             for (let oz = -2; oz <= 2; oz++)
               for (let ox = -2; ox <= 2; ox++) {
                 if (!ox && !oz) continue;
@@ -1540,7 +1590,7 @@ function VOXEL_CORE() {
           /* Fallen leaf litter around the base. Placed only where the cell below is actually
              grass inside this chunk — the canopy overhangs neighbouring columns whose height we
              have not sampled, and littering those blind would leave carpets floating on slopes. */
-          const LITTER = isBirch ? B.BIRCH_LEAF_CARPET : B.LEAF_CARPET;
+          const LITTER = carpetFill(isBirch ? CARPET_MAT.BIRCH_LITTER : CARPET_MAT.OAK_LITTER, 1);
           for (let oz = -2; oz <= 2; oz++)
             for (let ox = -2; ox <= 2; ox++) {
               if (!ox && !oz) continue;
@@ -1684,9 +1734,14 @@ function VOXEL_CORE() {
           // short grass thins with altitude (full at y100, ~1/4 at y200) but never disappears
           const alt = Math.min(1, Math.max(0, (h - 100) / 100));
           const grassCh  = 0.22 * (1 - alt * 0.75);
+          // two-block tall grass: a slice of the short-grass budget, plains-heavier, needs 2 air
+          const tallCh   = (isPlains ? 0.05 : 0.015) * (1 - alt * 0.75);
           if (r < flowerCh) {
             data[idx(lx, h + 1, lz)] = hash3(cx * 31 + lx + 12, 19, cz * 29 + lz + 7) < 0.5 ? B.POPPY : B.ORCHID;
-          } else if (r < flowerCh + grassCh) {
+          } else if (r < flowerCh + tallCh && h + 2 < CY && (data[idx(lx, h + 2, lz)] & 255) === B.AIR) {
+            data[idx(lx, h + 1, lz)] = B.TALL_LOWER;
+            data[idx(lx, h + 2, lz)] = B.TALL_UPPER;
+          } else if (r < flowerCh + tallCh + grassCh) {
             data[idx(lx, h + 1, lz)] = B.TALLGRASS;
           }
         }
@@ -1874,9 +1929,9 @@ function VOXEL_CORE() {
   const maskL = new Uint8Array(16 * 200);     // parallel mask of per-face block-light level
 
   function meshChunk(dataBuf, sxnB, sxpB, sznB, szpB, lightBuf, lxnB, lxpB, lznB, lzpB) {
-    const data = new Uint16Array(dataBuf);
-    const sxn = new Uint16Array(sxnB), sxp = new Uint16Array(sxpB);
-    const szn = new Uint16Array(sznB), szp = new Uint16Array(szpB);
+    const data = new Uint32Array(dataBuf);
+    const sxn = new Uint32Array(sxnB), sxp = new Uint32Array(sxpB);
+    const szn = new Uint32Array(sznB), szp = new Uint32Array(szpB);
     const light = new Uint8Array(lightBuf);   // this chunk's block-light (flood-filled main-thread)
     const lxn = new Uint8Array(lxnB), lxp = new Uint8Array(lxpB);
     const lzn = new Uint8Array(lznB), lzp = new Uint8Array(lzpB);
@@ -2101,6 +2156,19 @@ function VOXEL_CORE() {
             const boxes = PROPS[vid].boxesByVar[va] || PROPS[vid].boxesByVar[0];
             for (let bi = 0; bi < boxes.length; bi++)
               emitBoxFaces(x, y, z, boxes[bi], PROPS[vid].faces);
+          }
+          else if (PROPS[vid].model === 'carpet_stack') {
+            /* One box per RUN of same-material layers rather than one per layer: a 6-deep snow
+               drift is one quad set, and only a genuine material change costs an extra box. */
+            const n = carpetTop(val);
+            let i = 0;
+            while (i < n) {
+              const m = carpetMat(val, i);
+              let j = i + 1;
+              while (j < n && carpetMat(val, j) === m) j++;
+              if (m) emitBoxFaces(x, y, z, [0, i / CARPET_MAX, 0, 1, j / CARPET_MAX, 1], CARPET_MAT_FACES[m]);
+              i = j;
+            }
           }
         }
 
@@ -2371,7 +2439,9 @@ function VOXEL_CORE() {
   }
 
   return { B, T, V, PROPS, SLAB_IDS, stairBoxesAt, makeGen, meshChunk, idx,
-           logWidthOf, logWidthPx, LOG_W_MIN, LOG_W_MAX, LOG_W_NORMAL, LOG_W_BLOCK };
+           logWidthOf, logWidthPx, LOG_W_MIN, LOG_W_MAX, LOG_W_NORMAL, LOG_W_BLOCK,
+           CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER,
+           carpetMat, carpetSet, carpetTop, carpetPush, carpetPop, carpetFill, carpetRemoveAt };
 }
 
 /* ---------- worker entry point (stringified into the blob together with VOXEL_CORE) ---------- */
@@ -2399,6 +2469,8 @@ function WORKER_MAIN() {
 
 const CORE = VOXEL_CORE();
 const { B, V, PROPS, SLAB_IDS, logWidthOf, LOG_W_MIN, LOG_W_NORMAL } = CORE;
+const { CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER,
+        carpetMat, carpetSet, carpetTop, carpetPush, carpetPop, carpetFill, carpetRemoveAt } = CORE;
 
 // Items (IDs >= 256) — separate registry from blocks
 const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 260, APPLE: 261,
@@ -2421,7 +2493,7 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                IRON_HELMET: 331, IRON_CHESTPLATE: 332, IRON_LEGGINGS: 333, IRON_BOOTS: 334,
                GOLDEN_HELMET: 335, GOLDEN_CHESTPLATE: 336, GOLDEN_LEGGINGS: 337, GOLDEN_BOOTS: 338,
                DIAMOND_HELMET: 339, DIAMOND_CHESTPLATE: 340, DIAMOND_LEGGINGS: 341, DIAMOND_BOOTS: 342,
-               IRON_GLOVES: 343, BELT: 344, BARK: 345 };
+               IRON_GLOVES: 343, BELT: 344, BARK: 345, FIBER: 346, CLOTH: 347 };
 const ITEM_PROPS = {
   [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: 'Used as crafting ingredient' },
   [ITEM.BARK]:          { name: 'Bark',          stack: 99, icon: 'bark', desc: 'Used as fuel for 0.75 smelt' },
@@ -2439,6 +2511,8 @@ const ITEM_PROPS = {
   [ITEM.GLOW_DUST]:     { name: 'Glow dust',     stack: 99, icon: 'glow_dust', desc: 'Used as crafting ingredient' },
   [ITEM.STRING]:        { name: 'String',        stack: 99, icon: 'string', desc: 'Used as crafting ingredient' },
   [ITEM.FEATHER]:       { name: 'Feather',       stack: 99, icon: 'feather', desc: 'Used as crafting ingredient' },
+  [ITEM.FIBER]:         { name: 'Fiber',         stack: 99, icon: 'fiber', desc: 'Used as crafting ingredient' },
+  [ITEM.CLOTH]:         { name: 'Cloth',         stack: 99, icon: 'cloth', desc: 'Used as crafting ingredient' },
 // ores
   [ITEM.COAL]:          { name: 'Coal',          stack: 99, icon: 'coal', desc: 'Used as fuel for 8 smelt' },
   [ITEM.COAL_CHUNK]:    { name: 'Coal chunk',    stack: 99, icon: 'coal_chunk', desc: 'Used as fuel for 1 smelt' },
@@ -2562,7 +2636,7 @@ function mineDropAllowed(heldId, blockId) {
 
 // which blocks each tool class speeds up (material families, incl. their slab/stair forms)
 const TOOL_BLOCKS = {
-  shovel: new Set([B.SAND, B.RED_SAND, B.DIRT, B.GRASS, B.SNOW, B.SNOW_CARPET, B.CLAY, B.GRAVEL,]),
+  shovel: new Set([B.SAND, B.RED_SAND, B.DIRT, B.GRASS, B.SNOW, B.SNOW_CARPET, B.CARPET, B.CLAY, B.GRAVEL,]),
   pick:   new Set([B.STONE, B.COBBLE, B.COAL_ORE, B.IRON_ORE, B.DIAMOND_ORE, B.BRICKS, B.STONE_BRICK,
                    B.FURNACE, B.COBBLESLAB, B.BRICKSSLAB, B.BRICKSSTAIRS, B.STONE_BRICKSLAB, B.STONESLAB, B.GRASS, B.GLASSSLAB,
                    B.MARBLE, B.GRANITE, B.LIMESTONE,
@@ -2592,6 +2666,8 @@ const BLOCK_DROP = {
 
 // Returns [{id, count}, ...] (empty array = no drops). isNatural=true uses lower leaf-decay probability.
 function blockDrop(blockId, isNatural = false) {
+  // a layered carpet drops through carpetBreakInfo(), one item per broken layer — never here
+  if (blockId === B.CARPET) return [];
   // litter is a leaf block lying flat — it yields exactly what leaves yield
   if (blockId === B.LEAF_CARPET) blockId = B.LEAVES;
   else if (blockId === B.BIRCH_LEAF_CARPET) blockId = B.BIRCH_LEAVES;

@@ -192,6 +192,13 @@
                background:rgba(0,0,0,.75); border-radius:1px; pointer-events:none; }
   .slot .dur i, #vdrag .dur i { display:block; height:100%; border-radius:1px; }
   .slot.sel { border-color:#fff; background:rgba(255,255,255,.14); box-shadow:0 0 8px rgba(255,255,255,.35); }
+  /* interact prompt: sits just under the crosshair. Small, but a solid shadow keeps it readable
+     against grass and sky alike. The key glyph is bright, the sentence around it a little dimmer. */
+  #interact { position:fixed; left:50%; top:50%; margin-top:18px; transform:translateX(-50%);
+              color:rgba(255,255,255,.82); font-size:12px; letter-spacing:.2px; white-space:nowrap;
+              text-shadow:0 1px 3px #000, 0 0 6px rgba(0,0,0,.8); z-index:5; pointer-events:none;
+              opacity:0; transition:opacity .12s; }
+  #interact b { color:#fff; font-weight:600; }
   #blockname { position:fixed; left:50%; bottom:84px; transform:translateX(-50%); color:#fff; font-size:14px;
                text-shadow:0 1px 3px #000; z-index:5; pointer-events:none;
                opacity:0; transition:opacity .25s; }

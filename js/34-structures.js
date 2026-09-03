@@ -543,7 +543,7 @@ function structMode(s) {
    down past anything that is not a real full block. */
 const _isCover = (id) => {
   const p = PROPS[id];
-  return !p || !p.solid || p.model === 'cross' || p.model === 'carpet';
+  return !p || !p.solid || p.model === 'cross' || p.model === 'carpet' || p.model === 'carpet_stack';
 };
 function structGroundY(x, z) {
   let y = surfaceY(x, z);

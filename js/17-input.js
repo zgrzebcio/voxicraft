@@ -8,6 +8,11 @@ const sensInput = document.getElementById('sensInput');
 const shadowSel = document.getElementById('shadowSel');
 let playing = false;
 let lockTimer = 0, lockTries = 0;
+/* Which device the player last actually used. Drives the key glyph in the on-screen interact
+   prompt, so plugging in a pad mid-game relabels it without a reload. Keyboard/mouse claim it on
+   real input only; pollGamepad claims it when a button or stick genuinely moves, never merely
+   because a pad is connected — an idle controller must not steal the label from the keyboard. */
+let lastInputDevice = 'kbd';
 
 function setPlaying(on) {
   if (on && !currentWorld) { refreshMenu(); return; }   // no world selected — stay on the title
@@ -123,12 +128,14 @@ document.addEventListener('pointerlockchange', () => {
 });
 document.addEventListener('mousemove', (e) => {
   if (!pointerLocked || player.dead) return;
+  if (e.movementX || e.movementY) lastInputDevice = 'kbd';
   player.yaw   -= e.movementX * 0.0022 * sens;
   player.pitch -= e.movementY * 0.0022 * sens;
   player.pitch = Math.max(-1.5697, Math.min(1.5697, player.pitch));
 });
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
+  lastInputDevice = 'kbd';
   if (e.code === 'F1') { e.preventDefault(); toggleFullscreen(); return; }
   if (e.code === 'F2') { e.preventDefault(); if (playing) cycleCameraView(); return; }
   /* Tab is the inventory key. It has to be handled BEFORE the `!playing` guard below so it also
@@ -157,6 +164,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (!playing) return;
   if (e.code === 'KeyY' && !e.repeat && !invOpen) { dropFromHotbar(e.shiftKey ? 'stack' : 1); return; }
+  // KeyE (bush pickup) is HELD, not tapped — driven from the frame loop off `keys`, not here
   if (e.code === 'Space' && !e.repeat && !invOpen) jumpTap();
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat && !invOpen) player.fast = !player.fast;
   if (!invOpen && e.code.startsWith('Digit')) {
@@ -184,10 +192,11 @@ document.addEventListener('contextmenu', (e) => {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // unified break/place hold-to-repeat (mouse buttons and gamepad triggers feed the same state)
-const act = { break: false, place: false, lastBreak: 0, lastPlace: 0 };
+const act = { break: false, place: false, lastBreak: 0, lastPlace: 0, padPick: false };
 let mouseBreak = false, mousePlace = false;
 document.addEventListener('mousedown', (e) => {
   if (!pointerLocked) return;
+  lastInputDevice = 'kbd';
   if (e.button === 0) mouseBreak = true;
   if (e.button === 2) mousePlace = true;
 });
@@ -285,19 +294,22 @@ function pollGamepad(dt) {
   const g = getPad();
   if (!g) {                                 // disconnected: release held pad actions
     pad.radialOpen = false;
-    act.padBreak = act.padPlace = false;
+    act.padBreak = act.padPlace = act.padPick = false;
     radialEl.style.display = 'none';
     return { mx: 0, mz: 0, up: false, dn: false };
   }
   const btn = (i) => !!(g.buttons[i] && g.buttons[i].pressed);
   const val = (i) => (g.buttons[i] ? g.buttons[i].value : 0);
   const edge = (i) => btn(i) && !pad.prev[i];
+  // real pad activity (not just "a pad is plugged in") takes over the prompt's key glyph
+  if (g.buttons.some(b => b.pressed || b.value > 0.5) ||
+      g.axes.some(a => Math.abs(a) > 0.35)) lastInputDevice = 'pad';
 
   // death screen: A respawns, every other pad input is swallowed
   if (player.dead) {
     if (edge(0)) respawnPlayer();
     pad.prev = g.buttons.map(b => b.pressed);
-    act.padBreak = act.padPlace = false;
+    act.padBreak = act.padPlace = act.padPick = false;
     return { mx: 0, mz: 0, up: false, dn: false };
   }
 
@@ -309,35 +321,24 @@ function pollGamepad(dt) {
     invGamepad(g, dt, btn, edge);
     pad.prev = g.buttons.map(b => b.pressed);
     pad.radialOpen = false;
-    act.padBreak = act.padPlace = false;
+    act.padBreak = act.padPlace = act.padPick = false;
     radialEl.style.display = 'none';
     return { mx: 0, mz: 0, up: false, dn: false };
   }
   if (!playing) {
     pad.prev = g.buttons.map(b => b.pressed);
     pad.radialOpen = false;
-    act.padBreak = act.padPlace = false;
+    act.padBreak = act.padPlace = act.padPick = false;
     radialEl.style.display = 'none';
     return { mx: 0, mz: 0, up: false, dn: false };
   }
 
-  // radial hotbar picker: hold North/Y (3), aim with right stick, release to confirm
-  const openRadial = btn(3);
-  if (openRadial) {
-    const rx = padAxis(g.axes[2] || 0), ry = padAxis(g.axes[3] || 0);
-    if (Math.hypot(rx, ry) > 0.4) {
-      const ang = Math.atan2(rx, -ry);                       // 0 = up, clockwise
-      const step = (Math.PI * 2) / HOTBAR.length;
-      pad.radialSel = ((Math.round(ang / step) % HOTBAR.length) + HOTBAR.length) % HOTBAR.length;
-    }
-    if (!pad.radialOpen) pad.radialSel = hotbarSel;
-    pad.radialOpen = true;
-    drawRadial();
-  } else {
-    if (pad.radialOpen && pad.radialSel >= 0) { hotbarSel = pad.radialSel; updateHotbar(); }
-    pad.radialOpen = false;
-  }
-  radialEl.style.display = pad.radialOpen ? 'block' : 'none';
+  /* North (3) is bush pickup, the pad twin of E. It used to hold open a radial hotbar picker;
+     that never got finished or maintained and the bumpers already cycle the hotbar, so the radial
+     is retired. `pad.radialOpen` stays pinned false — the trigger handling below still reads it. */
+  act.padPick = btn(3);                          // held, like the keyboard bind
+  pad.radialOpen = false;
+  radialEl.style.display = 'none';
 
   // look (right stick) — smoothed, disabled while the radial is open
   if (!pad.radialOpen) {

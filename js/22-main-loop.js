@@ -11,7 +11,8 @@ const _fallOpen = (id) => id === B.AIR || PROPS[id]?.model === 'cross';
 // Carpets fall too — snow and leaf litter both need ground under them, and digging out that
 // ground used to leave a sheet of snow hanging in the air.
 const _fallsUnderGravity = (id) =>
-  id === B.SAND || id === B.RED_SAND || id === B.GRAVEL || PROPS[id]?.model === 'carpet';
+  id === B.SAND || id === B.RED_SAND || id === B.GRAVEL ||
+  PROPS[id]?.model === 'carpet' || PROPS[id]?.model === 'carpet_stack';
 function scheduleFall(x, y, z) {
   if (y < 1 || y > 199) return;
   const val = getBlock(x, y, z);
@@ -879,6 +880,10 @@ function frame(now) {
     }
     selBox.updateMatrix();
   }
+
+  updateInteractPrompt();                   // "(E) to pickup grass" under the crosshair
+  // bush pickup: held on KeyE or pad North, repeating on its own short cooldown
+  updateBushPickup(dt, (playing && !invOpen && !menuScene) && (!!keys['KeyE'] || act.padPick));
 
   // Single-press throw (edge: was not held last frame). Must run before doPlace calls.
   const _didThrow = (wantPlace && !act.place) ? tryThrow() : false;

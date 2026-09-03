@@ -139,7 +139,11 @@ function updateHands(dt, wantBreak, wantPlace, eatProg) {
   if (player.canFly && wantBreak && _swingT < 0)                 _swingT = 0;  // creative break
   if (!player.canFly && wantBreak && !_prevBreak && _swingT < 0) _swingT = 0;  // survival: swing even in air
   if (handPlaceSwing && _swingT < 0 && !heldIsFood)              _swingT = 0;  // successful place only
+  // bush pickup: you grab with your hand whatever you happen to be holding, so unlike a place
+  // this one is NOT gated on food — mid-meal harvesting still animates.
+  if (handPickSwing && _swingT < 0)                              _swingT = 0;
   handPlaceSwing = false;
+  handPickSwing = false;
   _prevMining = miningNow;
   _prevBreak  = wantBreak;
   _prevPlace  = wantPlace;

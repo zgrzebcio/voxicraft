@@ -49,11 +49,11 @@ const UNSTRIPPED_OF = {};
 UNSTRIPPED_OF[B.STRIPPED_LOG] = B.LOG;
 UNSTRIPPED_OF[B.STRIPPED_BIRCH_LOG] = B.BIRCH_LOG;
 UNSTRIPPED_OF[B.STRIPPED_SPRUCE_LOG] = B.SPRUCE_LOG;
-// leaves -> the litter they settle into
+// leaves -> the carpet MATERIAL they settle into (a layer of a stack, not a block of their own)
 const LITTER_OF = {};
-LITTER_OF[B.LEAVES] = B.LEAF_CARPET;
-LITTER_OF[B.BIRCH_LEAVES] = B.BIRCH_LEAF_CARPET;
-LITTER_OF[B.SPRUCE_LEAVES] = B.SPRUCE_LEAF_CARPET;
+LITTER_OF[B.LEAVES] = CARPET_MAT.OAK_LITTER;
+LITTER_OF[B.BIRCH_LEAVES] = CARPET_MAT.BIRCH_LITTER;
+LITTER_OF[B.SPRUCE_LEAVES] = CARPET_MAT.SPRUCE_LITTER;
 
 const isLiveLog     = (id) => STRIPPED_OF[id] !== undefined;
 const isStrippedLog = (id) => UNSTRIPPED_OF[id] !== undefined;
@@ -89,15 +89,47 @@ function spawnFallingLeaf(id, x, y, z) {
    Fallen leaves are not permanent scenery: each carpet is queued when it lands and rots away
    after a while. Deliberately NOT gated on nearby logs the way canopy decay is — litter lying at
    the foot of a living tree should still rot, otherwise every forest floor silts up forever. */
-const litterRot = new Map();        // "x,y,z" -> seconds remaining
-const LITTER_LIFE = 40, LITTER_LIFE_JITTER = 40;
+const litterRot = new Map();        // "x,y,z" -> seconds until this cell drops its next leaf layer
+const LITTER_LIFE = 40, LITTER_LIFE_JITTER = 40;                 // freshly felled debris: quick
 const LITTER_ROT_TICK = 1.0;
-let _litterTimer = 0;
+/* Litter that was never queued — everything the world generator laid down, and every cell loaded
+   from a save — is adopted the first time the sweep below notices it, with a life measured in
+   in-game days rather than seconds. That is what "decays on its own time" means here: no cell
+   shares a clock, each one is given its own countdown when it is first seen and then again after
+   every layer it loses, so a drift thins unevenly and eventually clears completely. */
+const LITTER_LIFE_NATURAL = 1.5, LITTER_LIFE_NATURAL_JITTER = 3;  // in-game days
+const _dayLen = () => (typeof DAY_LEN === 'number' ? DAY_LEN : 600);
+const LITTER_SWEEP_TICK = 4.0;      // seconds between adoption sweeps near the player
+const LITTER_SWEEP_TRIES = 24;
+let _litterTimer = 0, _litterSweep = 0;
 
 function queueLitterRot(x, y, z) {
   litterRot.set(x + ',' + y + ',' + z, LITTER_LIFE + Math.random() * LITTER_LIFE_JITTER);
 }
+// a carpet cell rots only if it actually holds leaves; a pure snow drift is left alone
+function litterLayerTop(val) {
+  if ((val & 255) !== B.CARPET) return isLitter(val & 255) ? 0 : -1;   // legacy pre-0.69 litter
+  for (let i = carpetTop(val) - 1; i >= 0; i--) if (CARPET_LITTER.has(carpetMat(val, i))) return i;
+  return -1;
+}
+/* Walk cells around the player and give any un-tracked leaf litter its own countdown. Cheap:
+   a couple of dozen point samples every few seconds, the same sampling trick grass spread uses. */
+function sweepLitterRot() {
+  if (typeof player === 'undefined' || !player.spawned || menuScene) return;
+  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  for (let i = 0; i < LITTER_SWEEP_TRIES; i++) {
+    const x = px + (Math.random() * 48 | 0) - 24;
+    const z = pz + (Math.random() * 48 | 0) - 24;
+    const y = py + (Math.random() * 12 | 0) - 6;
+    if (litterLayerTop(getBlock(x, y, z)) < 0) continue;
+    const k = x + ',' + y + ',' + z;
+    if (litterRot.has(k)) continue;
+    litterRot.set(k, (LITTER_LIFE_NATURAL + Math.random() * LITTER_LIFE_NATURAL_JITTER) * _dayLen());
+  }
+}
 function updateLitterRot(dt) {
+  _litterSweep += dt;
+  if (_litterSweep >= LITTER_SWEEP_TICK) { _litterSweep = 0; sweepLitterRot(); }
   _litterTimer += dt;
   if (_litterTimer < LITTER_ROT_TICK) return;
   const step = _litterTimer * (typeof tickFactor === 'function' ? tickFactor() : 1);
@@ -106,20 +138,18 @@ function updateLitterRot(dt) {
     const left = t - step;
     const [x, y, z] = k.split(',').map(Number);
     const val = getBlock(x, y, z);
-    if (!isLitter(val & 255)) { litterRot.delete(k); continue; }   // mined or replaced
+    const li = litterLayerTop(val);
+    if (li < 0) { litterRot.delete(k); continue; }                // mined, replaced, or all snow
     if (left > 0) { litterRot.set(k, left); continue; }
-    // thin the pile one layer at a time so a deep drift fades instead of blinking out
-    const v = (val >> 8) & 255;
-    if (v > 0) {
-      setBlock(x, y, z, (val & 255) | ((v - 1) << 8));
-      litterRot.set(k, LITTER_LIFE * 0.4 + Math.random() * LITTER_LIFE_JITTER * 0.4);
-    } else {
-      setBlock(x, y, z, B.AIR);
-      litterRot.delete(k);
-    }
+    /* Take that one leaf layer out and let whatever sat on top of it settle down a slot, so a
+       snow cap over rotting leaves sinks instead of hanging in the air. */
+    const cur = (val & 255) === B.CARPET ? val : carpetFill(CARPET_MAT_OF[val & 255], ((val >> 8) & 255) + 1);
+    setBlock(x, y, z, carpetRemoveAt(cur, li));
+    if (litterLayerTop(getBlock(x, y, z)) < 0) litterRot.delete(k);
+    else litterRot.set(k, (LITTER_LIFE_NATURAL * 0.5 + Math.random() * LITTER_LIFE_NATURAL_JITTER * 0.5) * _dayLen());
   }
 }
-function clearLitterRot() { litterRot.clear(); }
+function clearLitterRot() { litterRot.clear(); _litterSweep = 0; }
 
 /* Cells a falling block passes straight through. Billboards are included so a torch or a flower
    never stops a falling leaf in mid-air — it gets crushed on the way, the same rule sand and
@@ -137,15 +167,13 @@ function crushBillboard(x, y, z) {
 }
 
 const isLitter = (id) => id === B.LEAF_CARPET || id === B.BIRCH_LEAF_CARPET || id === B.SPRUCE_LEAF_CARPET;
-const LITTER_MAX_V = 5;             // variant 0..5 = 1..6 layers, same scale as snow carpet
+const isAnyCarpetId = (id) => id === B.CARPET || id === B.SNOW_CARPET || isLitter(id);
 
-/* Deepen the pile already in a cell. Returns false if that cell isn't this litter, or is full. */
-function _deepenLitter(x, y, z, litter) {
-  const val = getBlock(x, y, z);
-  if ((val & 255) !== litter) return false;
-  const v = (val >> 8) & 255;
-  if (v >= LITTER_MAX_V) return false;
-  setBlock(x, y, z, litter | ((v + 1) << 8));
+/* Deepen the pile already in a cell. Since 0.69 the pile does NOT have to be the same material —
+   an oak leaf settles onto a snow drift or a spruce pile just as happily, as its own layer. */
+function _deepenLitter(x, y, z, mat) {
+  if (!isAnyCarpetId(getBlock(x, y, z) & 255)) return false;
+  if (!addCarpetLayer(x, y, z, mat)) return false;
   queueLitterRot(x, y, z);
   return true;
 }
@@ -153,13 +181,13 @@ function _deepenLitter(x, y, z, litter) {
 /* Lay a fresh 1-layer carpet in an empty cell. Litter is NOT solid, so a pile that has reached
    full depth still has to count as support for the cell above it — the plain solid test would
    reject it and the leaf would fall through its own drift. */
-function _layLitter(x, y, z, litter) {
+function _layLitter(x, y, z, mat) {
   const here = getBlock(x, y, z) & 255;
   if (here !== B.AIR && PROPS[here]?.model !== 'cross') return false;
   const below = getBlock(x, y - 1, z) & 255;
-  if (!PROPS[below]?.solid && !isLitter(below)) return false;
+  if (!PROPS[below]?.solid && !isAnyCarpetId(below)) return false;
   crushBillboard(x, y, z);
-  setBlock(x, y, z, litter);
+  setBlock(x, y, z, carpetFill(mat, 1));
   queueLitterRot(x, y, z);
   return true;
 }
@@ -168,10 +196,10 @@ function _layLitter(x, y, z, litter) {
    carpet, not a passable cell), so the pile it should be joining is the one BELOW it. Checking
    the landing cell first was the bug — every leaf laid a fresh 1-layer carpet one cell up
    instead of deepening the drift it landed on. */
-function _addLitter(x, y, z, litter) {
-  return _deepenLitter(x, y - 1, z, litter)
-      || _deepenLitter(x, y, z, litter)
-      || _layLitter(x, y, z, litter);
+function _addLitter(x, y, z, mat) {
+  return _deepenLitter(x, y - 1, z, mat)
+      || _deepenLitter(x, y, z, mat)
+      || _layLitter(x, y, z, mat);
 }
 
 function updateFallingLeaves(dt) {
@@ -186,7 +214,7 @@ function updateFallingLeaves(dt) {
     scene.remove(f.group);
     FALLING.splice(i, 1);
     const restY = Math.max(0, cellY);
-    const litter = LITTER_OF[f.id] || B.LEAF_CARPET;
+    const litter = LITTER_OF[f.id] || CARPET_MAT.OAK_LITTER;
     // try this cell, then the one above it — a full pile below pushes the next layer up
     if (_addLitter(f.x, restY, f.z, litter)) continue;
     if (_addLitter(f.x, restY + 1, f.z, litter)) continue;
@@ -204,7 +232,7 @@ function clearFallingLeaves() {
    first surface and settle there. Used once the in-flight budget is spent. */
 const SETTLE_MAX_DROP = 24;
 function settleLeafNow(id, x, y, z) {
-  const litter = LITTER_OF[id] || B.LEAF_CARPET;
+  const litter = LITTER_OF[id] || CARPET_MAT.OAK_LITTER;
   let ry = y;
   for (let d = 0; d < SETTLE_MAX_DROP && ry > 1; d++) {
     if (!fallPassable(getBlock(x, ry - 1, z) & 255)) break;

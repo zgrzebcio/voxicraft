@@ -24,6 +24,30 @@ const hotbarEl = document.getElementById('hotbar');
 const radialEl = document.getElementById('radial');
 const radialCtx = radialEl.getContext('2d');
 
+/* ---- interact prompt under the crosshair ----
+   Shown only while a bush pickup is actually available, and labelled with the key on whichever
+   device you last touched — swap from keyboard to pad mid-game and the glyph follows on the next
+   frame. `lastInputDevice` is maintained in 17-input.js. */
+const interactEl = document.getElementById('interact');
+// North face button: Y on an Xbox pad, Triangle on a PlayStation one
+function padNorthLabel() {
+  const g = typeof getPad === 'function' ? getPad() : null;
+  const id = (g && g.id || '').toLowerCase();
+  return /dualshock|dualsense|playstation|\bps[45]\b/.test(id) ? '△' : 'Y';
+}
+let _interactShown = '';
+function updateInteractPrompt() {
+  const t = typeof findBushPickup === 'function' ? findBushPickup() : null;
+  if (!t) {
+    if (_interactShown) { interactEl.style.opacity = '0'; _interactShown = ''; }
+    return;
+  }
+  const keyLabel = lastInputDevice === 'pad' ? padNorthLabel() : 'E';
+  const txt = `(<b>${keyLabel}</b>) to pickup ${t.name}`;
+  if (txt !== _interactShown) { interactEl.innerHTML = txt; _interactShown = txt; }
+  interactEl.style.opacity = '1';
+}
+
 // block name pops in above the hotbar on selection, then fades out
 let blocknameTimer = 0;
 function flashBlockName() {

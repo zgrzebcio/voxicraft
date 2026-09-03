@@ -61,7 +61,7 @@ function ensureChunk(cx, cz) {
   let c = getChunk(cx, cz);
   if (!c) {
     c = { cx, cz, data: null, light: null, generating: false, meshing: false, queuedMesh: false,
-          dirty: false, rev: 0, meshes: [null, null, null] };
+          dirty: false, lit: false, rev: 0, meshes: [null, null, null] };
     chunks.set(key(cx, cz), c);
   }
   return c;
@@ -120,13 +120,30 @@ function neighborsReady(c) {
   return n1 && n1.data && n2 && n2.data && n3 && n3.data && n4 && n4.data;
 }
 
+/* `lit` gates meshing on the chunk's own lighting pass having run. Without it there is a race:
+   a neighbour's finishChunkGen spreads sky light into this chunk (which CREATES its c.sky array,
+   filling only the handful of cells the flood reached) and then queues it for meshing, while its
+   own seedSkyForChunk is still sitting in genFinishQueue. dispatchMesh only treats a MISSING
+   c.sky as "assume open sky" — a present-but-unseeded one bakes as zero, and the chunk comes out
+   pitch black with nothing left to re-mesh it. Opening a save makes this obvious because every
+   chunk regenerates at once and the finish queue drains only a few per frame. */
 function tryQueueMesh(c, d2, front) {
-  if (!c.data || c.queuedMesh || c.meshing || !neighborsReady(c)) return;
+  if (!c.data || !c.lit || c.queuedMesh || c.meshing || !neighborsReady(c)) return;
   c.queuedMesh = true;
   if (front) meshQueue.unshift({ cx: c.cx, cz: c.cz, d2: 0 });   // edits jump the queue
   else meshQueue.push({ cx: c.cx, cz: c.cz, d2 });
 }
 
+/* Cached generated terrain is a raw voxel buffer, and 0.69 widened a voxel from 16 to 32 bits.
+   A pre-0.69 cache reinterpreted as uint32 would be garbage, so the key changed with the format
+   and the old entries are simply never read again.
+
+   The key is also the ONLY way a generator change reaches a world someone has already visited:
+   a chunk is generated once and then read back from this cache forever, which is why the tall
+   grass added in 0.6855 never appeared in an existing save. Bump it whenever worldgen starts
+   emitting something new that old worlds should get. Regenerating is safe — same seed, same
+   terrain — and player edits are stored separately and replayed on top. */
+const TERRAIN_KEY = 'terrain691:';
 // extract a neighbour's 16x128 border plane (block data OR block light) for cross-chunk work
 const ZERO_LIGHT = new Uint8Array(16 * 16 * 200);   // stand-in for un-lit neighbours
 function edgeSlice(d, side, Ctor) {
@@ -161,8 +178,8 @@ function dispatchMesh(worker, c) {
     } else for (let i = 0; i < g.length; i++) g[i] |= 0xF0;   // unlit neighbour: assume open sky
     return g;
   };
-  const sxn = edgeSlice(nw.data, 0, Uint16Array), sxp = edgeSlice(ne.data, 1, Uint16Array);
-  const szn = edgeSlice(nn.data, 2, Uint16Array), szp = edgeSlice(ns.data, 3, Uint16Array);
+  const sxn = edgeSlice(nw.data, 0, Uint32Array), sxp = edgeSlice(ne.data, 1, Uint32Array);
+  const szn = edgeSlice(nn.data, 2, Uint32Array), szp = edgeSlice(ns.data, 3, Uint32Array);
   const lxn = packedEdge(nw, 0), lxp = packedEdge(ne, 1);
   const lzn = packedEdge(nn, 2), lzp = packedEdge(ns, 3);
   worker.postMessage({ type: 'mesh', cx: c.cx, cz: c.cz, rev: c.rev,
@@ -196,7 +213,7 @@ function pump() {
         job.generating = true;
         if (currentWorld && !menuScene) {
           const _cx = job.cx, _cz = job.cz, _w = w, _wid = currentWorld.id;
-          idbGet('terrain:' + _wid + ':' + key(_cx, _cz)).then(buf => {
+          idbGet(TERRAIN_KEY + _wid + ':' + key(_cx, _cz)).then(buf => {
             if (buf instanceof ArrayBuffer) {
               _w.busy--;
               const c = getChunk(_cx, _cz);
@@ -238,6 +255,7 @@ function finishChunkGen(c) {
   }
   relightForChunk(c.cx, c.cz);             // pour in any nearby glowstone before this meshes
   seedSkyForChunk(c);                      // daylight columns + spread into caves/overhangs
+  c.lit = true;                            // only now may it mesh — see the note on tryQueueMesh
   // structures are stamped AFTER terrain, on the main thread — see the header of 34-structures.js
   trySpawnStructureInChunk(c.cx, c.cz);
   // this chunk (and each neighbour that was waiting on it) may be meshable now
@@ -263,9 +281,9 @@ function onWorkerMessage(m) {
   if (m.type === 'gen') {
     if (!c) return;                          // chunk was unloaded while generating
     c.generating = false;
-    c.data = new Uint16Array(m.data);
+    c.data = new Uint32Array(m.data);
     if (!m._fromSave && currentWorld && !menuScene)
-      idbPut('terrain:' + currentWorld.id + ':' + key(m.cx, m.cz), c.data.buffer.slice()).catch(() => {});
+      idbPut(TERRAIN_KEY + currentWorld.id + ':' + key(m.cx, m.cz), c.data.buffer.slice()).catch(() => {});
     const edits = editStore.get(key(m.cx, m.cz));
     if (edits) for (const [i, v] of edits) c.data[i] = v;   // re-apply player edits
     /* The voxel data is installed immediately — it is only a typed-array wrap and the edit
@@ -364,6 +382,7 @@ function blockBoxes(x, y, z) {
   const prop = PROPS[val & 255];
   if (!prop.solid) return null;
   if (prop.model === 'stairs') return CORE.stairBoxesAt(getBlock, x, y, z, val);   // neighbour-aware corners
+  if (prop.boxesOf) return prop.boxesOf(val);      // variant too wide to index (layered carpet)
   if (prop.boxesByVar) { const b = prop.boxesByVar[(val >> 8) & 255]; if (b) return b; }
   return prop.boxes || FULL_BOX;
 }
@@ -372,6 +391,7 @@ function blockBoxes(x, y, z) {
 function rayBoxesAt(x, y, z) {
   const val = getBlock(x, y, z), prop = PROPS[val & 255];
   if (prop.model === 'stairs') return CORE.stairBoxesAt(getBlock, x, y, z, val);
+  if (prop.boxesOf) return prop.boxesOf(val);
   const bvr = prop.rayBoxesByVar || prop.boxesByVar;
   return bvr ? (bvr[(val >> 8) & 255] || prop.boxes) : prop.boxes;
 }
@@ -417,10 +437,18 @@ function setBlock(x, y, z, val) {
   // snow-on-grass: the grass directly under a snow block wears snowy sides (variant), and reverts
   // to plain grass when the snow is removed. Recursive setBlock is safe (grass fires no snow hook).
   // snow carpet counts as snow cover here too — a trunk replacing a carpet must clear the rim
-  const _snowy = (i) => i === B.SNOW || i === B.SNOW_CARPET;
-  if (_snowy(newId) && !_snowy(oldId) && (getBlock(x, y - 1, z) & 255) === B.GRASS)
+  // a layered carpet only frosts the grass under it when one of its layers is actually snow —
+  // a pile of pure leaf litter must leave the rim green
+  const _snowy = (v) => {
+    const i = v & 255;
+    if (i === B.SNOW || i === B.SNOW_CARPET) return true;
+    if (i !== B.CARPET) return false;
+    for (let l = carpetTop(v) - 1; l >= 0; l--) if (carpetMat(v, l) === CARPET_MAT.SNOW) return true;
+    return false;
+  };
+  if (_snowy(val) && !_snowy(oldVal) && (getBlock(x, y - 1, z) & 255) === B.GRASS)
     setBlock(x, y - 1, z, B.GRASS | (V.GRASS_SNOWY << 8));
-  if (_snowy(oldId) && !_snowy(newId)) {
+  if (_snowy(oldVal) && !_snowy(val)) {
     const below = getBlock(x, y - 1, z);
     if ((below & 255) === B.GRASS && ((below >> 8) & 255) === V.GRASS_SNOWY) setBlock(x, y - 1, z, B.GRASS);
   }
@@ -515,6 +543,41 @@ function setBlock(x, y, z, val) {
   if ((newId === B.SAND || newId === B.RED_SAND || newId === B.GRAVEL) && y > 0 && (getBlock(x, y - 1, z) & 255) === B.AIR)
     scheduleFall(x, y, z);
   editRushing = false;
+}
+/* ---- layered carpet: one cell, up to CARPET_MAX layers of mixed material ----
+   Everything that creates litter or snow cover goes through addCarpetLayer, so a fresh leaf
+   landing on a snow drift just pushes another material onto the same cell instead of needing a
+   free cell of its own. Legacy single-material carpets from pre-0.69 saves are converted on
+   contact, which is also how they gain the ability to mix. */
+function carpetValAt(x, y, z) {
+  const v = getBlock(x, y, z), id = v & 255;
+  if (id === B.CARPET) return v;
+  const mat = CARPET_MAT_OF[id];                       // legacy carpet: rebuild it as a stack
+  if (!mat) return null;
+  return carpetFill(mat, Math.min(CARPET_MAX, ((v >> 8) & 255) + 1));
+}
+// push one layer of `mat` onto the cell. Returns false if it is full or not a carpet cell.
+function addCarpetLayer(x, y, z, mat) {
+  const cur = carpetValAt(x, y, z);
+  if (cur === null) {
+    if (!isPlaceableInto(getBlock(x, y, z) & 255)) return false;
+    setBlock(x, y, z, carpetFill(mat, 1));
+    return true;
+  }
+  const next = carpetPush(cur, mat);
+  if (next === cur) return false;                      // already CARPET_MAX layers deep
+  setBlock(x, y, z, next);
+  return true;
+}
+/* Breaking a stack takes the TOP layer only and hands back that layer's own carpet block, so a
+   drift you built out of snow and three kinds of leaf comes apart in the order it went on. */
+function carpetBreakInfo(val) {
+  const id = val & 255;
+  if (id !== B.CARPET && !CARPET_MAT_OF[id]) return null;
+  const cur = id === B.CARPET ? val : carpetFill(CARPET_MAT_OF[id], Math.min(CARPET_MAX, ((val >> 8) & 255) + 1));
+  const top = carpetTop(cur);
+  if (!top) return null;
+  return { dropId: CARPET_MAT_ITEM[carpetMat(cur, top - 1)] || B.SNOW_CARPET, remainVal: carpetPop(cur) };
 }
 // is any glowstone within light range of (x,y,z)? (so opaque edits there re-shadow correctly)
 function glowNear(x, y, z) {

@@ -108,9 +108,11 @@ function clearPlantAt(x, y, z) {
    are already occupied even though they read as air. Refuse to build into them — except with the
    things that legitimately grow through a canopy or wash around a trunk. */
 const OVERHANG_OK = [B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES,
-                     B.LEAF_CARPET, B.BIRCH_LEAF_CARPET, B.SPRUCE_LEAF_CARPET, B.WATER, B.LAVA];
+                     B.LEAF_CARPET, B.BIRCH_LEAF_CARPET, B.SPRUCE_LEAF_CARPET, B.CARPET,
+                     B.WATER, B.LAVA];
 // every layered carpet shares one stacking rule, so a new carpet type only has to set model:'carpet'
-const isCarpet = (id) => id != null && id < 256 && PROPS[id]?.model === 'carpet';
+const isCarpet = (id) => id != null && id < 256 &&
+  (PROPS[id]?.model === 'carpet' || PROPS[id]?.model === 'carpet_stack');
 function logOverhangsCell(x, y, z) {
   // a log only bulges along its two NON-axis directions, so check each neighbour accordingly
   const dirs = [[1,0,0,0],[-1,0,0,0],[0,1,0,1],[0,-1,0,1],[0,0,1,2],[0,0,-1,2]];
@@ -134,6 +136,9 @@ function currentRay() {
 // Box order in SLAB_VAR doubles: [even/own half, odd/other half] — bi is the raycast box index.
 function slabBreakInfo(val, bi) {
   const id = val & 255, va = (val >> 8) & 255;
+  // layered carpet: one break takes the top layer and hands back that layer's own carpet block
+  const ci = carpetBreakInfo(val);
+  if (ci) return ci;
   if (!PROPS[id] || PROPS[id].model !== 'slab' || va < 6) return null;
   if (va < 16) {                                   // same-type double, axis o. Box order [2o, 2o+1].
     const o = va - 6, hA = 2 * o, hB = 2 * o + 1;
@@ -154,7 +159,107 @@ function doBreak() {
   playBlockSound(hit.id, 'break', hit.x, hit.y, hit.z);
   setBlock(hit.x, hit.y, hit.z, inf ? inf.remainVal : B.AIR);   // double slab: only the aimed half
 }
+/* ---- bush pickup ----
+   Short grass, tall grass and wheat are all `noTarget`, so the crosshair ray passes straight
+   through them and none of them can be mined the ordinary way. Bush pickup is how you gather
+   them: hold the bind and whatever bush you brush against comes up, repeatedly, straight into
+   the inventory. ("Bush pickup" is this system's internal name — the on-screen prompt always
+   says the plant's own name.)
+
+     wheat       always yields wheat, plus one fiber roll on top
+     short grass one fiber roll — it is one cell
+     tall grass  one fiber roll PER HALF, so a full plant rolls twice: 0, 1 or 2 fiber
+
+   Reach is the player's own collision box widened by BUSH_REACH — brushing past a bush is
+   enough, you do not have to stand exactly in its cell. Nearest candidate wins, so in a thick
+   patch you always take the one you are actually touching. */
+/* Fiber is the sole gate on every tool recipe (5 per tool), so this rate sets how long the
+   stone age lasts. At 20% a tool is ~25 bushes rather than ~50. */
+const HARVEST_FIBER_CHANCE = 0.20;
+const BUSH_REACH = 1.5;                          // multiplier on the player's half-width
+// what the on-screen prompt calls each pickable — the plant's own name, not the system's
+const BUSH_NAME = [];
+BUSH_NAME[B.TALLGRASS] = 'grass';
+BUSH_NAME[B.TALL_LOWER] = BUSH_NAME[B.TALL_UPPER] = 'tall grass';
+BUSH_NAME[B.WHEAT] = 'wheat';
+/* Yield goes STRAIGHT into the inventory — no dropped entity to walk back over. That is what
+   makes it work at a sprint: hold the key through a field and every bush lands in a slot as you
+   pass. Only when there is genuinely no room does it fall on the ground instead of vanishing. */
+function bushGive(id, x, y, z) {
+  if (player.canFly) return;                    // creative: no yield, same as every other break
+  if (!tryPickup(id)) spawnDrop(id, x, y, z);
+}
+function _harvestFiber(x, y, z, rolls) {
+  if (player.canFly) return;
+  for (let i = 0; i < rolls; i++)
+    if (Math.random() < HARVEST_FIBER_CHANCE) bushGive(ITEM.FIBER, x, y, z);
+}
+/* The single source of truth for both the prompt and the action: what would a pickup take right
+   now? Returns {x, y, z, id, name} or null. Pure — it never changes the world. */
+function findBushPickup() {
+  if (!playing || invOpen || menuScene || player.dead) return null;
+  const p = player.pos, r = player.R * BUSH_REACH;
+  const y0 = Math.floor(p.y);
+  const x0 = Math.floor(p.x - r), x1 = Math.floor(p.x + r);
+  const z0 = Math.floor(p.z - r), z1 = Math.floor(p.z + r);
+  let best = null, bestD = Infinity;
+  for (let y = y0; y <= y0 + 1; y++)
+    for (let z = z0; z <= z1; z++)
+      for (let x = x0; x <= x1; x++) {
+        const id = getBlock(x, y, z) & 255;
+        if (!BUSH_NAME[id]) continue;
+        const dx = (x + 0.5) - p.x, dz = (z + 0.5) - p.z;
+        const d = dx * dx + dz * dz;
+        if (d >= bestD) continue;
+        bestD = d;
+        best = { x, y, z, id, name: BUSH_NAME[id] };
+      }
+  return best;
+}
+function harvestAtPlayer() {
+  const t = findBushPickup();
+  if (!t) return false;
+  const { x, z, id } = t;
+  handPickSwing = true;                          // 24-hands.js plays the grab on the next frame
+  if (id === B.WHEAT) {
+    setBlock(x, t.y, z, B.AIR);
+    playBlockSound(B.WHEAT, 'break', x, t.y, z);
+    for (const d of blockDrop(B.WHEAT)) for (let n = 0; n < d.count; n++) bushGive(d.id, x, t.y, z);
+    _harvestFiber(x, t.y, z, 1);                 // wheat straw yields fiber as well
+    return true;
+  }
+  if (id === B.TALLGRASS) {
+    setBlock(x, t.y, z, B.AIR);
+    playBlockSound(B.TALLGRASS, 'break', x, t.y, z);
+    _harvestFiber(x, t.y, z, 1);
+    return true;
+  }
+  // take the whole two-cell plant however you met it, and roll once for each half
+  const ly = id === B.TALL_LOWER ? t.y : t.y - 1;
+  setBlock(x, ly + 1, z, B.AIR);
+  setBlock(x, ly, z, B.AIR);
+  playBlockSound(B.TALL_LOWER, 'break', x, ly, z);
+  _harvestFiber(x, ly, z, 2);
+  return true;
+}
+/* Held, not tapped: the first pick fires the instant the key goes down, then it repeats on a
+   short cooldown for as long as you hold it. Releasing clears the cooldown so a deliberate tap
+   is always immediate.
+
+   The cooldown is a touch longer than the hand's 0.28s swing, so every pick gets one complete
+   grab animation instead of the arm stuttering back to the start. It is only armed on a pick
+   that actually TOOK something — holding the key while walking up to a bush must not eat the
+   first one, so an empty attempt costs nothing. */
+const BUSH_REPEAT = 0.3;                         // seconds between picks while the key is held
+let _bushCd = 0;
+function updateBushPickup(dt, wantPick) {
+  if (!wantPick) { _bushCd = 0; return; }
+  _bushCd -= dt;
+  if (_bushCd > 0) return;
+  if (harvestAtPlayer()) _bushCd = BUSH_REPEAT;
+}
 let handPlaceSwing = false;   // set on a SUCCESSFUL place; 24-hands consumes it for the swing
+let handPickSwing  = false;   // same, for a successful bush pickup
 // complete a half-filled slab cell with the held slab → double slab. Same type → same-type
 // double (6+axis). Different type → mixed double: baseId keeps half v, heldId gets complement,
 // encoded 16 + partnerIdx*8 + v (partnerIdx = heldId's slab-registry index, must fit 0..15).
@@ -286,7 +391,7 @@ function doPlace() {
   }
   // snow carpet placed onto a cross/billboard plant -> replaces the plant in the same cell
   if (isCarpet(heldId) && PROPS[hit.id] && PROPS[hit.id].model === 'cross' && isSolid(hit.x, hit.y - 1, hit.z)) {
-    setBlock(hit.x, hit.y, hit.z, heldId);
+    setBlock(hit.x, hit.y, hit.z, carpetFill(CARPET_MAT_OF[heldId] || CARPET_MAT.SNOW, 1));
     playBlockSound(heldId, 'place', hit.x, hit.y, hit.z);
     handPlaceSwing = true;
     if (!player.canFly) {
@@ -296,12 +401,11 @@ function doPlace() {
     }
     return;
   }
-  // carpet on the same carpet -> add a layer to the aimed cell (variant 0..5 = 1..6 layers).
-  // Once at 6 layers (full), further clicks fall through to normal placement (a new carpet above).
-  if (isCarpet(heldId) && hit.id === heldId) {
-    const hv = (getBlock(hit.x, hit.y, hit.z) >> 8) & 255;
-    if (hv < 5) {
-      setBlock(hit.x, hit.y, hit.z, heldId | ((hv + 1) << 8));
+  /* Any carpet onto any carpet -> add a layer to the aimed cell, up to CARPET_MAX. The materials
+     do NOT have to match: snow on leaf litter on snow all live in the one cell now. Only once the
+     stack is full do further clicks fall through to normal placement (a new carpet above). */
+  if (isCarpet(heldId) && isCarpet(hit.id)) {
+    if (addCarpetLayer(hit.x, hit.y, hit.z, CARPET_MAT_OF[heldId] || CARPET_MAT.SNOW)) {
       playBlockSound(heldId, 'place', hit.x, hit.y, hit.z);
       handPlaceSwing = true;
       if (!player.canFly) {
@@ -483,7 +587,9 @@ function doPlace() {
            : hit.nz === 1 ? 4 : 5;                              // clicked wall
   }
   clearPlantAt(px, py, pz);                 // grass in the way is destroyed, not a blocker
-  setBlock(px, py, pz, id | (varb << 8));
+  // a carpet item never places its own block id: it starts (or joins) a layered stack
+  if (isCarpet(id)) setBlock(px, py, pz, carpetFill(CARPET_MAT_OF[id] || CARPET_MAT.SNOW, 1));
+  else setBlock(px, py, pz, id | (varb << 8));
   playBlockSound(id, 'place', px, py, pz);
   if (id === B.CHEST) {
     tryPairChest(px, py, pz, varb & 3);       // link to a lone same-facing neighbour, if any

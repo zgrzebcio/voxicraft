@@ -94,9 +94,9 @@ function buildDropGeom(id, variant = 0) {
   if (!variant && PROPS[id]?.model === 'log') variant = CORE.LOG_W_BLOCK << 2;
   const key = id + ':' + variant;
   if (DROP_GEOM[key]) return DROP_GEOM[key];
-  const data = new Uint16Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
-  data[CORE.idx(8, 64, 8)] = id | (variant << 8);
-  const empty = () => new Uint16Array(16 * 200).buffer;
+  const data = new Uint32Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
+  data[CORE.idx(8, 64, 8)] = (id | (variant << 8)) >>> 0;
+  const empty = () => new Uint32Array(16 * 200).buffer;
   const lite = () => new Uint8Array(16 * 200).fill(0xF0).buffer;
   // drops render fully sky-lit (high nibble 15) like icons, or they'd bake as cave-dark
   const lightArr = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z).fill(0xF0);
