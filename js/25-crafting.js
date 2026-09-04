@@ -35,11 +35,11 @@ const RECIPES_BASIC = [
   { in: [[B.STONE, 1]],                                                      out: [B.STONE_BRICK, 1] },
   { in: [[ITEM.BRICK, 4]],                                                   out: [B.BRICKS, 1] },
   { in: [[ITEM.STRING, 4]],                                                  out: [B.WOOL, 1] },
-  { in: [[V_PLANKS, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_SWORD, 1] },
-  { in: [[V_PLANKS, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_SHOVEL, 1] },
-  { in: [[V_PLANKS, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_PICKAXE, 1] },
-  { in: [[V_PLANKS, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_HATCHET, 1] },
-  { in: [[V_PLANKS, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_HOE, 1] },
+  { in: [[V_PLANKS, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_SWORD, 1] },
+  { in: [[V_PLANKS, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_SHOVEL, 1] },
+  { in: [[V_PLANKS, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_PICKAXE, 1] },
+  { in: [[V_PLANKS, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_HATCHET, 1] },
+  { in: [[V_PLANKS, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_HOE, 1] },
 ];
 const RECIPES_ADVANCED = [
   { in: [[ITEM.COAL_CHUNK, 8]],                                              out: [ITEM.COAL, 1] },
