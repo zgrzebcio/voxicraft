@@ -23,6 +23,16 @@
 
 const SOUND_MASTER = 0.5;                 // global scale — all sounds are quiet by design
 
+/* Two independent mutes, kept in localStorage so the choice survives a reload. Music and effects
+   are separate knobs because they are separate annoyances: the title loop can wear thin long
+   before block sounds do. */
+const MUTE_MUSIC_KEY = 'vc_muteMusic', MUTE_SFX_KEY = 'vc_muteSfx';
+const _readMute = (k) => { try { return localStorage.getItem(k) === '1'; } catch { return false; } };
+let musicMuted = _readMute(MUTE_MUSIC_KEY), sfxMuted = _readMute(MUTE_SFX_KEY);
+const _writeMute = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch {} };
+function setMusicMuted(v) { musicMuted = !!v; _writeMute(MUTE_MUSIC_KEY, musicMuted); updateMusic(); }
+function setSfxMuted(v)   { sfxMuted   = !!v; _writeMute(MUTE_SFX_KEY, sfxMuted); }
+
 const SOUND_FILES = {
   // blocks
   glass: 'Sound/Blocks/glass.ogg',
@@ -95,7 +105,7 @@ function _soundPool(key) {
 /* play a sound by key. opts: { gain, rate, pos } — pos is a THREE.Vector3-ish {x,y,z} that
    attenuates with distance from the player. */
 function playSound(key, opts) {
-  if (!_soundReady) return;
+  if (!_soundReady || sfxMuted) return;
   const pool = _soundPool(key);
   if (!pool) return;
   const o = opts || {};
@@ -184,7 +194,7 @@ _bgm.loop = true;
 _bgm.volume = SOUND_MASTER;
 
 function updateMusic() {
-  const wantMusic = _soundReady && (typeof menuScene === 'undefined' || menuScene);
+  const wantMusic = _soundReady && !musicMuted && (typeof menuScene === 'undefined' || menuScene);
   if (wantMusic) { if (_bgm.paused) _bgm.play().catch(() => {}); }
   else if (!_bgm.paused) _bgm.pause();
 }

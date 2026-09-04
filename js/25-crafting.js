@@ -35,13 +35,17 @@ const RECIPES_BASIC = [
   { in: [[B.STONE, 1]],                                                      out: [B.STONE_BRICK, 1] },
   { in: [[ITEM.BRICK, 4]],                                                   out: [B.BRICKS, 1] },
   { in: [[ITEM.STRING, 4]],                                                  out: [B.WOOL, 1] },
-  { in: [[ITEM.IRON_INGOT, 2], [ITEM.FIBER, 5]],                             out: [ITEM.IRON_SHEARS, 1] },
+  { in: [[V_PLANKS, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_SWORD, 1] },
+  { in: [[V_PLANKS, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_SHOVEL, 1] },
+  { in: [[V_PLANKS, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_PICKAXE, 1] },
+  { in: [[V_PLANKS, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_HATCHET, 1] },
+  { in: [[V_PLANKS, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]], [ITEM.FLINT, 1],  out: [ITEM.WOODEN_HOE, 1] },
 ];
 const RECIPES_ADVANCED = [
   { in: [[ITEM.COAL_CHUNK, 8]],                                              out: [ITEM.COAL, 1] },
   { in: [[B.STONE, 1], [ITEM.FLINT, 1], [ITEM.COAL, 1]],                     out: [ITEM.GLOW_DUST, 1] },
   { in: [[V_PLANKS, 3]],                                                     out: [ITEM.BOWL, 4] },
-  { in: [[V_STONE, 10]],                                                      out: [B.FURNACE, 1] },
+  { in: [[V_STONE, 10]],                                                     out: [B.FURNACE, 1] },
   { in: [[ITEM.IRON_INGOT, 1]],                                              out: [ITEM.IRON_NUGGET, 9] },
   { in: [[ITEM.IRON_NUGGET, 9]],                                             out: [ITEM.IRON_INGOT, 1] },
   { in: [[ITEM.GOLD_INGOT, 1]],                                              out: [ITEM.GOLD_NUGGET, 9] },
@@ -54,11 +58,8 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.FIBER, 10]],                                                  out: [ITEM.CLOTH, 1] },
   { in: [[V_PLANKS, 10], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 10]],            out: [B.CHEST, 1] },
   { in: [[B.WOOL, 4], [V_PLANKS, 4], [ITEM.CLOTH, 5], [ITEM.FIBER, 10]],     out: [B.BED, 1] },
-  { in: [[V_PLANKS, 6], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 4]],              out: [B.DOOR, 1] },
+  { in: [[V_PLANKS, 8], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 4]],              out: [B.DOOR, 1] },
   { in: [[V_PLANKS, 3]],                                                     out: [B.STAIRS, 2] },
-  /* Every tool head is lashed to its handle with fiber, so all five tool lines take the same
-     5 fiber on top of head material + sticks. Fiber comes only from bush pickup, which makes
-     the grass you walk through an actual tool-tier gate instead of scenery. */
   { in: [[ITEM.DIAMOND, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]],               out: [ITEM.DIAMOND_SWORD, 1] },
   { in: [[ITEM.DIAMOND, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5]],               out: [ITEM.DIAMOND_SHOVEL, 1] },
   { in: [[ITEM.DIAMOND, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]],               out: [ITEM.DIAMOND_PICKAXE, 1] },
@@ -74,16 +75,12 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.IRON_INGOT, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]],            out: [ITEM.IRON_PICKAXE, 1] },
   { in: [[ITEM.IRON_INGOT, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5]],            out: [ITEM.IRON_HATCHET, 1] },
   { in: [[ITEM.IRON_INGOT, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]],            out: [ITEM.IRON_HOE, 1] },
+  { in: [[ITEM.IRON_INGOT, 2], [ITEM.FIBER, 5]],                             out: [ITEM.IRON_SHEARS, 1] },
   { in: [[V_STONE, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]],                    out: [ITEM.STONE_SWORD, 1] },
   { in: [[V_STONE, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                    out: [ITEM.STONE_SHOVEL, 1] },
   { in: [[V_STONE, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                    out: [ITEM.STONE_PICKAXE, 1] },
   { in: [[V_STONE, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                    out: [ITEM.STONE_HATCHET, 1] },
   { in: [[V_STONE, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                    out: [ITEM.STONE_HOE, 1] },
-  { in: [[V_PLANKS, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]],                   out: [ITEM.WOODEN_SWORD, 1] },
-  { in: [[V_PLANKS, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                   out: [ITEM.WOODEN_SHOVEL, 1] },
-  { in: [[V_PLANKS, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                   out: [ITEM.WOODEN_PICKAXE, 1] },
-  { in: [[V_PLANKS, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                   out: [ITEM.WOODEN_HATCHET, 1] },
-  { in: [[V_PLANKS, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                   out: [ITEM.WOODEN_HOE, 1] },
   { in: [[ITEM.IRON_INGOT, 3]],                                              out: [ITEM.BUCKET, 1] },
   { in: [[ITEM.WHEAT, 3]],                                                   out: [ITEM.FLOUR, 1] },
   { in: [[ITEM.FLOUR, 3], [B.PUMPKIN, 1]],                                   out: [ITEM.PUMPKIN_PIE, 1] },
@@ -91,8 +88,6 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.GUNPOWDER, 7], [B.SAND, 10]],                                 out: [B.TNT, 1] },
   { in: [[ITEM.SUGAR_CANE, 3]],                                              out: [ITEM.PAPER, 1] },
   { in: [[ITEM.GOLD_INGOT, 10], [ITEM.APPLE, 1]],                            out: [ITEM.GOLDEN_APPLE, 1] },
-  /* Armor is plate over a padded liner: the fiber lashes it, the cloth pads it, and both scale
-     with how much of you the piece covers (gloves 4/1 up to chestplate 8/3). */
   { in: [[ITEM.IRON_INGOT, 6],  [ITEM.FIBER, 4], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_GLOVES, 1] },
   { in: [[ITEM.IRON_INGOT, 8],  [ITEM.FIBER, 5], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_BOOTS, 1] },
   { in: [[ITEM.IRON_INGOT, 10], [ITEM.FIBER, 6], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_HELMET, 1] },
@@ -149,6 +144,7 @@ function doCraft(r) {
   for (let i = 0; i < HOTBAR.length; i++)   HOTBAR[i]   = hot[i] || null;
   for (let i = 0; i < invSlots.length; i++) invSlots[i] = inv[i] || null;
   refreshSlotsUI(); updateHotbar();
+  addXP(craftXP(r.out[0]));                         // paid by what you made, not by the click
 }
 
 // output-id -> category: blocks (id<256), tools (item with .tool), materials (other items)

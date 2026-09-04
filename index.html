@@ -10,7 +10,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="mono"></div>
-<div id="version">alpha 0.6981</div>
+<div id="version">alpha 0.714</div>
 <div id="crosshair"></div>
 <div id="interact"></div>
 <div id="blockname"></div>
@@ -22,6 +22,8 @@
   </div>
 </div>
 <canvas id="vitals" width="860" height="70"></canvas>
+<div id="xpBar"><div id="xpFill"></div><div id="xpLevel"></div></div>
+<div id="xpPops"></div>
 <div id="deathScreen">
   <div class="dbox">
     <h1>You Died</h1>
@@ -101,6 +103,9 @@
       <label>render distance
         <input id="distInput" type="number" min="4" max="32" step="1">
       </label>
+      <label title="Chunks that actually tick: mobs, fluids, falling blocks, growth. Capped by render distance.">sim distance
+        <input id="simInput" type="number" min="2" max="16" step="1">
+      </label>
       <label>shadow dist
         <select id="shadowSel">
           <option value="0">off</option>
@@ -113,6 +118,8 @@
       <label>sensitivity %
         <input id="sensInput" type="number" min="10" max="400" step="10">
       </label>
+      <button id="musicBtn" title="Mute music" style="padding:6px 11px;font-size:14px">&#9834;</button>
+      <button id="sfxBtn" title="Mute sound effects" style="padding:6px 11px;font-size:14px">&#128266;</button>
       <button id="fsBtn" title="Fullscreen (F1)" style="padding:6px 11px;font-size:14px">&#9974;</button>
     </div>
     <div id="hzNote"></div>
@@ -180,6 +187,7 @@ window.THREE = THREE;
 <script defer src="js/31-armor.js"></script>
 <script defer src="js/33-felling.js"></script>
 <script defer src="js/34-structures.js"></script>
+<script defer src="js/35-leveling.js"></script>
 <script defer src="js/20-inventory-ui.js"></script>
 <script defer src="js/21-spawn.js"></script>
 <script defer src="js/22-main-loop.js"></script>

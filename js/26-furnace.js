@@ -74,6 +74,7 @@ function updateFurnaces(dt) {
         inn.count--;
         if (inn.count <= 0) f.slots[1] = null;
         if (out) out.count++; else f.slots[2] = mkSlot(res, 1);
+        addXP(XP_SMELT);
         _refreshFurnaceSlots(k);
       }
     } else f.progress = 0;

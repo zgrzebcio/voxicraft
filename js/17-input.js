@@ -4,6 +4,7 @@
 const modeSel = document.getElementById('modeSel');
 const fpsSel = document.getElementById('fpsSel');
 const distInput = document.getElementById('distInput');
+const simInput  = document.getElementById('simInput');
 const sensInput = document.getElementById('sensInput');
 const shadowSel = document.getElementById('shadowSel');
 let playing = false;
@@ -75,6 +76,10 @@ function applySettings() {
   const d = clampi(+distInput.value || viewDist, 4, 32);
   distInput.value = d;
   if (d !== viewDist) { viewDist = d; applyViewDist(); rebuildQueues(); }
+  // simulation radius: nothing to rebuild — every gated system reads simDist() per tick
+  const sd = clampi(+simInput.value || simRadius, SIM_DIST_MIN, SIM_DIST_MAX);
+  simInput.value = sd;
+  if (sd !== simRadius) { simRadius = sd; localStorage.setItem('vc_sim', sd); }
   const sr = parseInt(shadowSel.value);
   if (sr !== shadowR) { shadowR = sr; applyShadowDist(); }
 }
@@ -114,6 +119,22 @@ document.getElementById('quitBtn').addEventListener('click', () => {
   refreshMenu('home');
 });
 document.getElementById('fsBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
+/* Mute toggles. #menuExtras hosts them, so the same pair shows on the title screen and on the
+   pause menu without a second copy of the markup. The glyph IS the state: struck-through = off. */
+{
+  const musicBtn = document.getElementById('musicBtn'), sfxBtn = document.getElementById('sfxBtn');
+  const paint = () => {
+    musicBtn.textContent = musicMuted ? '♪̸' : '♪';
+    musicBtn.title = musicMuted ? 'Music off — click to unmute' : 'Music on — click to mute';
+    musicBtn.style.opacity = musicMuted ? '0.45' : '1';
+    sfxBtn.textContent = sfxMuted ? '\u{1F507}' : '\u{1F50A}';
+    sfxBtn.title = sfxMuted ? 'Sound effects off — click to unmute' : 'Sound effects on — click to mute';
+    sfxBtn.style.opacity = sfxMuted ? '0.45' : '1';
+  };
+  musicBtn.addEventListener('click', (e) => { e.stopPropagation(); setMusicMuted(!musicMuted); paint(); });
+  sfxBtn.addEventListener('click',   (e) => { e.stopPropagation(); setSfxMuted(!sfxMuted); paint(); });
+  paint();
+}
 canvas.addEventListener('click', () => {
   if (playing && !pointerLocked && !invOpen) { lockTries = 0; tryPointerLock(); }
 });
@@ -269,10 +290,14 @@ function invGamepad(g, dt, btn, edge) {
     invCursor.x += mx * 900 * dt;
     invCursor.y += my * 900 * dt;
   }
-  // right stick scrolls the crafting recipe list (when present)
+  /* Right stick scrolls whichever list is under it: the crafting recipes in survival, the
+     creative block palette in creative. Both are open at once for nobody, so a straight
+     either/or is enough — and the palette had no pad scroll at all before 0.704. */
   const ry = padAxis(g.axes[3] || 0);
-  const clist = document.getElementById('craftList');
-  if (clist && Math.abs(ry) > 0.01) clist.scrollTop += ry * 700 * dt;
+  if (Math.abs(ry) > 0.01) {
+    const list = document.getElementById('craftList') || document.querySelector('#inv .invScroll');
+    if (list) list.scrollTop += ry * 700 * dt;
+  }
   const hov = hoveredSlot();
   if (edge(0) && hov) beginDrag(hov.region, hov.i);              // A press = pick up
   if (edge(0) && !hov) {                                         // A on a craft button = craft

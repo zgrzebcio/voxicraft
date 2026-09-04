@@ -91,12 +91,14 @@ function saveWorld(syncToLS = false) {
   const data = {
     savedAt: Date.now(),
     edits, drops, furnaces, entities: serializeEntities(), chests: serializeChests(),
+    entChunks: serializeEntChunks(),      // chunks that already rolled their mob population
     // structures: which chunks were already rolled, unopened loot markers, structure-block setups
     structPlaced: serializeStructPlaced(), structLoot: serializePendingLoot(),
     structBlocks: serializeStructBlocks(),
     time: worldTime, worldDay, curMode: currentInvMode,
     survHot: survStash.hot, survInv: survStash.inv, survInv2: survStash.inv2,
     survEquip: serializeEquip(), survBelt: serializeBelt(),
+    xp: serializeXP(),                    // total experience + the player-placed block ledger
     player: { pos: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw, pitch: player.pitch,
               hp: player.hp, food: player.food, saturation: player.saturation, flying: player.flying,
               hotSel: hotbarSel,
@@ -125,7 +127,7 @@ async function loadWorld(w) {
   _loadingWorld = true;
   worldLoadingNameEl.textContent = w.name;
   worldLoadingEl.style.display = 'flex';
-  const vd = clampi(+distInput.value || 10, 4, 32);      // leave the 4-chunk panorama distance
+  const vd = clampi(+distInput.value || 10, 4, 32);      // leave the short panorama distance
   if (vd !== viewDist) { viewDist = vd; applyViewDist(); }
   randomTickSpeed = clampi(+w.tickSpeed || 3, 0, 20);     // world's simulation-speed setting
   if (!w.createdVersion) w.createdVersion = 'pre-0.443';  // legacy worlds predate version stamping
@@ -161,6 +163,8 @@ async function loadWorld(w) {
   if (data && Array.isArray(data.chests)) restoreChests(data.chests);   // contents before meshes
   // structure state must land BEFORE any chunk streams in, or already-rolled chunks re-roll
   restoreStructPlaced(data && data.structPlaced);
+  // same rule for mobs: this must land before any chunk streams in, or it re-rolls its population
+  restoreEntChunks(data && data.entChunks);
   restorePendingLoot(data && data.structLoot);
   restoreStructBlocks(data && data.structBlocks);
   for (const [k, m] of editStore) {
@@ -187,6 +191,7 @@ async function loadWorld(w) {
   };
   // worn gear (and anything on the belt) rides with the survival stash
   restoreEquip(_hasSurvSave ? data.survEquip : null, _hasSurvSave ? data.survBelt : null);
+  restoreXP(_hasSurvSave ? data.xp : null);
   if (data && typeof data.time === 'number') { worldTime = ((data.time % 1) + 1) % 1; worldDay = typeof data.worldDay === 'number' ? data.worldDay : 0; }
   else { worldTime = 1 / 24; worldDay = 0; }  // new world: start at 07:00, day 0
   // survival-created worlds are locked to survival; creative worlds resume their last mode
@@ -300,7 +305,7 @@ function refreshMenu(screen) {
 /* Minecraft-style title panorama: a fixed scenic overlook on the dedicated "voxicraft" seed
    (forest hilltop with mountains and water in view), rendered at view distance 4 with the
    camera slowly circling. */
-const MENU_SPOT = { x: -23.5, y: 176, z: 8.5, pitch: -0.36 };   // above the raised (sea-level 99) terrain
+const MENU_SPOT = { x: 34, y: 165, z: 284, pitch: -0.36 };   // above the raised (sea-level 99) terrain
 let menuScene = false;
 function setHudVisible(v) {
   for (const id of ['hud', 'hotbar', 'crosshair'])
@@ -312,7 +317,7 @@ function startMenuBackdrop() {
   clearBeds();
   clearChests();
   resetWorld('voxicraft');
-  viewDist = 4; applyViewDist(false);       // backdrop only — never persist the 4-chunk distance
+  viewDist = 5; applyViewDist(false);       // backdrop only — never persist this short distance
   worldTime = 0.15;                         // late morning: bright, long shadows
   player.pos.set(MENU_SPOT.x, MENU_SPOT.y, MENU_SPOT.z);
   player.spawned = true;                    // skip the spawn snap entirely

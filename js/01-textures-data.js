@@ -101,7 +101,6 @@ const TEXTURES = {
   berry_bush_empty:         'textures/Billboards/Plants/empty_berry_bush_.png',
   berry_bush_fruitling:     'textures/Billboards/Plants/fruitling_berry_bush_.png',
   berry_bush:               'textures/Billboards/Plants/berry_bush.png',
-  berries:                  'textures/Items/Consumables/berries.png',
 };
 
 const ITEM_TEXTURES = {
@@ -130,6 +129,7 @@ const ITEM_TEXTURES = {
   copper_nugget: 'textures/Items/Ores/copper_nugget.png',
   tin_nugget:    'textures/Items/Ores/tin_nugget.png',
   melon_slice:   'textures/Items/Consumables/melon_slice.png',
+  berries:       'textures/Items/Consumables/berries.png',
   brick:         'textures/Items/Materials/brick.png',
   potato:        'textures/Items/Plants/potato.png',
   potato_bake:   'textures/Items/Consumables/baked_potato.png',

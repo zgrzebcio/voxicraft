@@ -19,8 +19,10 @@ function resetWorld(seed, terrainType) {
   clearLitterRot();
   clearSnowMelt();
   clearBerryGrow();
+  restoreXP(null);                          // loadWorld restores the real total right after this
   clearStructureState();
   clearEntities();
+  restoreEntChunks(null);                   // loadWorld restores the real roll ledger right after
   clearBeds();
   clearChests();
   player.spawnPos = null;

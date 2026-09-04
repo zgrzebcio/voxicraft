@@ -233,6 +233,7 @@ function harvestAtPlayer() {
   if (!t) return 0;
   const { x, z, id } = t;
   handPickSwing = true;                          // 24-hands.js plays the grab on the next frame
+  addXP(XP_HARVEST);                             // foraging counts, same as breaking a wild block
   if (id === B.BERRY_BUSH) {
     if (t.v === BERRY_STAGE.GROWN) {
       // first pick on a ripe bush: take the fruit, leave the plant standing and empty
@@ -387,7 +388,9 @@ function useBucket(heldId, hit) {
     _swapHeld(ITEM.BUCKET);
   }
 }
-function doPlace() {
+// every block edit inside a place action is the player's own work — see 35-leveling.js
+function doPlace() { return withPlayerPlacement(_doPlace); }
+function _doPlace() {
   // shears on a woolly sheep: take the fleece instead of placing anything
   if (tryShearSheep()) { handPlaceSwing = true; return; }
   // empty bucket: fill from open water even when nothing solid is behind it (no block hit needed)
@@ -637,8 +640,11 @@ function doPlace() {
   }
   if (id === B.TNT) armTNT(px, py, pz);          // start the fuse the moment TNT is placed
   if (id === B.OAK_SAPLING || id === B.BIRCH_SAPLING || id === B.SPRUCE_SAPLING) armSapling(px, py, pz, id);
-  // a real block placed on top of grass smothers it back to dirt (billboards/cross don't)
-  if (type !== 'cross' && (getBlock(px, py - 1, pz) & 255) === B.GRASS) setBlock(px, py - 1, pz, B.DIRT);
+  /* Only an OPAQUE block smothers the grass under it. Anything light still gets through — leaves,
+     leaf litter, snow carpets, glass, a chest, every cross billboard — leaves the grass alive.
+     (0.703: this used to key off the cross model alone, which killed grass under a pane of glass
+     and under every carpet you laid down.) */
+  if (PROPS[id]?.opaque && (getBlock(px, py - 1, pz) & 255) === B.GRASS) setBlock(px, py - 1, pz, B.DIRT);
   handPlaceSwing = true;
   // survival: consume one from the stack; creative slots are ephemeral, no decrement
   if (!player.canFly) {

@@ -304,14 +304,14 @@ function applyCameraView(dt) {
 
 /* ================================ NPC entities ================================ */
 const ENTITIES = [];
-const ENT_MAX = 3;                       // population cap around the player
+// no population cap since 0.71 — density comes from the per-chunk spawn roll instead
 const ENT_R = 0.3, ENT_H = 1.8;
 const ENT_HP = 20;
 const ENT_SPEED = 2.2, ENT_CHASE_SPEED = 4.0;
 const ENT_GRAVITY = 26, ENT_JUMP = 7.6;
 const ENT_ATTACK_DMG = 3, ENT_ATTACK_CD = 1.0, ENT_ATTACK_RANGE = 2.2;
 const ENT_AGGRO_TIME = 12, ENT_AGGRO_RANGE = 18;
-const ENT_DESPAWN_DIST = 256;
+// nothing despawns for distance any more — far mobs freeze instead (see updateEntities)
 const ENT_NAMES = ['Wanderer', 'Drifter', 'Stray', 'Nomad', 'Traveller'];
 const ENT_THINK_TIME = 0.3;              // beat between being provoked and starting to fight back
 const ENT_KNOCK = 0.5, ENT_KNOCK_HOP = 6.2;
@@ -324,6 +324,7 @@ const ENT_HAZARD_CD = 0.5;               // seconds between lava / cactus ticks
 const ENT_LAVA_DMG = 4, ENT_CACTUS_DMG = 1, ENT_DROWN_DMG = 2;
 const ENT_AIR_MAX = 12;                  // seconds underwater before drowning starts
 const ENT_HOME_RANGE = 200;              // never wanders further than this from its spawn point
+const ENT_STUCK_TIME = 12;               // seconds of "walking" without moving before a mob is written off
 // Only these biomes support a spawn; the leash keeps them roughly in that region afterwards.
 const ENT_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
 
@@ -351,7 +352,6 @@ const ENT_CARRY_POOL = [
 const _ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 
 /* ---- sheep: passive grazers. They never attack; being hit makes them bolt. ---- */
-const SHEEP_MAX = 4;
 const SHEEP_HP = 8;
 const SHEEP_SPEED = 2.0, SHEEP_FLEE_SPEED = 5.2;
 const SHEEP_FLEE_TIME = 6;
@@ -468,15 +468,33 @@ function _entHazard(x, y, z) {
   const fx = Math.floor(x), fz = Math.floor(z), fy = Math.floor(y);
   // a step that would drop the feet into water counts as a hazard too
   if ((getBlock(fx, fy, fz) & 255) === B.WATER) return true;
-  // ...and so does a ledge: probe downward for a floor and refuse the step if the drop would
-  // hurt. Water counts as a floor here — falling into a pond is survivable, a ravine is not.
+  /* ...and so does a ledge: probe downward for a floor and refuse the step if the drop would
+     hurt. WATER FOUND ON THE WAY DOWN IS ALSO A HAZARD (0.711) — it used to count as a floor,
+     on the reasoning that falling into a pond is survivable. That is exactly how mobs kept
+     ending up in the sea: standing on a bank, the cell straight ahead is air (the water surface
+     is a block lower), so the step looked clean and they walked straight off into it. Now the
+     shoreline reads as a wall and they turn along it instead. */
   let d = 0;
   while (d <= ENT_FALL_SAFE && fy - 1 - d >= 0) {
     const bid = getBlock(fx, fy - 1 - d, fz) & 255;
-    if (bid === B.WATER || PROPS[bid]?.solid) break;
+    if (bid === B.WATER) return true;
+    if (PROPS[bid]?.solid) break;
     d++;
   }
   return d > ENT_FALL_SAFE;
+}
+/* A spawn needs real ROOM, not just a body-sized gap: a 2x2x2 block of open cells. Without this
+   a mob could be placed into a one-block-high cave mouth or a crevice and be sealed in the
+   instant it settled — the body AABB is only 0.6 wide, so it fitted where nothing could move. */
+function _entSpawnRoom(x, y, z) {
+  const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z);
+  for (let dy = 0; dy <= 1; dy++)
+    for (let dz = 0; dz <= 1; dz++)
+      for (let dx = 0; dx <= 1; dx++) {
+        const id = getBlock(fx + dx, fy + dy, fz + dz) & 255;
+        if (PROPS[id]?.solid || id === B.WATER || id === B.LAVA) return false;
+      }
+  return true;
 }
 
 /* Fall damage, mirroring the player's rule. Tracks the highest point reached while airborne
@@ -554,7 +572,7 @@ function damageEntity(ent, dmg) {
   if (ent.kind === 'sheep') {
     if (!player.canFly) ent.fleeT = SHEEP_FLEE_TIME;
     if (ent.hp <= 0) {
-      if (!player.canFly) _entDropLoot(ent);
+      if (!player.canFly) { _entDropLoot(ent); addXP(XP_MOB); }
       const i = ENTITIES.indexOf(ent);
       if (i >= 0) _removeEntity(i);
       return true;
@@ -568,7 +586,7 @@ function damageEntity(ent, dmg) {
     ent.state = 'chase';
   }
   if (ent.hp <= 0) {
-    if (!player.canFly) _entDropLoot(ent);
+    if (!player.canFly) { _entDropLoot(ent); addXP(XP_MOB); }
     const i = ENTITIES.indexOf(ent);
     if (i >= 0) _removeEntity(i);
     return true;
@@ -715,14 +733,13 @@ function tryAttackEntity(ent) {
 }
 
 /* ---- persistence ----
-   Only entities inside the render distance are written: anything further out was never
-   simulated this session, and keeping it would slowly bloat the save with stale mobs. */
+   EVERY entity is written (0.71), not just the ones in render distance. A chunk rolls its
+   population once and only once, so an unsaved mob is a mob that never comes back — the whole
+   point of the new scheme is that the flock you found is still there tomorrow. Frozen entities
+   in unloaded chunks are saved exactly like active ones. */
 function serializeEntities() {
   const out = [];
   for (const e of ENTITIES) {
-    const cdx = Math.abs(Math.floor(e.x / 16) - playerCX);
-    const cdz = Math.abs(Math.floor(e.z / 16) - playerCZ);
-    if (cdx > viewDist || cdz > viewDist) continue;
     out.push([
       +e.x.toFixed(2), +e.y.toFixed(2), +e.z.toFixed(2),
       +e.yaw.toFixed(3), Math.max(0, +e.hp.toFixed(1)),
@@ -764,44 +781,68 @@ function restoreEntities(list) {
   }
 }
 
-/* ---- spawning: keep a small population in the loaded ring around the player ---- */
-let _spawnTimer = 0;
-// find a legal, out-of-view surface spot near the player; returns {x,y,z} or null
-function _findSpawnSpot(biomes) {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = 14 + Math.random() * 18;
-    const x = Math.floor(player.pos.x + Math.cos(a) * r) + 0.5;
-    const z = Math.floor(player.pos.z + Math.sin(a) * r) + 0.5;
-    const c = getChunk(Math.floor(x / 16), Math.floor(z / 16));
-    if (!c || !c.data) continue;                       // never spawn into an unloaded chunk
-    // never pop into view: the spot has to be behind or well to the side of the camera
-    camera.getWorldDirection(_atkDir);
-    const vx = x - player.pos.x, vz = z - player.pos.z;
-    const vm = Math.hypot(vx, vz) || 1;
-    if ((vx / vm) * _atkDir.x + (vz / vm) * _atkDir.z > 0.15) continue;
+/* ---- spawning (0.71) ----
+   Mobs are part of the TERRAIN, not a running population meter. A chunk rolls for its inhabitants
+   exactly once, the first time it is ever generated, and that roll is recorded in `_entChunks`
+   and saved with the world — so walking back into a chunk never re-populates it. Nothing spawns
+   near the player on a timer any more, and nothing despawns for being far away: the mobs you
+   left in a field are the mobs you find when you come back.
+
+   The cost of a permanent population is paid by FREEZING it. An entity whose chunk is not loaded
+   is skipped entirely by the update loop and its model is hidden — it holds its position and its
+   state, and costs nothing per frame beyond the array slot. See updateEntities. */
+const _entChunks = new Set();            // "cx,cz" of every chunk that has already rolled
+const ENT_CHUNK_CHANCE = 0.030;          // a wanderer in ~1 chunk in 33
+const SHEEP_CHUNK_CHANCE = 0.028;        // a flock in ~1 chunk in 36 — sheep were far too common
+const SHEEP_FLOCK_MIN = 1, SHEEP_FLOCK_MAX = 3;
+
+// a legal surface spot inside this chunk, or null. Chunk-local — nothing to do with the player.
+function _findChunkSpot(cx, cz, biomes) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const x = cx * 16 + Math.floor(Math.random() * 16) + 0.5;
+    const z = cz * 16 + Math.floor(Math.random() * 16) + 0.5;
     if (!biomes.has(mainGen.biomeAt(Math.floor(x), Math.floor(z)))) continue;
     const gy = surfaceY(Math.floor(x), Math.floor(z));
     const top = getBlock(Math.floor(x), gy, Math.floor(z)) & 255;
     if (top === B.AIR || top === B.WATER || top === B.LAVA || top === B.CACTUS) continue;
     const y = gy + 1;
     if (_entBlocked(x, y, z) || _entHazard(x, y, z)) continue;
+    if (!_entSpawnRoom(x, y, z)) continue;             // needs a 2x2x2 pocket, not just a body gap
     return { x, y, z, top };
   }
   return null;
 }
-function _trySpawnEntity() {
-  const npcs = ENTITIES.reduce((n, e) => n + (e.kind === 'npc' ? 1 : 0), 0);
-  if (npcs >= ENT_MAX) return;
-  const s = _findSpawnSpot(ENT_BIOMES);
-  if (s) spawnEntity(s.x, s.y, s.z);
+/* Called once per chunk from 11-chunks.js, right after its terrain and structures land. */
+function trySpawnEntitiesInChunk(cx, cz) {
+  if (menuScene || !currentWorld) return;
+  const k = cx + ',' + cz;
+  if (_entChunks.has(k)) return;
+  _entChunks.add(k);
+  if (Math.random() < ENT_CHUNK_CHANCE) {
+    const s = _findChunkSpot(cx, cz, ENT_BIOMES);
+    if (s) spawnEntity(s.x, s.y, s.z);
+  }
+  if (Math.random() < SHEEP_CHUNK_CHANCE) {
+    const s = _findChunkSpot(cx, cz, SHEEP_BIOMES);
+    // grazers only appear on grass, and they arrive as a flock clustered on the same spot
+    if (s && s.top === B.GRASS) {
+      const n = SHEEP_FLOCK_MIN + Math.floor(Math.random() * (SHEEP_FLOCK_MAX - SHEEP_FLOCK_MIN + 1));
+      for (let i = 0; i < n; i++) {
+        const ox = (Math.random() * 4 - 2), oz = (Math.random() * 4 - 2);
+        const sx = s.x + ox, sz = s.z + oz;
+        // a scattered flock member that lands somewhere cramped falls back to the anchor spot,
+        // which already passed the full room test
+        if (_entBlocked(sx, s.y, sz) || _entHazard(sx, s.y, sz) || !_entSpawnRoom(sx, s.y, sz))
+          { spawnSheep(s.x, s.y, s.z); continue; }
+        spawnSheep(sx, s.y, sz);
+      }
+    }
+  }
 }
-function _trySpawnSheep() {
-  const sheep = ENTITIES.reduce((n, e) => n + (e.kind === 'sheep' ? 1 : 0), 0);
-  if (sheep >= SHEEP_MAX) return;
-  const s = _findSpawnSpot(SHEEP_BIOMES);
-  if (!s || s.top !== B.GRASS) return;                 // grazers only appear on grass
-  spawnSheep(s.x, s.y, s.z);
+function serializeEntChunks() { return [..._entChunks]; }
+function restoreEntChunks(list) {
+  _entChunks.clear();
+  if (Array.isArray(list)) for (const k of list) if (typeof k === 'string') _entChunks.add(k);
 }
 
 /* Player shove: mob hits and body collisions feed a decaying velocity here rather than moving
@@ -827,9 +868,11 @@ function _separateBodies(dt) {
   const minD = ENT_R * 2, minD2 = minD * minD;
   for (let a = 0; a < ENTITIES.length; a++) {
     const e = ENTITIES[a];
+    if (e.active === false) continue;         // frozen in an unloaded chunk — nothing to push
     // vs other entities
     for (let b = a + 1; b < ENTITIES.length; b++) {
       const o = ENTITIES[b];
+      if (o.active === false) continue;
       if (Math.abs(o.y - e.y) >= ENT_H) continue;
       let dx = o.x - e.x, dz = o.z - e.z;
       let d2 = dx * dx + dz * dz;
@@ -915,6 +958,7 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
   /* ---- move ---- */
   let moved = 0;
   const stunned = (e.kx !== 0 || e.kz !== 0);
+  e.wantMove = moveSpeed > 0 && !stunned;        // read by the stuck watchdog next tick
   if (moveSpeed > 0 && !stunned) {
     moveSpeed *= boxDragMul(e.x, e.y, e.z, ENT_R, ENT_H);   // leaves/litter -40%, snow -70%
     const sx = Math.sin(e.yaw) * moveSpeed * dt, sz = Math.cos(e.yaw) * moveSpeed * dt;
@@ -1021,18 +1065,46 @@ function updateEntities(dt) {
   }
   _updatePlayerKick(dt);
 
-  _spawnTimer -= dt;
-  if (_spawnTimer <= 0) {
-    _spawnTimer = 4 + Math.random() * 4;
-    if (Math.random() < 0.5) _trySpawnEntity(); else _trySpawnSheep();
-  }
-
   for (let i = ENTITIES.length - 1; i >= 0; i--) {
     const e = ENTITIES[i];
+    if (e.y < -30) { _removeEntity(i); continue; }     // fell out of the world: genuinely gone
+    /* TWO RADII (0.712). Visibility follows the GENERATION radius — if the chunk is loaded, the
+       mob is drawn, standing still, exactly where it was. Simulation follows the much smaller
+       `simDist`: outside it the mob is skipped by every per-frame system (`active` is what
+       _separateBodies reads) even though you can still see it in the distance.
+
+       That split is the point of the change. A render distance of 32 draws ~4000 chunks, and
+       stepping mobs through all of them was pure waste when the player can only reach the
+       nearest handful. A parked mob resumes mid-stride the moment it comes back in range. */
+    const ecx = Math.floor(e.x / 16), ecz = Math.floor(e.z / 16);
+    const ec = getChunk(ecx, ecz);
+    const loaded = !!(ec && ec.data);
+    if (e.model.root.visible !== loaded) e.model.root.visible = loaded;
+    const sim = loaded && inSimRangeChunk(ecx, ecz);
+    /* WAKE-UP AUDIT. The moment a parked mob starts simulating again, check it is somewhere it
+       can actually live. A mob embedded in solid blocks — walled in by a player build, buried by
+       falling gravel, or in a pocket the world has since closed — is removed rather than left
+       twitching inside a wall forever. Runs once per entity per wake-up, not per frame. */
+    if (sim && e.active === false && _entBlocked(e.x, e.y, e.z)) { _removeEntity(i); continue; }
+    if (!sim) { e.active = false; continue; }
+    e.active = true;
     const pdx = player.pos.x - e.x, pdz = player.pos.z - e.z;
     const pdy = player.pos.y - e.y;
     const distXZ = Math.hypot(pdx, pdz);
-    if (distXZ > ENT_DESPAWN_DIST || e.y < -30) { _removeEntity(i); continue; }
+
+    /* STUCK WATCHDOG. `wantMove` is set by the movement blocks below: it means the mob asked to
+       walk this tick. If it asks and asks and never actually moves, it is wedged — a one-block
+       hole it fell into, a crevice, a pocket a build sealed around it — and no amount of further
+       ticking will free it, so it is removed. Only ever out of sight (>16 blocks): nothing is
+       allowed to blink out while you are looking at it. */
+    if (e._px !== undefined && e.wantMove) {
+      const dx2 = e.x - e._px, dz2 = e.z - e._pz;
+      if (dx2 * dx2 + dz2 * dz2 < 1e-6) {
+        e.stuckT = (e.stuckT || 0) + dt;
+        if (e.stuckT > ENT_STUCK_TIME && distXZ > 16) { _removeEntity(i); continue; }
+      } else e.stuckT = 0;
+    } else e.stuckT = 0;
+    e._px = e.x; e._pz = e.z;
 
     if (e.hurtT > 0) e.hurtT -= dt;
     if (e.atkCd > 0) e.atkCd -= dt;
@@ -1118,6 +1190,7 @@ function updateEntities(dt) {
     // getting knocked back briefly overrides walking, so a chasing mob can't immediately
     // stride back through its own knockback and cancel it out
     const stunned = (e.kx !== 0 || e.kz !== 0);
+    e.wantMove = moveSpeed > 0 && !stunned;      // read by the stuck watchdog next tick
     if (moveSpeed > 0 && !stunned) {
       moveSpeed *= boxDragMul(e.x, e.y, e.z, ENT_R, ENT_H);  // leaves/litter -40%, snow -70%
       const sx = Math.sin(e.yaw) * moveSpeed * dt;

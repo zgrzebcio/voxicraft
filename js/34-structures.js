@@ -46,6 +46,7 @@ const DEFAULT_LOOT = {
   '1': {
     name: 'basic',
     rolls: [3, 6],
+    xp: [3, 8],                        // experience for the first open — see awardLootXP
     entries: [
       { id: 'WOODEN_PICKAXE', min: 1, max: 1, chance: 0.35 },
       { id: 'WOODEN_HATCHET', min: 1, max: 1, chance: 0.35 },
@@ -127,7 +128,9 @@ function fillPendingLoot(x, y, z, slots) {
   const rec = PENDING_LOOT.get(k);
   if (!rec) return false;
   PENDING_LOOT.delete(k);
-  rollLootInto(slots, resolveLootTable(STRUCTURES.get(rec.struct), rec.table));
+  const table = resolveLootTable(STRUCTURES.get(rec.struct), rec.table);
+  rollLootInto(slots, table);
+  awardLootXP(table);                    // finding the chest is the achievement, not its contents
   return true;
 }
 function serializePendingLoot() {

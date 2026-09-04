@@ -67,7 +67,12 @@ function buildInventory() {
     scroller.className = 'invScroll';
     scroller.appendChild(mkGrid(invSlots2, 'inv2'));
     invEl.appendChild(scroller);
-    scroller.scrollTop = scroller.scrollHeight;     // start at the bottom row, next to the main grid
+    /* Open pinned to the BOTTOM of the palette, so the first rows you see are the ones sitting
+       against the main grid. Done twice: once now, and again after layout settles — while the
+       panel is still display:none the scroll height is 0 and the first assignment is a no-op. */
+    const _toBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
+    _toBottom();
+    requestAnimationFrame(_toBottom);
   }
   invEl.appendChild(mkGrid(invSlots, 'inv'));
   // survival: crafting list on the left, plus the furnace GUI on the right when one is open

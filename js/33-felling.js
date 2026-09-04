@@ -55,6 +55,15 @@ LITTER_OF[B.LEAVES] = CARPET_MAT.OAK_LITTER;
 LITTER_OF[B.BIRCH_LEAVES] = CARPET_MAT.BIRCH_LITTER;
 LITTER_OF[B.SPRUCE_LEAVES] = CARPET_MAT.SPRUCE_LITTER;
 
+/* Reverse of LITTER_OF: a carpet material back to the leaf block it fell from. A broken litter
+   layer yields what LEAVES yield (sticks, the rare apple, a sapling) rather than handing back a
+   litter block — fallen leaves are leaves, not a building material. */
+const LEAF_OF_LITTER = [];
+LEAF_OF_LITTER[CARPET_MAT.OAK_LITTER] = B.LEAVES;
+LEAF_OF_LITTER[CARPET_MAT.BIRCH_LITTER] = B.BIRCH_LEAVES;
+LEAF_OF_LITTER[CARPET_MAT.SPRUCE_LITTER] = B.SPRUCE_LEAVES;
+const litterLeafBlock = (mat) => LEAF_OF_LITTER[mat];
+
 const isLiveLog     = (id) => STRIPPED_OF[id] !== undefined;
 const isStrippedLog = (id) => UNSTRIPPED_OF[id] !== undefined;
 const isAnyLog      = (id) => isLiveLog(id) || isStrippedLog(id);
@@ -135,8 +144,12 @@ function updateLitterRot(dt) {
   const step = _litterTimer * (typeof tickFactor === 'function' ? tickFactor() : 1);
   _litterTimer = 0;
   for (const [k, t] of litterRot) {
-    const left = t - step;
     const [x, y, z] = k.split(',').map(Number);
+    /* Out of the simulation radius the countdown is PAUSED, not merely un-applied: `t` is left
+       exactly as it was, so a forest floor does not silently rot away while you are on the other
+       side of the world and then pop bare the moment you walk back into view. */
+    if (!inSimRange(x, z)) continue;
+    const left = t - step;
     const val = getBlock(x, y, z);
     const li = litterLayerTop(val);
     if (li < 0) { litterRot.delete(k); continue; }                // mined, replaced, or all snow
@@ -216,6 +229,7 @@ function updateSnowMelt(dt) {
   _meltTimer = 0;
   for (const [k, t] of snowMelt) {
     const [x, y, z] = k.split(',').map(Number);
+    if (!inSimRange(x, z)) continue;             // melt clock pauses outside the sim radius
     const val = getBlock(x, y, z);
     const si = snowLayerTop(val);
     if (si < 0) { snowMelt.delete(k); continue; }                 // mined, replaced, or already gone
@@ -269,6 +283,7 @@ function updateBerryGrow(dt) {
   _berryTimer = 0;
   for (const [k, t] of berryGrow) {
     const [x, y, z] = k.split(',').map(Number);
+    if (!inSimRange(x, z)) continue;             // regrow clock pauses outside the sim radius
     const stage = berryStageAt(getBlock(x, y, z));
     if (stage < 0) { berryGrow.delete(k); continue; }             // picked clean, mined, or ripe
     const left = t - step;

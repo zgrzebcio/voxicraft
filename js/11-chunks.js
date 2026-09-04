@@ -258,6 +258,8 @@ function finishChunkGen(c) {
   c.lit = true;                            // only now may it mesh — see the note on tryQueueMesh
   // structures are stamped AFTER terrain, on the main thread — see the header of 34-structures.js
   trySpawnStructureInChunk(c.cx, c.cz);
+  // ...and the chunk rolls its mob population, once, the first time it ever exists
+  trySpawnEntitiesInChunk(c.cx, c.cz);
   // this chunk (and each neighbour that was waiting on it) may be meshable now
   const R2 = viewDist * viewDist;
   for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
@@ -413,6 +415,8 @@ function setBlock(x, y, z, val) {
   const oldLit = blockLightOf(oldVal) > 0, newLit = blockLightOf(val) > 0;
   if (oldLit && !newLit) glowDel(x, y, z);
   if (newLit && !oldLit) glowAdd(x, y, z);
+  // leveling ledger: remember cells the player placed into, forget them when they are cleared
+  if (typeof notePlacedCell === 'function') notePlacedCell(x, y, z, newId);
   let edits = editStore.get(key(cx, cz));
   if (!edits) editStore.set(key(cx, cz), edits = new Map());
   edits.set(i, val);

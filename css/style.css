@@ -23,9 +23,40 @@
      the canvas bitmap stays 452×20; CSS width is 10% larger so icons render slightly bigger. */
   /* canvas bitmap stays native 36px sprites (780×74); CSS shows it at half size so the
      browser downscales the whole supersampled bitmap smoothly — crisp icons, no pixel loss */
-  #vitals { position:fixed; left:50%; bottom:66px; transform:translateX(-50%); z-index:5;
+  /* bottom:78px clears the XP bar + its level number, which sit at 58..~82, without floating */
+  #vitals { position:fixed; left:50%; bottom:78px; transform:translateX(-50%); z-index:5;
             pointer-events:none; image-rendering:auto; display:none;
             width:470px; height:40px; }
+  /* ---- experience bar (0.7) ----
+     Minecraft's slot — a strip above the hotbar with the level number centred on it — but a
+     plain smooth bar instead of the segmented sprite. Light-green fill on a dark track. */
+  #xpBar { position:fixed; left:50%; bottom:60px; transform:translateX(-50%); z-index:5;
+           pointer-events:none; display:none; width:470px; height:9px;
+           background:rgba(8,10,14,.72); border:1px solid rgba(255,255,255,.16);
+           border-radius:5px; overflow:visible; }
+  #xpFill { height:100%; width:0%; border-radius:4px;
+            background:linear-gradient(180deg,#b6ff6a,#7ee63a 60%,#5cc523);
+            box-shadow:0 0 6px rgba(140,255,90,.55); transition:width .12s linear; }
+  #xpLevel { position:absolute; left:0; right:0; bottom:9px; text-align:center;
+             font:700 15px/1 system-ui,sans-serif; color:#b6ff6a;
+             text-shadow:0 0 3px #000,1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000; }
+  #xpBar.flash #xpFill { box-shadow:0 0 14px rgba(180,255,120,.95); }
+  #xpBar.flash #xpLevel { color:#e6ffcf; }
+  /* "+N" gain popups: they rise off the RIGHT end of the bar, clear of the hotbar and the
+     level number, so a gain is readable without covering anything you were looking at */
+  #xpPops { position:fixed; left:50%; bottom:60px; margin-left:243px; width:0; height:0;
+            z-index:6; pointer-events:none; display:none; }
+  .xpPop { position:absolute; left:0; bottom:0; white-space:nowrap;
+           font:700 15px/1 system-ui,sans-serif; color:#b6ff6a;
+           text-shadow:0 0 4px rgba(120,255,60,.6),1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;
+           animation:xpPopRise 1.2s ease-out forwards; }
+  /* --dy0 is the popup's rung on the stagger ladder, so simultaneous gains never overlap */
+  @keyframes xpPopRise {
+    0%   { opacity:0; transform:translate(var(--dx,0),calc(6px  - var(--dy0,0px))) scale(.85); }
+    14%  { opacity:1; transform:translate(var(--dx,0),calc(0px  - var(--dy0,0px))) scale(1.08); }
+    28%  { transform:translate(var(--dx,0),calc(-4px  - var(--dy0,0px))) scale(1); }
+    100% { opacity:0; transform:translate(var(--dx,0),calc(-46px - var(--dy0,0px))) scale(1); }
+  }
   .slot { width:46px; height:46px; border:2px solid rgba(255,255,255,.22); border-radius:5px;
           background:rgba(0,0,0,.35); position:relative; display:flex; align-items:center; justify-content:center; }
   .slot img { width:40px; height:40px; image-rendering:pixelated; }
@@ -43,7 +74,8 @@
   #inv .grid + .grid { padding-top:8px; border-top:1px solid rgba(255,255,255,.12); }  /* split 2nd/main grid */
   /* creative overflow palette: fixed viewport height (3 rows) that scrolls, so extra rows never
      grow the panel. 3 rows = 3*46px slots + 2*4px gaps. */
-  #inv .invScroll { max-height:146px; overflow-y:auto; overflow-x:hidden; pointer-events:auto;
+  /* 4 rows on show by default (46px slot + 4px gap each), instead of the old 2.9 */
+  #inv .invScroll { max-height:204px; overflow-y:auto; overflow-x:hidden; pointer-events:auto;
                     padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.12);
                     scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.30) transparent; }
   #inv .invScroll::-webkit-scrollbar { width:8px; }
@@ -199,7 +231,8 @@
               text-shadow:0 1px 3px #000, 0 0 6px rgba(0,0,0,.8); z-index:5; pointer-events:none;
               opacity:0; transition:opacity .12s; }
   #interact b { color:#fff; font-weight:600; }
-  #blockname { position:fixed; left:50%; bottom:84px; transform:translateX(-50%); color:#fff; font-size:14px;
+  /* held-item name sits ABOVE the vitals row (78 + 40 tall), where the hearts used to be */
+  #blockname { position:fixed; left:50%; bottom:124px; transform:translateX(-50%); color:#fff; font-size:14px;
                text-shadow:0 1px 3px #000; z-index:5; pointer-events:none;
                opacity:0; transition:opacity .25s; }
 

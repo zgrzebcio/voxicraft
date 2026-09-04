@@ -567,10 +567,23 @@ function VOXEL_CORE() {
         const sp = 1 - Math.abs(fbm(x * 0.045 + 77.7, z * 0.045 - 55.5, 2));
         h += Math.pow(smooth01(sp, 0.78, 0.97), 2) * 30 * rdh;
       }
-      if (cont < -0.2) h += (cont + 0.2) * 45;          // continental shelf -> oceans
-      // deep ocean: separate low-freq mask carves broad abyssal basins well below the shelf
-      const deep = smooth01(fbm(x * 0.0009 + 1571.3, z * 0.0009 - 733.1, 2), 0.02, 0.42)
-                 * smooth01(-cont, 0.16, 0.3);          // only inside real oceans
+      /* Continental shelf -> oceans. The descent used to switch on the instant cont crossed -0.2,
+         which left a crease all along that contour; the smoothstep eases it in over the same band
+         the deep-ocean mask uses, and is fully 1 by -0.30 so open-ocean depth is unchanged. */
+      if (cont < -0.2) h += (cont + 0.2) * 45 * smooth01(-cont, 0.20, 0.30);
+      /* Deep ocean: separate low-freq mask carves broad abyssal basins well below the shelf.
+
+         This is a 34-block drop, so ALL of its steepness lives in how fast the mask crosses 0..1.
+         The old band (0.02..0.42 of an fbm at 0.0009) crossed in well under a hundred blocks and
+         produced a scarp — a wall you could stand on the lip of. Three changes stretch it into a
+         real continental slope: a lower frequency, a mask band more than twice as wide, and a
+         second smoothstep over the finished mask so both the top and the toe of the slope ease
+         off instead of meeting the flat in a crease. The gate on `cont` also starts AFTER the
+         shelf descent has fully engaged, so a basin never begins while the shelf is still
+         dropping — that overlap stacked two descents into one step. */
+      const deepN = fbm(x * 0.0007 + 1571.3, z * 0.0007 - 733.1, 2);
+      let deep = smooth01(deepN, -0.20, 0.70) * smooth01(-cont, 0.26, 0.52);
+      deep = deep * deep * (3 - 2 * deep);              // ease the descent at BOTH ends
       h -= deep * 34;
 
       // rivers & lakes (fade out in deserts, oceans, real mountains). Carving is TWO-tier so
@@ -578,7 +591,7 @@ function VOXEL_CORE() {
       // gently down to a low rim, then a tighter `core` mask scoops a shallow basin. Because
       // the rim descent spans a wide noise band, high plains/forest slope down to the shore
       // over many blocks instead of leaving vertical walls beside the water.
-      let rT = 0, lk = 0;
+      let rT = 0, lk = 0, carveBed = 0;   // carveBed 0..1: how far inside a river/lake channel
       // river/lake carving stays active across the continental shelf so a river mouth cuts
       // straight through to the ocean instead of fading out and leaving a beach ridge
       const landF = smooth01(cont, -0.30, -0.20) * (1 - fDesert) * (1 - Math.min(1, mTerm / 18));
@@ -595,11 +608,24 @@ function VOXEL_CORE() {
         const coreLo = 0.88 - wN * 0.10;
         const core   = Math.max(smooth01(ln, 0.64, 0.84), smooth01(rn, coreLo, 0.965)) * landF;
         if (valley > 0.001) {
-          // shallow default (3 below water); wide stretches scoop up to 9 below
-          const rim = WATER_LEVEL + 1, floor = WATER_LEVEL - 3 - wN * 6;
+          /* Depth is a function of WIDTH and nothing else: a narrow brook is ~3 below water, the
+             widest channels ~11. One field (wN) drives both, so the two can never disagree. */
+          const rim = WATER_LEVEL + 1, depth = 3 + wN * 8, floor = WATER_LEVEL - depth;
+          /* FLAT BED, steep banks. `core` is a smooth 0..1 ramp, and using it directly made the
+             channel a V — deepest exactly on the centre line and shelving up the whole way out.
+             Raising it to a low power saturates it almost as soon as you are inside the channel,
+             so the cross-section reads as a shallow box: banks drop, then the bottom runs level. */
+          const bed = Math.pow(core, 0.35);
           let target = h + (rim - h) * valley;                     // ease land down to the rim
-          target += (floor - rim) * core;                          // then scoop the basin
-          if (target < h) h = target;                              // only ever lower terrain
+          target += (floor - rim) * bed;                           // then scoop the basin
+          /* ...and the bottom is not a mirror. Two octaves of relief ride on the flat bed: a
+             broad slow term that reads as a submerged slope, and a finer one for humps and
+             hollows. Scaled to a fraction of the depth and multiplied by `bed`, so the relief
+             fades out at the banks and a hump can never break the surface. */
+          const bedRelief = fbm(x * 0.026 + 5501.3, z * 0.026 - 4417.9, 3) * 0.55
+                          + fbm(x * 0.0060 - 2207.7, z * 0.0060 + 3313.1, 2) * 0.45;
+          target += bedRelief * Math.min(2.4, depth * 0.34) * bed;
+          if (target < h) { h = target; carveBed = bed; }          // only ever lower terrain
         }
         rT = smooth01(rn, coreLo, 0.965) * landF;   // tracks the carve, so 'River' labels the real channel
         lk = smooth01(ln, 0.64, 0.84) * landF;
@@ -611,7 +637,10 @@ function VOXEL_CORE() {
          untouched) and the result is clamped below water level so a spike can never surface as
          an unintended island. */
       if (h < WATER_LEVEL) {
-        const amp = Math.min(1, (WATER_LEVEL - h) / 8);     // 0 at the shore, full by 8 deep
+        /* Ocean relief. Damped to near nothing inside a carved river/lake bed — that bed carries
+           its own, gentler relief, and stacking the seabed octaves on top of it was what made
+           rivers read as lumpy trenches instead of channels with a floor. */
+        const amp = Math.min(1, (WATER_LEVEL - h) / 8) * (1 - carveBed * 0.9);
         // lower frequency + bigger amplitude = broad rolling hills rather than choppy bumps
         const lump  = fbm(x * 0.018 + 1777.3, z * 0.018 - 2213.9, 3);
         const spike = 1 - Math.abs(fbm(x * 0.05 - 611.7, z * 0.05 + 733.1, 2));
@@ -1758,7 +1787,7 @@ function VOXEL_CORE() {
           const tallCh   = (isPlains ? 0.05 : 0.015) * (1 - alt * 0.75);
           /* Berry bushes are scattered thinly and land in a RANDOM growth stage, so a fresh world
              already has some ripe and some bare — the regrow timer takes over from there. */
-          const berryCh = (isPlains ? 0.006 : 0.010) * (1 - alt * 0.75);
+          const berryCh = (isPlains ? 0.0018 : 0.003) * (1 - alt * 0.75);
           if (r < flowerCh) {
             data[idx(lx, h + 1, lz)] = hash3(cx * 31 + lx + 12, 19, cz * 29 + lz + 7) < 0.5 ? B.POPPY : B.ORCHID;
           } else if (r < flowerCh + berryCh) {

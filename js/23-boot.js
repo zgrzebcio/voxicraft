@@ -7,6 +7,7 @@
 modeSel.value = localStorage.getItem('vc_mode') || 'creative';
 fpsSel.value = String(fpsLimit || 0);
 distInput.value = viewDist;
+simInput.value = simRadius;
 sensInput.value = Math.round(sens * 100);
 shadowSel.value = String(shadowR);
 applyShadowDist();

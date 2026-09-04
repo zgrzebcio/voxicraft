@@ -22,16 +22,23 @@ function scheduleFall(x, y, z) {
   fallingBlocks.set(`${x},${y},${z}`, val);        // keep the variant: carpets carry layer count
 }
 let _fallTimer = 0;
+const FALL_MAX_PER_TICK = 192;         // budget: a huge collapse comes down over several ticks
 function processFalling(dt) {
   _fallTimer += dt;
   if (_fallTimer < 0.08) return;
   _fallTimer -= 0.08;
-  const todo = [...fallingBlocks.keys()];
+  const todo = [];
+  for (const k of fallingBlocks.keys()) {
+    if (todo.length >= FALL_MAX_PER_TICK) break;
+    todo.push(k);
+  }
   for (const k of todo) {
     if (!fallingBlocks.has(k)) continue;
+    const [x, y, z] = k.split(',').map(Number);
+    // outside the simulation radius: leave it queued, untouched, for when the player returns
+    if (!inSimRange(x, z)) continue;
     const val = fallingBlocks.get(k);
     fallingBlocks.delete(k);
-    const [x, y, z] = k.split(',').map(Number);
     if (getBlock(x, y, z) !== val) continue;
     if (!_fallOpen(getBlock(x, y - 1, z) & 255)) continue;
     crushBillboard(x, y - 1, z);                 // torch/flower in the way is destroyed + dropped
@@ -84,7 +91,12 @@ function processLeavesDecay(dt) {
   leavesDecayTimer += dt;
   if (leavesDecayTimer < DECAY_INTERVAL) return;
   leavesDecayTimer -= DECAY_INTERVAL;
-  const toProcess = [...leavesDecayQueue].slice(0, DECAY_BATCH);
+  const toProcess = [];
+  for (const k of leavesDecayQueue) {
+    if (toProcess.length >= DECAY_BATCH) break;
+    if (!_keyInSimRange(k)) continue;      // stays queued until the player is back in range
+    toProcess.push(k);
+  }
   for (const key of toProcess) {
     leavesDecayQueue.delete(key);
     const [x, y, z] = key.split(',').map(Number);
@@ -142,6 +154,7 @@ function processGrassSpread(dt) {
   // age the covered-grass timers; convert after 24h dark, drop entries that got uncovered/changed
   for (const [k, t] of _darkGrass) {
     const [x, y, z] = k.split(',').map(Number);
+    if (!inSimRange(x, z)) continue;             // dark-cover clock pauses outside the sim radius
     if ((getBlock(x, y, z) & 255) !== B.GRASS || !PROPS[getBlock(x, y + 1, z) & 255].opaque) { _darkGrass.delete(k); continue; }
     const nt = t + interval;
     if (nt >= DAY_LEN) { setBlock(x, y, z, B.DIRT); _darkGrass.delete(k); }
@@ -271,6 +284,11 @@ function dryWaterFrom(sx, sy, sz) {
   queueWaterAround(sx, sy, sz, waterDry());
 }
 const WATER_MAX_PER_TICK = 256;           // safety valve only; timing comes from per-cell schedule
+// "x,y,z" key -> is that cell inside the simulation radius? (cheap: only the two horizontal parts)
+function _keyInSimRange(k) {
+  const i = k.indexOf(','), j = k.lastIndexOf(',');
+  return inSimRange(+k.slice(0, i), +k.slice(j + 1));
+}
 // Water must always tick before lava in a frame: lava is the slower fluid and its
 // water-contact rule (obsidian/stone) has to see water's moves from this same frame, not the
 // previous one. updateFluids() enforces that order and owns the shared clock.
@@ -284,6 +302,9 @@ function updateWaterFlow() {
   const todo = [];
   for (const [k, t] of _waterQueue) {
     if (t > _fluidClock) continue;
+    // outside the simulation radius the cell keeps its place in the queue and its due time; it
+    // simply is not acted on. Walk back into range and the flow picks up where it left off.
+    if (!_keyInSimRange(k)) continue;
     todo.push(k);
     if (todo.length >= WATER_MAX_PER_TICK) break;
   }
@@ -429,6 +450,7 @@ function updateLavaFlow() {
   const todo = [];
   for (const [k, t] of _lavaQueue) {
     if (t > _fluidClock) continue;
+    if (!_keyInSimRange(k)) continue;       // frozen out of range, same as water
     todo.push(k);
     if (todo.length >= LAVA_MAX_PER_TICK) break;
   }
@@ -702,6 +724,7 @@ function frame(now) {
   updateLitterRot(dt);                      // fallen leaves rot off the forest floor
   updateSnowMelt(dt);                       // snow outside a cold biome thins away a layer at a time
   updateBerryGrow(dt);                      // picked berry bushes ripen again, one stage at a time
+  updateXPBar(dt);
   updateStructOutline();                    // drop the capture box if its block was broken
   processPlacementQueue();                  // villages/dungeons assemble a few cells per frame
   updateFallingLeaves(dt);                  // canopy coming down after a tree was felled
@@ -960,6 +983,7 @@ function frame(now) {
         // NOT an early return — the rest of frame() still has to stream chunks and render.
         const chopped = tryChopLog(mx, my, mz);
         if (!chopped) playBlockSound(minedId, 'break', mx, my, mz);
+        awardBlockXP(mx, my, mz, minedId);       // natural blocks only; your own placements pay 0
         // tier gate: wrong/too-weak tool still breaks the block but yields no drops
         const dropsOk = mineDropAllowed(slotId(HOTBAR[hotbarSel]), minedId);
         const inf = chopped ? null : slabBreakInfo(mval, mbi);   // double slab: break only the mined half
@@ -969,9 +993,14 @@ function frame(now) {
           setBlock(mx, my, mz, inf.remainVal);
           if (dropsOk) {
             // a snow layer never hands back a carpet — only a shovel packs it into a snowball
+            const leafBlk = inf.mat != null ? litterLeafBlock(inf.mat) : undefined;
             if (inf.mat === CARPET_MAT.SNOW) {
               if (ITEM_PROPS[slotId(HOTBAR[hotbarSel])]?.tool === 'shovel')
                 spawnDrop(ITEM.SNOWBALL, mx, my, mz);
+            } else if (leafBlk != null) {
+              // leaf litter yields exactly what its leaves yield, never a litter block
+              for (const drop of blockDrop(leafBlk, false))
+                for (let i = 0; i < drop.count; i++) spawnDrop(drop.id, mx, my, mz);
             } else spawnDrop(inf.dropId, mx, my, mz);
           }
         } else {
@@ -1127,7 +1156,7 @@ function frame(now) {
       `XYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}<br>` +
       `biome ${mainGen.biomeAt(Math.floor(p.x), Math.floor(p.z))}<br>` +
       `chunk ${cx} , ${cz} &middot; loaded ${chunks.size}<br>` +
-      `seed ${SEED} &middot; dist ${viewDist} [ ]<br>` +
+      `seed ${SEED} &middot; dist ${viewDist} [ ] &middot; sim ${simDist()}<br>` +
       `draws ${info.calls} &middot; tris ${(info.triangles / 1000).toFixed(0)}k`;
   }
 }
