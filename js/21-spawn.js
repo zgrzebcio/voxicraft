@@ -23,6 +23,7 @@ function resetWorld(seed, terrainType) {
   clearStructureState();
   clearEntities();
   restoreEntChunks(null);                   // loadWorld restores the real roll ledger right after
+  clearSimWake();                           // every chunk must be seeded again in the new world
   clearBeds();
   clearChests();
   player.spawnPos = null;

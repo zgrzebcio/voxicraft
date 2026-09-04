@@ -194,8 +194,9 @@ function paintVitals() {
 }
 let vitalsDirty = true, vitalsShown = false;
 
-// GUI sprite textures — loaded async; vitalsDirty set on each load to trigger a repaint
+// GUI sprite textures — loaded async on world entry; vitalsDirty set per load to force a repaint
 const GUI_IMG = {};
+let ensureVitalsSprites = () => {};
 {
   const _p = {
     heartContainer:      'textures/Gui/Vitals/Heart/container.png',
@@ -214,17 +215,37 @@ const GUI_IMG = {};
     armorIronFull:       'textures/Gui/Vitals/Armor/iron_armor_full.png',
     armorIronHalf:       'textures/Gui/Vitals/Armor/iron_armor_half.png',
   };
-  for (const [k, src] of Object.entries(_p)) {
-    const img = new Image();
-    img.onload = () => { GUI_IMG[k] = img; vitalsDirty = true; };
-    img.src = src;
-  }
+  /* Requested on world load, not at boot (0.7147). Fourteen more HTTP requests for a bar that is
+     only ever drawn in survival, behind a menu that never shows it — and on a slow static server
+     each request is another slot in the browser's six-per-origin queue that a block texture could
+     have used. paintVitals already falls back to its procedural stamps for any sprite that has
+     not landed, so an early frame is still correct, just plainer. */
+  ensureVitalsSprites = function () {
+    ensureVitalsSprites = () => {};              // once
+    let pending = Object.keys(_p).length;
+    for (const [k, src] of Object.entries(_p)) {
+      const img = new Image();
+      const done = () => { if (--pending <= 0) { vitalsSpritesReady = true; vitalsDirty = true; } };
+      img.onload = () => { GUI_IMG[k] = img; vitalsDirty = true; done(); };
+      img.onerror = done;                    // a missing file must not block the bar forever
+      img.src = src;
+    }
+  };
 }
+/* The procedural stamps are a fallback for sprites that never arrive, and they draw smaller than
+   the real 36px art. Deferring the sprite load to world entry (0.7147) meant every join showed
+   the small stamped hearts for a moment and then swapped to the proper ones — a visible resize.
+   The bar now simply waits: hidden until the sprites land, or until a second has passed, after
+   which the stamps are better than nothing. */
+let vitalsSpritesReady = false;
+let _vitalsWaitT = 0;
 // per-frame: survival only. Depletes food by activity, regenerates HP when well-fed (which
 // costs food fast), starves at empty food, kills+respawns at 0 HP. Fall damage kept from
 // the previous pass. Sprint/jump ARE the main food consumers — idle is very slow (per user).
 function updateVitals(dt) {
-  const survival = !player.canFly && player.spawned;
+  _vitalsWaitT += dt;
+  const artReady = vitalsSpritesReady || _vitalsWaitT > 1.0;
+  const survival = !player.canFly && player.spawned && artReady;
   if (survival !== vitalsShown) {
     vitalsShown = survival;
     vitalsEl.style.display = survival ? 'block' : 'none';
@@ -283,7 +304,9 @@ function updateVitals(dt) {
       const fell = player.fallStart - player.pos.y;
       // hay bale fully absorbs fall damage when you land on it
       const landOn = getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z)) & 255;
-      if (fell > 3.5 && landOn !== B.HAY) { player.hp = Math.max(0, player.hp - (fell - 3)); player._dmgCause = 'fell from a high place'; }   // 1 HP per block past 3
+      // half a block more slack before it counts (0.7148): the free-fall allowance is 3.5 blocks
+      // and damage is measured past that, so a drop that only just exceeds it costs nothing
+      if (fell > 4.0 && landOn !== B.HAY) { player.hp = Math.max(0, player.hp - (fell - 3.5)); player._dmgCause = 'fell from a high place'; }   // 1 HP per block past 3.5
       player.fallStart = null;
     }
   } else player.fallStart = null;

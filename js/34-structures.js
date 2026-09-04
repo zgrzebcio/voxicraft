@@ -366,16 +366,21 @@ async function loadStructures() {
   const names = _readManifest(raw, 'manifest.json');
   if (!names) return;
 
-  for (const n of names) {
-    if (typeof n !== 'string') { _structReport('error', 'manifest.json', `entry ${JSON.stringify(n)} is not a file name`); continue; }
-    let text;
+  /* Fetched in PARALLEL. This was an `await` inside the loop, so N prefabs meant N round trips
+     end to end — each one waiting for the last to finish before its request was even sent.
+     Registration still happens in manifest order afterwards, so prefab precedence is unchanged. */
+  const fetched = await Promise.all(names.map(async (n) => {
+    if (typeof n !== 'string') { _structReport('error', 'manifest.json', `entry ${JSON.stringify(n)} is not a file name`); return null; }
     try {
       const r = await fetch(STRUCT_DIR + n, { cache: 'no-store' });
-      if (!r.ok) { _structReport('error', n, `not found (HTTP ${r.status}) — listed in the manifest but missing from ${STRUCT_DIR}`); continue; }
-      text = await r.text();
-    } catch (e) { _structReport('error', n, 'could not be fetched: ' + e.message); continue; }
-    const prefab = parseStructureText(text, n);
-    if (prefab) registerStructure(prefab, n);
+      if (!r.ok) { _structReport('error', n, `not found (HTTP ${r.status}) — listed in the manifest but missing from ${STRUCT_DIR}`); return null; }
+      return { n, text: await r.text() };
+    } catch (e) { _structReport('error', n, 'could not be fetched: ' + e.message); return null; }
+  }));
+  for (const f of fetched) {
+    if (!f) continue;
+    const prefab = parseStructureText(f.text, f.n);
+    if (prefab) registerStructure(prefab, f.n);
   }
   const n = STRUCTURES.size;
   console.log(`[structure] loaded ${n} prefab${n === 1 ? '' : 's'}: ${[...STRUCTURES.keys()].join(', ') || '(none)'}`);
@@ -1213,4 +1218,13 @@ function buildStructPanel() {
   panel.querySelector('#stDl').addEventListener('click', () => downloadStructure(doSave()));
 }
 
-loadStructures();
+/* Deferred to world load (0.7146). Prefabs are a gameplay asset — trySpawnStructureInChunk bails
+   out on `menuScene || !currentWorld`, so nothing on the title screen can ever consult them — yet
+   this used to fire a manifest fetch plus one request per prefab while the player was still
+   waiting for the menu to appear. `ensureStructuresLoaded` runs the load exactly once, on the
+   first world opened; a second call returns the same promise. */
+let _structuresPromise = null;
+function ensureStructuresLoaded() {
+  if (!_structuresPromise) _structuresPromise = loadStructures();
+  return _structuresPromise;
+}

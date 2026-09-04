@@ -39,14 +39,17 @@ const glowLevelAt = (gx, gy, gz) => blockLightOf(getBlock(gx, gy, gz)) || GLOW_L
 
 let _plyGlow = null; // null | [x, y, z, level] — virtual player held-light source
 
-// perf gate: only light sources within half the view distance (in chunks) of the player
-// propagate. Far sources are skipped — no BFS, no chunk dirtying. Chunks outside this ring
-// keep whatever light they last computed until the player moves closer and relightForChunk
-// reruns for them (or they get evicted and reloaded).
+/* Perf gate: only light sources inside the SIMULATION radius propagate. Far sources are skipped —
+   no BFS, no chunk dirtying — and their chunks keep whatever light they last computed.
+
+   This used to be `viewDist >> 1`, an ad-hoc ring unrelated to anything else, and it was quietly
+   wrong in both directions: at render distance 32 it flooded light across 16 chunks of terrain
+   nobody was near, and at render distance 8 it was only 4 chunks, so a structure stamped 5 chunks
+   out had its torches registered as emitters and then never lit — the unlit supply crate. Tying
+   it to simDist() makes lighting agree with every other simulated system, and the sim-wake pass
+   (22-main-loop.js) re-lights each chunk as it enters the radius, so nothing stays dark. */
 function _lightSrcActive(sx, sz) {
-  const scx = Math.floor(sx / 16), scz = Math.floor(sz / 16);
-  const half = Math.max(1, viewDist >> 1);
-  return Math.abs(scx - playerCX) <= half && Math.abs(scz - playerCZ) <= half;
+  return inSimRangeChunk(Math.floor(sx / 16), Math.floor(sz / 16));
 }
 
 // BFS-relax light from a source; level defaults to GLOW_LEVEL for placed glowstone.
@@ -141,9 +144,9 @@ function updatePlayerLight(nx, ny, nz, level) {
 
 // a freshly loaded chunk: pour in any glowstone within reach so it isn't dark
 function relightForChunk(cx, cz) {
-  const half = Math.max(1, viewDist >> 1);
-  // skip if the chunk itself is beyond half view distance from player
-  if (Math.abs(cx - playerCX) > half || Math.abs(cz - playerCZ) > half) return;
+  // outside the simulation radius the chunk is drawn but not maintained; the sim-wake pass
+  // calls this again the moment it comes back into range, so nothing is lost by skipping here
+  if (!inSimRangeChunk(cx, cz)) return;
   // only emitters in the chunks this one can be reached from — not every light in the world
   forEachGlowNear(cx * 16 + 8, cz * 16 + 8, GLOW_LEVEL + 8, (gx, gy, gz) => {
     if (!_lightSrcActive(gx, gz)) return;

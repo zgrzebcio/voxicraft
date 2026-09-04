@@ -21,6 +21,8 @@ for (let i = 0; i < WORKER_COUNT; i++) {
   workers.push(w);
 }
 function initWorkers(seed, terrainType) {
+  // a world swap abandons whatever was in flight; the throttle's counter must not leak with it
+  if (typeof resetGenThrottle === 'function') resetGenThrottle();
   for (const w of workers) w.postMessage({ type: 'init', seed, terrainType: terrainType || 'default' });
 }
 initWorkers(SEED, TERRAIN_TYPE);

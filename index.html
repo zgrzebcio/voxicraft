@@ -8,9 +8,15 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<!-- Opaque from the very first paint, and the FIRST element in the body so it exists before
+     anything else can be shown. The canvas opacity alone was not enough: the browser paints the
+     page before the deferred scripts run, so there was a brief window of raw canvas — chunks
+     mid-generation, then a flash — before startMenuBackdrop() could veil it. This is styled
+     inline so it is black even if the stylesheet has not arrived yet. -->
+<div id="bootCover" style="position:fixed;inset:0;background:#000;z-index:9999;pointer-events:none"></div>
 
 <div id="hud" class="mono"></div>
-<div id="version">alpha 0.714</div>
+<div id="version">alpha 0.7149</div>
 <div id="crosshair"></div>
 <div id="interact"></div>
 <div id="blockname"></div>
@@ -43,7 +49,10 @@
   <div id="structPanel"></div>
 </div>
 
- <div id="overlay"> 
+ <!-- starts veiled: the menu rides in with the panorama once it is built (see _menuVeil).
+      Set here rather than by script, because the overlay paints the moment it is parsed —
+      adding the class from JS meant one frame of fully-visible menu before it faded out. -->
+ <div id="overlay" class="veiled">
   <div class="panel"> 
     <h1>voxiCraft</h1>
     <div class="sub" id="menuSub">infinite voxel world &middot; greedy-meshed &middot; worker-generated</div>

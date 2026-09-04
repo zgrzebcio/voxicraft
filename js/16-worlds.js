@@ -116,6 +116,7 @@ function saveWorld(syncToLS = false) {
     });
   if (!syncToLS) _captureThumb(id);   // update thumbnail on every async save
   currentWorld.lastPlayed = Date.now();
+  currentWorld.savedDay = worldDay;    // in-game day at the moment of the save, shown in the list
   persistWorlds();
 }
 
@@ -127,6 +128,9 @@ async function loadWorld(w) {
   _loadingWorld = true;
   worldLoadingNameEl.textContent = w.name;
   worldLoadingEl.style.display = 'flex';
+  // everything the title screen did not need — icons, item sprites, prefabs — starts here, behind
+  // the loading screen, where there is already something covering the wait
+  ensureGameAssets();
   const vd = clampi(+distInput.value || 10, 4, 32);      // leave the short panorama distance
   if (vd !== viewDist) { viewDist = vd; applyViewDist(); }
   randomTickSpeed = clampi(+w.tickSpeed || 3, 0, 20);     // world's simulation-speed setting
@@ -241,32 +245,45 @@ function renderWorldList() {
     return;
   }
   const sorted = [...WORLDS].sort((a, b) => (b.lastPlayed || b.created || 0) - (a.lastPlayed || a.created || 0));
+  /* "12 Mar, 14:03" — short. The year is dropped: these are save files, not archives, and the
+     whole point of the rewrite below is that everything fits on ONE line under the name. */
+  const _stamp = (ts) => {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ', ' +
+           d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
+  };
   for (const w of sorted) {
-    const ts = w.lastPlayed || w.created;
-    const d = ts ? new Date(ts) : null;
-    const dateStr = d ? d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' }) : '—';
-    const timeStr = d ? d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' }) : '';
     const row = document.createElement('div');
     row.className = 'wrow';
+    /* One name, one info line. It used to be a name plus three stacked lines, which the row's
+       fixed height then clipped — which is why the timestamps I added were nowhere to be seen.
+       `savedDay` is the in-game day the world was last written at, so the line says both when you
+       last played in real time and how far along the world itself is. */
+    const bits = [
+      `seed ${escapeHtml(w.seed)}`,
+      escapeHtml(w.mode),
+      `created ${_stamp(w.created)}`,
+      `played ${_stamp(w.lastPlayed || w.created)}`,
+    ];
+    if (typeof w.savedDay === 'number') bits.push(`day ${w.savedDay}`);
+    bits.push(`v${escapeHtml(w.lastVersion || w.createdVersion || 'pre-0.443')}`);
     row.innerHTML =
-      `<div class="wthumb"><span class="wthumb-ph">◻</span></div>` +
+      `<div class="wshade"></div>` +
       `<div class="wbody">` +
         `<div class="winfo">` +
           `<b>${escapeHtml(w.name)}</b>` +
-          `<span class="wseed">seed ${escapeHtml(w.seed)} &middot; ${w.mode}</span>` +
-          `<span class="wseed">created v${escapeHtml(w.createdVersion || 'pre-0.443')} &middot; last v${escapeHtml(w.lastVersion || w.createdVersion || 'pre-0.443')}</span>` +
-          `<span class="wtime"><span class="wtime-label">last played</span><br>${dateStr} ${timeStr}</span>` +
+          `<span class="wseed">${bits.join(' &middot; ')}</span>` +
         `</div>` +
       `</div>` +
       `<div class="wbtns"></div>`;
-    // async load thumbnail from IDB
-    const thumbEl = row.querySelector('.wthumb');
+    /* The save's own screenshot IS the row now — stretched across it as a background, with a
+       scrim over the top for legibility — instead of a separate 104px thumbnail box beside the
+       text. Same image, same IDB key; it just fills the space it used to sit next to. */
     idbGet('thumb:' + w.id).then(url => {
       if (!url) return;
-      const img = document.createElement('img');
-      img.src = url;
-      thumbEl.innerHTML = '';
-      thumbEl.appendChild(img);
+      row.style.backgroundImage = `url("${url}")`;
+      row.classList.add('has-thumb');
     });
     const btns = row.querySelector('.wbtns');
     const play = document.createElement('button');
@@ -308,11 +325,42 @@ function refreshMenu(screen) {
 const MENU_SPOT = { x: 34, y: 165, z: 284, pitch: -0.36 };   // above the raised (sea-level 99) terrain
 let menuScene = false;
 function setHudVisible(v) {
+  /* vitals and the XP bar were missing from this list, so quitting to the title screen left the
+     hearts, hunger and level bar sitting over the panorama. They own their own visibility while
+     playing (survival only), so hiding is unconditional but SHOWING is left to them — otherwise
+     this would force a creative player's heart row back on. */
   for (const id of ['hud', 'hotbar', 'crosshair'])
     document.getElementById(id).style.display = v ? '' : 'none';
+  if (!v) {
+    for (const id of ['vitals', 'xpBar', 'xpPops']) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    }
+    // both of those cache their last shown state and only touch the DOM on a change, so the
+    // cached flags have to be cleared or neither would ever come back
+    vitalsShown = false;
+    if (typeof xpBarEl !== 'undefined' && xpBarEl) xpBarEl._shown = undefined;
+  }
+}
+/* The panorama is not allowed to be watched while it assembles: the canvas is held at zero
+   opacity until the whole 5-chunk radius has data AND geometry, then fades up. Chunks popping in
+   one by one behind the title is the single most "unfinished" thing a voxel game can show, and
+   the fill takes well under a second anyway — this just makes sure none of it is on screen. */
+let _menuVeil = false, _menuVeilT = 0;
+/* The boot cover is removed from the DOM once faded, so it can never sit over the game as an
+   invisible layer. Idempotent — every reveal path calls it, and only the first one does work. */
+function liftBootCover() {
+  const el = document.getElementById('bootCover');
+  if (!el || el.classList.contains('gone')) return;
+  el.classList.add('gone');
+  setTimeout(() => el.remove(), 600);
 }
 function startMenuBackdrop() {
   menuScene = true;
+  _menuVeil = true;
+  _menuVeilT = performance.now();
+  canvas.style.opacity = '0';
+  overlay.classList.add('veiled');          // menu waits for the panorama, then eases in with it
   clearDoors();
   clearBeds();
   clearChests();

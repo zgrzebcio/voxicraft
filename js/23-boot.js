@@ -15,6 +15,10 @@ player.canFly = modeSel.value !== 'survival';
 if (!player.canFly) player.flying = false;
 startMenuBackdrop();                        // title screen: rotating "voxicraft"-seed panorama
 refreshMenu('home');
+/* Failsafe: the veil is normally lifted from the frame loop once the panorama is built, but the
+   frame loop only starts after the atlas resolves. If that ever fails, an unreachable menu is the
+   worst possible outcome — so show it regardless after eight seconds. */
+setTimeout(() => { overlay.classList.remove('veiled'); liftBootCover(); }, 8000);
 // prune orphaned world blobs (saves whose registry entry is gone, e.g. deleted elsewhere)
 for (const k of Object.keys(localStorage))
   if (k.startsWith('vc_world_') && !WORLDS.some(w => 'vc_world_' + w.id === k)) localStorage.removeItem(k);
@@ -44,12 +48,38 @@ window.addEventListener('beforeunload', () => { if (currentWorld) saveWorld(true
 buildAtlas().then((tex) => {
   sharedUniforms.map.value = tex;
   tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-  PLACEABLE.forEach(id => renderBlockIcon(id));   // pre-render all 3D block icons (once)
-  buildHotbar();
-  buildInventory();
   applyViewDist();
-  requestAnimationFrame(frame);
+  requestAnimationFrame(frame);                   // start drawing the panorama immediately
 });
+
+/* ---- deferred game assets (0.7146) ----
+   Everything below is needed to PLAY and useless on the title screen, so none of it happens at
+   boot any more. The HUD is hidden behind the menu, prefabs cannot spawn without a currentWorld,
+   and the inventory is built by toggleInventory() the first time it is opened.
+
+   The icon warm-up is the expensive one: an offscreen 3D render per placeable block, cached into
+   ICON3D. It used to run synchronously before the very first frame — hundreds of renders with
+   the screen still blank. Now it is sliced across frames, 3ms at a time, and only once a world is
+   actually being entered, where there is a loading screen to hide it behind.
+
+   Idempotent: entering a second world re-uses everything the first one warmed. */
+let _gameAssetsStarted = false;
+function ensureGameAssets() {
+  if (_gameAssetsStarted) return;
+  _gameAssetsStarted = true;
+  ensureItemAssets();                             // item sprites + armor sheets (drops, previews)
+  ensureStructuresLoaded();                       // prefab manifest + files, fetched in parallel
+  ensureVitalsSprites();                          // hearts / food / air / armor bar sprites
+  buildHotbar();
+  let i = 0;
+  const warmIcons = () => {
+    const t0 = performance.now();
+    while (i < PLACEABLE.length && performance.now() - t0 < 3) renderBlockIcon(PLACEABLE[i++]);
+    if (i < PLACEABLE.length) requestAnimationFrame(warmIcons);
+    else buildInventory();                        // icons are cached by now, so this is cheap
+  };
+  requestAnimationFrame(warmIcons);
+}
 
 // small console/debug handle (harmless in normal play)
 window.__vc = {

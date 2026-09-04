@@ -75,14 +75,70 @@ function loadImage(name, url) {
   });
 }
 
-async function buildAtlas() {
-  // item sprites load alongside block tiles so drop geometry can read pixels synchronously
-  await Promise.all([
-    ...Object.keys(TEXTURES).map(n => loadImage(n)),
-    ...Object.entries(ITEM_TEXTURES).map(([n, u]) => loadImage(n, u)),
-    // armor-overlay sheets live in IMAGES too, but never enter the block atlas
+/* Item sprites and armor sheets are NOT loaded at boot (0.7146). Only block tiles go into the
+   atlas, and only the atlas is needed to draw the title panorama, so awaiting these held the
+   first frame hostage to a pile of files the menu never touches. They are read from IMAGES by
+   drop geometry and the armor preview — both strictly in-world — and hotbar/inventory icons do
+   not need them at all (renderItemIcon hands the browser the URL and lets it decode there).
+   ensureItemAssets() is called on world load and runs once. */
+let _itemAssetsPromise = null;
+function ensureItemAssets() {
+  if (!_itemAssetsPromise) _itemAssetsPromise = Promise.all([
+    ...Object.entries(ITEM_TEXTURES).map(([n, u]) => loadImage(n, u).catch(() => {})),
     ...Object.entries(EQUIP_TEXTURES).map(([n, u]) => loadImage(n, u).catch(() => {})),
   ]);
+  return _itemAssetsPromise;
+}
+
+/* ---- atlas cache (0.7147) ----
+   The atlas is stitched from ~90 individual PNGs, and every one of them is its own HTTP request.
+   Measured cold on the dev server: 162 requests finishing ~94ms apart, 15.2 SECONDS before the
+   first frame could draw. No amount of JS scheduling helps with that — the fix is to stop making
+   the requests.
+
+   So the finished 1280x1280 sheet is stored in IndexedDB and reloaded whole on later boots: one
+   read instead of ninety fetches. The key carries GAME_VERSION and the tile-list shape, so any
+   change to the textures or the layout misses the cache and rebuilds from source — a stale atlas
+   would be a far worse bug than a slow boot. */
+const ATLAS_CACHE_KEY = 'atlas:' + GAME_VERSION + ':' + ATLAS_COLS + 'x' + ATLAS_TILES.length;
+function _atlasTexFrom(source) {
+  const tex = new THREE.CanvasTexture(source);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 4;
+  return tex;
+}
+async function _loadCachedAtlas() {
+  try {
+    await idbReady;
+    const blob = await idbGet(ATLAS_CACHE_KEY);
+    if (!(blob instanceof Blob)) return null;
+    const bmp = await createImageBitmap(blob);
+    /* Draw the bitmap back into a real canvas rather than handing the ImageBitmap straight to
+       CanvasTexture. three.js treats an ImageBitmap source differently from a canvas on upload —
+       notably flipY — so the cached sheet came out mirrored against its own UVs and every block
+       sampled a neighbouring tile. Round-tripping through a canvas makes the cached path
+       byte-identical to the freshly stitched one, which is the only way this cache is safe. */
+    const cvs = document.createElement('canvas');
+    cvs.width = cvs.height = ATLAS_COLS * 128;
+    const g = cvs.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(bmp, 0, 0);
+    bmp.close?.();
+    return _atlasTexFrom(cvs);
+  } catch { return null; }                 // any failure at all: silently rebuild from source
+}
+function _cacheAtlas(cvs) {
+  try {
+    cvs.toBlob(b => { if (b) idbPut(ATLAS_CACHE_KEY, b).catch(() => {}); }, 'image/png');
+  } catch {}
+}
+
+async function buildAtlas() {
+  const cached = await _loadCachedAtlas();
+  if (cached) return cached;                                         // no network at all
+  await Promise.all(Object.keys(TEXTURES).map(n => loadImage(n)));   // block tiles only
 
   // tall_grass.png is one 2-tall sprite (e.g. 60x120): split it into a top and bottom half so
   // each of the two stacked blocks samples the correct portion instead of the whole squished image
@@ -184,11 +240,7 @@ async function buildAtlas() {
     //}
   });
 
-  const tex = new THREE.CanvasTexture(cvs);
-  tex.magFilter = THREE.NearestFilter;                    // crisp voxels up close
-  tex.minFilter = THREE.NearestMipmapLinearFilter;        // mipmaps for the distance
-  tex.generateMipmaps = true;
-  tex.anisotropy = 4;
-  return tex;
+  _cacheAtlas(cvs);          // async, off the critical path — next boot skips every fetch above
+  return _atlasTexFrom(cvs);
 }
 

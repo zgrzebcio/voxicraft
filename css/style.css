@@ -24,6 +24,17 @@
   /* canvas bitmap stays native 36px sprites (780×74); CSS shows it at half size so the
      browser downscales the whole supersampled bitmap smoothly — crisp icons, no pixel loss */
   /* bottom:78px clears the XP bar + its level number, which sit at 58..~82, without floating */
+  /* Title reveal: the panorama fades up once it is fully built, and the menu rides in just behind
+     it — see _menuVeil in 16-worlds.js. The panel is offset slightly further and eased with a
+     soft overshoot curve so the two do not move as one flat sheet. */
+  #game { transition:opacity .45s ease; }
+  /* the boot cover fades out with the reveal, then stops intercepting anything */
+  #bootCover { transition:opacity .4s ease; }
+  #bootCover.gone { opacity:0; }
+  #overlay { transition:opacity .5s ease; }
+  #overlay.veiled { opacity:0; pointer-events:none; }
+  #overlay > .panel { transition:transform .55s cubic-bezier(.16,.84,.28,1), opacity .5s ease; }
+  #overlay.veiled > .panel { transform:translateY(18px) scale(.97); opacity:0; }
   #vitals { position:fixed; left:50%; bottom:78px; transform:translateX(-50%); z-index:5;
             pointer-events:none; image-rendering:auto; display:none;
             width:470px; height:40px; }
@@ -258,8 +269,13 @@
   /* ---- start / pause overlay ---- */
   #overlay { position:fixed; inset:0; background:rgba(8,10,18,.42); backdrop-filter:blur(2px);
              display:flex; align-items:center; justify-content:center; z-index:10; }
+  /* wider (0.7148): the world rows carry two timestamps and a version pair now, and the pause
+     menu's option row was wrapping. min-width keeps the title and pause screens from collapsing
+     to the width of their few buttons. */
   #overlay .panel { background:rgba(16,18,30,.92); border:1px solid rgba(255,255,255,.15); border-radius:12px;
-                    padding:28px 36px; color:#eee; max-width:760px; text-align:center; }
+                    padding:28px 36px; color:#eee; text-align:center;
+                    width:min(1040px, 92vw); max-width:1040px; min-width:min(680px, 92vw);
+                    box-sizing:border-box; }
   #overlay h1 { margin:0 0 4px; font-size:34px; letter-spacing:2px; color:#9fd58a; text-shadow:0 2px 0 #2a4a20; }
   #overlay .sub { color:#9aa; margin-bottom:16px; font-size:13px; }
   #overlay .seedrow { display:flex; gap:8px; justify-content:center; margin-bottom:14px; }
@@ -286,22 +302,30 @@
                     flex-direction:column; gap:8px; padding-right:4px; }
   #overlay button.grey { background:#4a4f66; }
   #overlay button.grey:hover { background:#5b6180; }
-  #overlay .wrow { display:flex; flex-direction:row; align-items:stretch; background:#0b0d16;
+  /* The save's screenshot is the row's own background now, so there is no thumbnail column and
+     the row only has to be as tall as two lines of text. `position:relative` anchors the scrim. */
+  #overlay .wrow { position:relative; display:flex; flex-direction:row; align-items:center;
+                   background:#0b0d16; background-size:cover; background-position:center 40%;
                    border:1px solid #334; border-radius:10px; overflow:hidden;
-                   min-height:76px; text-align:left; }
-  #overlay .wthumb { width:104px; flex-shrink:0; background:#0d0f1c;
-                     display:flex; align-items:center; justify-content:center; overflow:hidden; }
-  #overlay .wthumb img { width:100%; height:100%; object-fit:cover; display:block; }
-  #overlay .wthumb-ph { font-size:26px; color:#223; }
-  #overlay .wbody { flex:1; display:flex; flex-direction:column; justify-content:space-between;
-                    padding:10px 14px; min-width:0; }
-  #overlay .wrow .winfo { display:flex; flex-direction:column; gap:2px; min-width:0; }
-  #overlay .wrow .winfo b { font-size:18px; color:#dfe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #overlay .wrow .winfo .wseed { font-size:13px; color:#89a; }
-  #overlay .wrow .winfo .wtime { font-size:13px; color:#aac; margin-top:4px; }
-  #overlay .wrow .winfo .wtime-label { font-size:10px; color:#667; text-transform:uppercase; letter-spacing:0.04em; }
-  #overlay .wrow .wbtns { display:flex; gap:7px; align-items:center; flex-shrink:0; padding:0 16px; }
-  #overlay .wrow .wbtns button { padding:8px 23px; font-size:17px; }
+                   min-height:52px; text-align:left; }
+  /* scrim: without it the white name vanishes over a snowy or sandy screenshot */
+  #overlay .wrow .wshade { position:absolute; inset:0; pointer-events:none; }
+  #overlay .wrow.has-thumb .wshade {
+    background:linear-gradient(90deg, rgba(8,10,18,.92) 0%, rgba(8,10,18,.82) 55%, rgba(8,10,18,.62) 100%); }
+  #overlay .wrow > .wbody, #overlay .wrow > .wbtns { position:relative; z-index:1; }
+  #overlay .wbody { flex:1; display:flex; flex-direction:column; justify-content:center;
+                    padding:7px 14px; min-width:0; }
+  #overlay .wrow .winfo { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  #overlay .wrow .winfo b { font-size:17px; color:#dfe; overflow:hidden; text-overflow:ellipsis;
+                            white-space:nowrap; text-shadow:0 1px 3px #000; }
+  /* the whole world summary on one line; ellipsis rather than wrapping keeps every row equal */
+  #overlay .wrow .winfo .wseed { font-size:12.5px; color:#9ab; white-space:nowrap;
+                                 overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 3px #000; }
+  /* created + last played sit side by side rather than stacking, so the row keeps its height */
+  /* (.wtime / .wthumb rules removed in 0.7149 — the stamps live in the one-line summary now,
+     and the screenshot is the row background rather than a column of its own) */
+  #overlay .wrow .wbtns { display:flex; gap:7px; align-items:center; flex-shrink:0; padding:0 14px; }
+  #overlay .wrow .wbtns button { padding:6px 20px; font-size:15px; }
   #overlay .wrow .wdel { background:#7d3232; flex:0 0 auto; padding:6px 11px; }
   #overlay .wrow .wdel:hover { background:#944040; }
   #overlay .wempty { color:#789; font-size:13px; padding:10px 0 14px; }

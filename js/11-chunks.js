@@ -127,11 +127,24 @@ function neighborsReady(c) {
    c.sky as "assume open sky" — a present-but-unseeded one bakes as zero, and the chunk comes out
    pitch black with nothing left to re-mesh it. Opening a save makes this obvious because every
    chunk regenerates at once and the finish queue drains only a few per frame. */
+/* The queue is kept in nearest-first order by INSERTING each entry at its place, instead of
+   pushing and re-sorting the whole thing afterwards. finishChunkGen used to call meshQueue.sort()
+   on every single chunk arrival, and while streaming that queue holds hundreds of entries — an
+   O(n log n) pass per arriving chunk, dozens of times a second, to absorb at most five new items.
+   A binary search costs log n comparisons and one splice. */
+function _insertMeshJob(job) {
+  let lo = 0, hi = meshQueue.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (meshQueue[mid].d2 <= job.d2) lo = mid + 1; else hi = mid;
+  }
+  meshQueue.splice(lo, 0, job);
+}
 function tryQueueMesh(c, d2, front) {
   if (!c.data || !c.lit || c.queuedMesh || c.meshing || !neighborsReady(c)) return;
   c.queuedMesh = true;
   if (front) meshQueue.unshift({ cx: c.cx, cz: c.cz, d2: 0 });   // edits jump the queue
-  else meshQueue.push({ cx: c.cx, cz: c.cz, d2 });
+  else _insertMeshJob({ cx: c.cx, cz: c.cz, d2 });
 }
 
 /* Cached generated terrain is a raw voxel buffer, and 0.69 widened a voxel from 16 to 32 bits.
@@ -189,13 +202,61 @@ function dispatchMesh(worker, c) {
                       light.buffer, lxn.buffer, lxp.buffer, lzn.buffer, lzp.buffer]);
 }
 
+/* ---- generation throttle (0.7143) ----
+   Generation is the single most expensive thing this game does, and pump() used to feed it as
+   hard as the worker pool would take: every worker filled to two jobs, continuously, for as long
+   as the queue had anything in it. Flying across terrain therefore pinned every core for minutes
+   at a time — the fan noise and the battery drain you noticed.
+
+   Two dials shape it:
+
+     max — how many generation jobs may be in flight at once
+     gap — minimum milliseconds between handing out two of them
+
+   They are driven by the DISTANCE of the next chunk waiting, not by how many are waiting.
+
+   Keying them to queue LENGTH was the obvious reading of "slower when there is more to do", and
+   it does not work: at render distance 16 the queue legitimately holds 800 chunks, so the deepest
+   throttle latched permanently and generation never caught up. Measured coverage was 6-24% of the
+   render radius — a steady 165fps spent drawing an empty world, which is not a performance win,
+   it is a broken render distance.
+
+   Distance is the honest signal. A hole four chunks away is one you are looking at, so it is
+   worth full speed; the far horizon can arrive at a leisurely pace nobody will notice. The result
+   still removes the thing that actually heats the machine — every core pinned on generation for
+   minutes at a stretch — because past the near ring the gap caps throughput to a steady rate
+   instead of letting it saturate. It just converges while doing so.
+
+   Meshing is never throttled: it is the cheap half, and it is what you actually see appear.
+   The world-loading screen is exempt — the player is waiting on exactly this work. */
+let _genInflight = 0;
+let _lastGenAt = 0;
+function _genThrottle() {
+  /* The loading screen and the title panorama both get an exemption. Neither is "play": the
+     player is looking straight at the work and waiting for it, and the panorama is a fixed
+     5-chunk radius that is over in a moment. Throttling those was what made boot feel slow. */
+  if (_loadingWorld || menuScene) return { max: 8, gap: 0 };
+  const g = genQueue[0];
+  const d2 = g ? g.d2 : 0;                             // squared chunk distance of the next job
+  if (d2 <= 16)  return { max: 3, gap: 6 };            // within 4 chunks: you can see the gap
+  if (d2 <= 64)  return { max: 2, gap: 14 };           // within 8
+  if (d2 <= 144) return { max: 2, gap: 26 };           // within 12
+  return { max: 2, gap: 40 };                          // far horizon: ~25/sec, steady and cool
+}
+function noteGenDone() { if (_genInflight > 0) _genInflight--; }
+function resetGenThrottle() { _genInflight = 0; _lastGenAt = 0; }
+
 // hand queued jobs to idle workers — meshing near chunks beats generating far ones
 function pump() {
+  const thr = _genThrottle();
+  const now = performance.now();
   for (const w of workers) {
     while (w.busy < 2) {
+      // gen is allowed only while under the concurrency cap and past the pacing gap
+      const genOk = _genInflight < thr.max && (now - _lastGenAt) >= thr.gap;
       let job = null, kind = null;
-      while (meshQueue.length || genQueue.length) {
-        const m = meshQueue[0], g = genQueue[0];
+      while (meshQueue.length || (genQueue.length && genOk)) {
+        const m = meshQueue[0], g = genOk ? genQueue[0] : null;
         if (m && (!g || m.d2 <= g.d2 + 2)) {
           meshQueue.shift();
           const c = getChunk(m.cx, m.cz);
@@ -209,6 +270,7 @@ function pump() {
       }
       if (!job) return;
       w.busy++;
+      if (kind === 'gen') { _genInflight++; _lastGenAt = now; }
       if (kind === 'gen') {
         job.generating = true;
         if (currentWorld && !menuScene) {
@@ -253,6 +315,10 @@ function finishChunkGen(c) {
     if (!EMITTER_ID[v & 255]) continue;
     if (blockLightOf(v) > 0) glowAdd(wx0 + (i & 15), i >> 8, wz0 + ((i >> 4) & 15));
   }
+  /* A chunk arriving fresh needs seeding again — its edits were just re-applied, and if it landed
+     while outside the simulation radius the relight below declines. Clearing the woken mark is
+     what guarantees the sim-wake pass revisits it (and lights it) once the player is close. */
+  simWakeInvalidate(c.cx, c.cz);
   relightForChunk(c.cx, c.cz);             // pour in any nearby glowstone before this meshes
   seedSkyForChunk(c);                      // daylight columns + spread into caves/overhangs
   c.lit = true;                            // only now may it mesh — see the note on tryQueueMesh
@@ -268,19 +334,28 @@ function finishChunkGen(c) {
     const ddx = n.cx - playerCX, ddz = n.cz - playerCZ, d2 = ddx * ddx + ddz * ddz;
     if (d2 <= R2) tryQueueMesh(n, d2);
   }
-  meshQueue.sort((a, b) => a.d2 - b.d2);
-  pump();
+  pump();                                  // tryQueueMesh inserts in order; no re-sort needed
 }
 
-function processGenFinish(maxPerFrame) {
+/* A COUNT is a poor budget: one chunk's finish pass can cost anything from a fraction of a
+   millisecond to several, depending on how much decoration and lighting landed in it, so a fixed
+   "two per frame" is either wasteful or a stutter depending on the terrain. `deadline` is the
+   real limit — a timestamp this drain must not run past — with the count kept as a ceiling.
+   Whatever is left simply waits for the next frame; nothing is dropped. */
+function processGenFinish(maxPerFrame, deadline) {
   let n = 0;
-  while (genFinishQueue.length && n < maxPerFrame) { finishChunkGen(genFinishQueue.shift()); n++; }
+  while (genFinishQueue.length && n < maxPerFrame) {
+    finishChunkGen(genFinishQueue.shift());
+    n++;
+    if (deadline && n >= 1 && performance.now() > deadline) break;
+  }
 }
 
 function onWorkerMessage(m) {
   if (m.type === 'error') { console.error('[worker]', m.message); return; }
   const c = getChunk(m.cx, m.cz);
   if (m.type === 'gen') {
+    noteGenDone();                           // free a slot in the generation throttle, always
     if (!c) return;                          // chunk was unloaded while generating
     c.generating = false;
     c.data = new Uint32Array(m.data);
@@ -307,7 +382,7 @@ function onWorkerMessage(m) {
 // chunks, applying them on different frames shows a see-through hole for a frame — so a rush
 // result waits (a few frames max) until no adjacent rush re-mesh is still in flight, then all
 // pending rush results apply together in the same frame, ignoring the per-frame cap.
-function applyMeshResults(maxPerFrame) {
+function applyMeshResults(maxPerFrame, deadline) {
   let n = 0;
   let rushWaiting = false;
   for (const m of meshResults) {
@@ -333,6 +408,9 @@ function applyMeshResults(maxPerFrame) {
     if (m.rush) { qi++; continue; }                    // held for the grouped apply above
     meshResults.splice(qi, 1);
     if (applyOneMesh(m)) n++;
+    // a geometry upload is a GPU-side allocation and its cost varies wildly with chunk content;
+    // stop at the frame's deadline rather than trusting the count. The rest wait one frame.
+    if (deadline && performance.now() > deadline) break;
   }
   if (n > 0) shadowDirty = true;            // new/changed geometry must reach the shadow maps
 }
