@@ -37,7 +37,11 @@ function blockLightOf(val) {
 // per-position emission: read the block's own light level (torch 10, glowstone 14, furnace 5...)
 const glowLevelAt = (gx, gy, gz) => blockLightOf(getBlock(gx, gy, gz)) || GLOW_LEVEL;
 
-let _plyGlow = null; // null | [x, y, z, level] — virtual player held-light source
+/* Virtual held-light sources — one slot per split-screen player (0.72), each null or
+   [x, y, z, level]. Every consumer treats them exactly like placed emitters; the only reason they
+   are not in `glowLights` is that they move every block step and are diffed rather than added. */
+const _plyGlows = [null, null, null, null];
+const _plyGlowSources = (out) => { for (const g of _plyGlows) if (g) out.push(g); return out; };
 
 /* Perf gate: only light sources inside the SIMULATION radius propagate. Far sources are skipped —
    no BFS, no chunk dirtying — and their chunks keep whatever light they last computed.
@@ -93,9 +97,9 @@ function relight(x, y, z) {
     if (!_lightSrcActive(gx, gz)) return;
     near.push([gx, gy, gz, glowLevelAt(gx, gy, gz)]);
   });
-  if (_plyGlow) {
-    const [gx, gy, gz] = _plyGlow;
-    if (Math.abs(gx - x) <= 2 * R && Math.abs(gy - y) <= 2 * R && Math.abs(gz - z) <= 2 * R) near.push(_plyGlow);
+  for (const g of _plyGlows) {
+    if (!g) continue;
+    if (Math.abs(g[0] - x) <= 2 * R && Math.abs(g[1] - y) <= 2 * R && Math.abs(g[2] - z) <= 2 * R) near.push(g);
   }
   let x0 = x - R, x1 = x + R, y0 = y - R, y1 = y + R, z0 = z - R, z1 = z + R;
   for (const g of near) { x0 = Math.min(x0, g[0]-R); x1 = Math.max(x1, g[0]+R); y0 = Math.min(y0, g[1]-R); y1 = Math.max(y1, g[1]+R); z0 = Math.min(z0, g[2]-R); z1 = Math.max(z1, g[2]+R); }
@@ -108,26 +112,28 @@ function relight(x, y, z) {
     }
 }
 
-// Update the player's virtual held-light source.
-// Call when the player moves a block or changes held item. level=0 clears.
-function updatePlayerLight(nx, ny, nz, level) {
-  const old = _plyGlow;
-  _plyGlow = level > 0 ? [nx, ny, nz, level] : null;
-  if (!old && !_plyGlow) return;
+// Update one player's virtual held-light source (`slot` is the split-screen player index).
+// Call when that player moves a block or changes held item. level=0 clears their light.
+function updatePlayerLight(slot, nx, ny, nz, level) {
+  const old = _plyGlows[slot];
+  const now = level > 0 ? [nx, ny, nz, level] : null;
+  _plyGlows[slot] = now;
+  if (!old && !now) return;
 
   const R = GLOW_LEVEL;
   // guard: if old and new are far apart (world reset), skip old in the bounding box
   const skipOld = old && (Math.abs(old[0]-nx) > 2*R || Math.abs(old[1]-ny) > 2*R || Math.abs(old[2]-nz) > 2*R);
 
-  const cx = _plyGlow ? nx : old[0], cy = _plyGlow ? ny : old[1], cz = _plyGlow ? nz : old[2];
-  // sources to re-propagate: placed glowLights + new player light. Old is NOT a source — it gets cleared.
+  const cx = now ? nx : old[0], cy = now ? ny : old[1], cz = now ? nz : old[2];
+  // sources to re-propagate: placed glowLights + EVERY player's light (this one's old position is
+  // not a source — it is what the clear below is for, but another player standing there is).
   const sources = [];
   forEachGlowNear(cx, cz, 2 * R, (gx, gy, gz) => {
     if (Math.abs(gx-cx)>2*R || Math.abs(gy-cy)>2*R || Math.abs(gz-cz)>2*R) return;
     if (!_lightSrcActive(gx, gz)) return;
     sources.push([gx,gy,gz,glowLevelAt(gx,gy,gz)]);
   });
-  if (_plyGlow) sources.push(_plyGlow);
+  _plyGlowSources(sources);
 
   // bbox: cover new position + old position so old light gets cleared
   let x0=cx-R, x1=cx+R, y0=cy-R, y1=cy+R, z0=cz-R, z1=cz+R;
@@ -153,8 +159,9 @@ function relightForChunk(cx, cz) {
     const dx = Math.max(cx*16 - gx, gx - (cx*16+15), 0), dz = Math.max(cz*16 - gz, gz - (cz*16+15), 0);
     if (dx <= GLOW_LEVEL && dz <= GLOW_LEVEL) propagateLight(gx, gy, gz, glowLevelAt(gx, gy, gz));
   });
-  if (_plyGlow) {
-    const [gx, gy, gz, lv] = _plyGlow;
+  for (const g of _plyGlows) {
+    if (!g) continue;
+    const [gx, gy, gz, lv] = g;
     const dx = Math.max(cx*16 - gx, gx - (cx*16+15), 0), dz = Math.max(cz*16 - gz, gz - (cz*16+15), 0);
     if (dx <= lv && dz <= lv) propagateLight(gx, gy, gz, lv);
   }
@@ -163,7 +170,7 @@ function relightForChunk(cx, cz) {
 // Dev test — run _dbgHeldLight() in browser console while holding a light block
 window._dbgHeldLight = () => {
   const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y + player.EYE), pz = Math.floor(player.pos.z);
-  console.log('[held-light] _plyGlow:', _plyGlow);
+  console.log('[held-light] _plyGlows:', _plyGlows);
   console.log('[held-light] player block:', px, py, pz);
   const rows = [];
   for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {

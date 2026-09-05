@@ -15,15 +15,20 @@ const BED_H = 0.5625;              // 9/16, the classic bed height (legs are dra
 const BED_DIR = [[0, 1], [0, -1], [1, 0], [-1, 0]];   // 0:+Z 1:-Z 2:+X 3:-X
 
 /* ---------------------------------- textures ---------------------------------- */
+// never cached blank — see the note on chestTexture in 30-chest.js (0.724)
 const _bedTexCache = {};
 function bedTexture(name) {
-  if (_bedTexCache[name]) return _bedTexCache[name];
-  const t = new THREE.Texture(IMAGES[name]);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.needsUpdate = true;
-  _bedTexCache[name] = t;
+  let t = _bedTexCache[name];
+  if (!t) {
+    t = _bedTexCache[name] = new THREE.Texture(IMAGES[name]);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.needsUpdate = true;
+  } else if (!t.image && IMAGES[name]) {
+    t.image = IMAGES[name];
+    t.needsUpdate = true;
+  }
   return t;
 }
 function bedMat(name) {
@@ -133,7 +138,16 @@ function removeBedMesh(k) {
   for (const mt of b.mats) mt.dispose();
   BEDS.delete(k);
 }
-function clearBeds() { for (const k of [...BEDS.keys()]) removeBedMesh(k); }
+/* Loading another world takes every bed with it, so nobody may be left flagged as lying in one —
+   a stale `sleepingAt` would pin that player in place forever with no bed to get out of. */
+function clearBeds() {
+  for (const k of [...BEDS.keys()]) removeBedMesh(k);
+  BEDS.clear();
+  for (const p of PLAYERS) p.sleepingAt = null;
+  _sleeping = false;
+  _sleepFade = 0;
+  _sleepEl.style.display = 'none';
+}
 
 // the FOOT cell of the bed that owns (x,y,z), or null
 function bedFootOf(x, y, z) {
@@ -187,7 +201,10 @@ function tryPlaceBed(px, py, pz) {
 // night runs from dusk to dawn; worldTime is 0 = sunrise, .25 noon, .5 sunset, .75 midnight
 const BED_NIGHT_FROM = 0.48;
 const BED_WAKE_TIME = 0.005;       // just after sunrise
-let _sleepFade = 0, _sleeping = false;
+/* Sleeping skips the world's clock, so it is a WORLD action even though one person does it: the
+   fade covers the whole screen and everyone wakes to the same morning. `_sleeper` remembers who
+   climbed in, because the rest and the respawn point are theirs alone. */
+let _sleepFade = 0, _sleeping = false, _sleeper = null;
 
 const _sleepEl = document.createElement('div');
 _sleepEl.id = 'sleepOverlay';
@@ -199,20 +216,68 @@ document.body.appendChild(_sleepEl);
 
 const isNightForSleep = () => worldTime >= BED_NIGHT_FROM;
 
-// right-click a bed: fade out, skip to dawn, set the respawn point
+/* ---- lying down (0.7294) ----
+   Getting into bed is a STATE now, not an instant fade to dawn. The player is laid out on the
+   mattress, their body visible to everyone else doing the same, and they stay there until they
+   sneak back out. A bed holds ONE person: `occupant` is why the second player to try a bed is
+   turned away rather than sharing it, which is what makes "everyone needs their own bed" a real
+   requirement rather than a suggestion.
+
+   The night only passes once EVERY spawned player is in a bed — see updateBed. */
+const bedOccupant = (rec) => (rec && rec.occupant && rec.occupant.sleepingAt) ? rec.occupant : null;
+const isSleeping = (p) => !!(p && p.sleepingAt);
+
+// where on the bed a sleeper's body goes: the midpoint of the two cells, up on the mattress
+function bedRestPose(foot) {
+  const d = BED_DIR[foot.facing & 3];
+  return { x: foot.x + 0.5 + d[0] * 0.5, y: foot.y + BED_H, z: foot.z + 0.5 + d[1] * 0.5,
+           yaw: Math.atan2(d[0], d[1]) };          // head end is the direction they face
+}
+
+// right-click a bed: lie down on it and make it your respawn point
 function trySleep(x, y, z) {
   const foot = bedFootOf(x, y, z);
   if (!foot) return false;
-  if (_sleeping) return true;
+  if (isSleeping(player)) return true;
   if (!isNightForSleep()) { toast('you can only sleep at night'); return true; }
   const dx = player.pos.x - (x + 0.5), dz = player.pos.z - (z + 0.5);
   if (dx * dx + dz * dz > 25) { toast('bed is too far away'); return true; }
-  _sleeping = true;
-  _sleepFade = 0;
-  _sleepEl.style.display = 'block';
+  const rec = BEDS.get(bedKey(foot.x, foot.y, foot.z));
+  const taken = bedOccupant(rec);
+  if (taken && taken !== player) { toast(`${playerLabel(taken)} is already in this bed`); return true; }
+
+  const pose = bedRestPose(foot);
+  player.sleepingAt = { x: foot.x, y: foot.y, z: foot.z, facing: foot.facing, key: bedKey(foot.x, foot.y, foot.z) };
+  player.pos.set(pose.x, pose.y, pose.z);
+  player.yaw = pose.yaw;
+  player.pitch = -0.55;                            // looking up at the ceiling
+  player.vy = 0; player.flying = false; player.fast = false; player.sneaking = false;
+  if (rec) rec.occupant = player;
   // sleeping here makes this your respawn point
   player.spawnPos = new THREE.Vector3(foot.x + 0.5, y, foot.z + 0.5);
+  const waiting = PLAYERS.filter(p => p.spawned && !isSleeping(p)).length;
+  if (waiting) toast(waiting === 1 ? 'waiting for 1 more player to sleep'
+                                   : `waiting for ${waiting} more players to sleep`);
+  else toast('sneak to get up');
   return true;
+}
+
+/* Get up. Steps off to the side of the bed so nobody wakes inside the frame, and releases the
+   bed for whoever wants it next. */
+function leaveBed(p = player) {
+  const s = p.sleepingAt;
+  if (!s) return;
+  p.sleepingAt = null;
+  const rec = BEDS.get(s.key);
+  if (rec && rec.occupant === p) rec.occupant = null;
+  // sidestep perpendicular to the bed, falling back to the foot cell if that is walled in
+  const d = BED_DIR[s.facing & 3];
+  const side = [-d[1], d[0]];
+  const tx = s.x + 0.5 + side[0], tz = s.z + 0.5 + side[1];
+  if (typeof isSolid === 'function' && !isSolid(Math.floor(tx), s.y, Math.floor(tz)))
+    p.pos.set(tx, s.y, tz);
+  else p.pos.set(s.x + 0.5, s.y + 1, s.z + 0.5);
+  p.vy = 0;
 }
 
 // fade to black, jump the clock, fade back in
@@ -234,6 +299,18 @@ function updateBed(dt) {
     }
   }
 
+  /* Somebody has to still be in bed for the sleepers' beds to hold them: a bed broken out from
+     under a sleeper leaves them lying in mid-air otherwise. */
+  for (const p of PLAYERS) {
+    const s = p.sleepingAt;
+    if (s && (getBlock(s.x, s.y, s.z) & 255) !== B.BED) leaveBed(p);
+  }
+
+  /* The night passes only when EVERY spawned player is in a bed — which is the whole reason a bed
+     can only hold one person. Solo that is the single sleeper and nothing has changed. */
+  const live = PLAYERS.filter(p => p.spawned);
+  _sleeping = live.length > 0 && live.every(isSleeping) && isNightForSleep();
+
   if (!_sleeping) {
     if (_sleepFade > 0) {                       // fading back in after waking
       _sleepFade = Math.max(0, _sleepFade - dt * 1.6);
@@ -244,11 +321,14 @@ function updateBed(dt) {
   }
   _sleepFade = Math.min(1, _sleepFade + dt * 2.2);
   _sleepEl.style.opacity = _sleepFade.toFixed(3);
-  if (_sleepFade >= 1) {                        // fully black: advance to dawn and wake up
+  if (_sleepFade >= 1) {                        // fully black: advance to dawn and get everyone up
     worldDay++;
     worldTime = BED_WAKE_TIME;
-    player.food = Math.max(player.food, 6);     // a night's rest staves off starving
-    if (player.hp > 0) player.hp = Math.min(MAX_HP, player.hp + 4);
+    for (const p of live) {
+      p.food = Math.max(p.food, 6);             // a night's rest staves off starving
+      if (p.hp > 0) p.hp = Math.min(MAX_HP, p.hp + 4);
+      leaveBed(p);
+    }
     _sleeping = false;
     toast('Good morning');
   }

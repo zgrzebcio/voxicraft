@@ -110,9 +110,16 @@ function playSound(key, opts) {
   if (!pool) return;
   const o = opts || {};
   let vol = (o.gain != null ? o.gain : 1) * SOUND_MASTER;
-  if (o.pos && typeof player !== 'undefined') {
-    const dx = o.pos.x - player.pos.x, dy = o.pos.y - player.pos.y, dz = o.pos.z - player.pos.z;
-    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  /* One pair of speakers, up to four listeners: attenuate from whichever player is CLOSEST, so
+     a sound next to player three is still heard even while player one is a mile away (0.72). */
+  if (o.pos && typeof PLAYERS !== 'undefined') {
+    let d = Infinity;
+    for (const p of PLAYERS) {
+      if (!p.spawned) continue;
+      const dx = o.pos.x - p.pos.x, dy = o.pos.y - p.pos.y, dz = o.pos.z - p.pos.z;
+      const dd = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dd < d) d = dd;
+    }
     if (d > 24) return;                              // out of earshot — skip the decode entirely
     vol *= 1 - d / 24;
   }
@@ -145,16 +152,22 @@ function playBlockSound(id, kind, x, y, z) {
    the block actually under the feet every STEP_DIST metres. Distance-based (not time-based) so
    sneaking and sprinting space out correctly without extra state. */
 const STEP_DIST = 2.1;
-let _stepAccum = 0, _stepLastX = 0, _stepLastZ = 0;
 
+/* The accumulator lives ON THE PLAYER (0.729), the same way entities carry their own.
+
+   It used to be three module-level variables, but updateFootsteps runs once per player per frame —
+   so with split screen `_stepLastX/Z` was overwritten by whoever ticked last, and the "distance
+   walked" each call measured was really the distance BETWEEN two players. Standing perfectly still
+   a couple of blocks apart therefore fired footsteps continuously, and the further apart they
+   stood the faster they ran. */
 function updateFootsteps(grounded) {
   const p = player.pos;
-  const dx = p.x - _stepLastX, dz = p.z - _stepLastZ;
-  _stepLastX = p.x; _stepLastZ = p.z;
-  if (!grounded || player.flying) { _stepAccum = 0; return; }
-  _stepAccum += Math.sqrt(dx * dx + dz * dz);
-  if (_stepAccum < STEP_DIST) return;
-  _stepAccum = 0;
+  const dx = p.x - (player._stepLastX ?? p.x), dz = p.z - (player._stepLastZ ?? p.z);
+  player._stepLastX = p.x; player._stepLastZ = p.z;
+  if (!grounded || player.flying) { player._stepAccum = 0; return; }
+  player._stepAccum = (player._stepAccum || 0) + Math.sqrt(dx * dx + dz * dz);
+  if (player._stepAccum < STEP_DIST) return;
+  player._stepAccum = 0;
   // the block whose top the feet rest on — one cell below, since p.y sits at that surface
   const bx = Math.floor(p.x), bz = Math.floor(p.z);
   let id = getBlock(bx, Math.floor(p.y - 0.06), bz) & 255;
@@ -172,7 +185,8 @@ const ENT_STEP_RANGE = 16;
 
 function entityStepSound(e, dt, spd) {
   if (!e.onGround || spd < 0.6) { e._stepAccum = 0; return; }
-  const dx = e.x - player.pos.x, dy = e.y - player.pos.y, dz = e.z - player.pos.z;
+  const lp = nearestPlayerTo(e.x, e.z);                    // audible near ANY player (0.72)
+  const dx = e.x - lp.pos.x, dy = e.y - lp.pos.y, dz = e.z - lp.pos.z;
   if (dx * dx + dy * dy + dz * dz > ENT_STEP_RANGE * ENT_STEP_RANGE) { e._stepAccum = 0; return; }
   e._stepAccum = (e._stepAccum || 0) + spd * dt;
   if (e._stepAccum < ENT_STEP_DIST) return;

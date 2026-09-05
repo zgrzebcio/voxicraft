@@ -3,11 +3,25 @@
   #game { display:block; width:100%; height:100%; }
   .mono { font-family:Consolas, 'Courier New', monospace; }
 
+  /* ---- split screen (0.72) ----
+     One pane per player, parked over that player's viewport. `.hudScale` carries a transform,
+     which makes it the containing block for its `position:fixed` children — so every HUD rule
+     below keeps its existing offsets and simply resolves against the pane instead of the window.
+     Nothing else in this file had to change. */
+  .hudPane { position:fixed; overflow:hidden; pointer-events:none; z-index:5; }
+  .hudScale { position:absolute; left:0; top:0; transform-origin:0 0; }
+  .paneTag { position:absolute; top:4px; right:8px; color:#cfe0ff; font-size:11px; opacity:.55;
+             font-family:Consolas, 'Courier New', monospace; letter-spacing:1px;
+             text-shadow:0 1px 2px rgba(0,0,0,.9); display:none; }
+  body.split .paneTag { display:block; }
+  /* a hairline between viewports so the seam reads as deliberate */
+  body.split .hudPane { box-shadow:inset 0 0 0 1px rgba(255,255,255,.10); }
+
   /* ---- HUD ---- */
   #hud { position:fixed; top:10px; left:10px; color:#fff; font-size:13px; line-height:1.45;
          text-shadow:0 1px 2px rgba(0,0,0,.9); pointer-events:none; z-index:5; }
   /* build version — bump on every change (see FutureRoadmap.txt for the 1.0 plan) */
-  #version { position:fixed; top:8px; right:10px; color:#cfd8e0; font-size:11px;
+  #version { position:fixed; top:18px; right:10px; color:#cfd8e0; font-size:11px;
              font-family:Consolas, 'Courier New', monospace; letter-spacing:0.5px;
              text-shadow:0 1px 2px rgba(0,0,0,.9); pointer-events:none; z-index:11; opacity:0.85; }
   #crosshair { position:fixed; left:50%; top:50%; width:18px; height:18px; margin:-9px 0 0 -9px;
@@ -37,7 +51,7 @@
   #overlay.veiled > .panel { transform:translateY(18px) scale(.97); opacity:0; }
   #vitals { position:fixed; left:50%; bottom:78px; transform:translateX(-50%); z-index:5;
             pointer-events:none; image-rendering:auto; display:none;
-            width:470px; height:40px; }
+            width:535px; height:40px; }
   /* ---- experience bar (0.7) ----
      Minecraft's slot — a strip above the hotbar with the level number centred on it — but a
      plain smooth bar instead of the segmented sprite. Light-green fill on a dark track. */
@@ -74,10 +88,18 @@
   .slot img.i3d { image-rendering:auto; }   /* 3D icons are supersampled — smooth downscale */
 
   /* ---- inventory wrapper (centers both panels side-by-side) ---- */
+  /* gap 12 -> 6: the crafting and equipment wings sit right against the grid, so the whole thing
+     reads as one panel and takes less width in a split-screen viewport */
+  /* pointer-events:auto is REQUIRED (0.7293), not cosmetic: since 0.728 the panel lives inside a
+     .hudPane, and that pane is pointer-events:none so the HUD never eats clicks meant for the
+     world. Slot drag survived because it is coordinate-based (slotAtPoint on document events), but
+     the crafting output is a real <button> click — and elementFromPoint, which the gamepad path
+     uses, skips pointer-events:none subtrees entirely. So crafting was dead on both devices. */
   #invWrap { position:fixed; left:50%; bottom:220px; transform:translateX(-50%); z-index:8;
-             display:none; flex-direction:row; gap:12px; align-items:flex-end; }
+             display:none; flex-direction:row; gap:6px; align-items:flex-end;
+             pointer-events:auto; }
 
-  /* ---- inventory (3x9, slot 0 = bottom-left) ---- */
+  /* ---- inventory (4x8 since 0.7292, slot 0 = bottom-left) ---- */
   #inv { background:rgba(16,18,30,.94); border:1px solid rgba(255,255,255,.15); border-radius:10px;
          padding:12px; display:flex; flex-direction:column; gap:8px; }
   #inv .title { color:#9ab; font-size:12px; text-align:center; }
@@ -329,6 +351,45 @@
   #overlay .wrow .wdel { background:#7d3232; flex:0 0 auto; padding:6px 11px; }
   #overlay .wrow .wdel:hover { background:#944040; }
   #overlay .wempty { color:#789; font-size:13px; padding:10px 0 14px; }
+
+  /* ---- profile list + split-screen roster (0.721) ----
+     Same visual language as the world rows, one size down: these are short lists of people, not
+     save files with screenshots. */
+  #overlay .splitTitle { color:#9fd58a; font-size:15px; font-weight:600; letter-spacing:.5px;
+                        margin:0 0 8px; text-align:center; }
+  #overlay .splitList { max-height:230px; overflow-y:auto; margin-bottom:12px;
+                       display:flex; flex-direction:column; gap:6px; }
+  #overlay .srow { display:flex; align-items:center; justify-content:space-between; gap:10px;
+                  background:rgba(12,16,26,.72); border:1px solid #2c3446; border-radius:7px;
+                  padding:8px 10px 8px 13px; }
+  #overlay .srow.sel { border-color:#4f7a4a; background:rgba(18,30,20,.72); }
+  #overlay .srow .sname { display:flex; flex-direction:column; gap:1px; min-width:0;
+                         color:#dfe; font-size:15px; text-align:left; }
+  #overlay .srow .ssub { font-size:12px; color:#8a9bb0; }
+  #overlay .srow .sbtns { display:flex; gap:6px; align-items:center; flex-shrink:0; }
+  #overlay .srow .sbtns button { padding:5px 14px; font-size:13.5px; }
+  #overlay .srow .wdel { background:#7d3232; padding:5px 10px; }
+  #overlay .srow .wdel:hover { background:#944040; }
+  #overlay .splitNote { color:#789; font-size:12.5px; margin:-4px 0 14px; }
+  #overlay #splitProfileSel, #overlay #profileNameIn, #overlay #splitNameIn {
+    background:#0b0d16; color:#dfe; border:1px solid #445; border-radius:6px; padding:8px 10px; }
+  #overlay #splitPanel { border-bottom:1px solid #2c3446; margin-bottom:14px; padding-bottom:4px; }
+
+  /* ---- "waiting for input" (0.722) ----
+     Sits above the pause menu (z 21) because it is opened FROM it, and swallows nothing: the
+     capture itself is what stops the pressed button reaching the game. */
+  #inputWait { position:fixed; inset:0; z-index:21; display:none;
+              align-items:center; justify-content:center; background:rgba(4,6,12,.78);
+              backdrop-filter:blur(3px); }
+  #inputWait .iwbox { background:rgba(12,16,26,.96); border:1px solid #3a4458;
+                     border-radius:10px; padding:22px 30px; text-align:center; max-width:460px; }
+  #inputWaitText { color:#9fd58a; font-size:20px; font-weight:600; letter-spacing:.4px; }
+  #inputWaitHint { color:#9ab; font-size:13px; margin-top:8px; line-height:1.5; }
+  #inputWait .iwdots { display:flex; justify-content:center; gap:9px; margin-top:16px; }
+  #inputWait .iwdots span { width:8px; height:8px; background:#4a7060; border-radius:50%;
+                           animation:wlb 1.2s infinite ease-in-out; }
+  #inputWait .iwdots span:nth-child(2) { animation-delay:.2s; }
+  #inputWait .iwdots span:nth-child(3) { animation-delay:.4s; }
 
   /* ---- world loading screen (below overlay at z:10, shown during chunk generation) ---- */
   #worldLoading { position:fixed; inset:0; background:rgba(4,6,12,.92); backdrop-filter:blur(4px);

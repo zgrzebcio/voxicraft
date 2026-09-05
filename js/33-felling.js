@@ -124,8 +124,9 @@ function litterLayerTop(val) {
 /* Walk cells around the player and give any un-tracked leaf litter its own countdown. Cheap:
    a couple of dozen point samples every few seconds, the same sampling trick grass spread uses. */
 function sweepLitterRot() {
-  if (typeof player === 'undefined' || !player.spawned || menuScene) return;
-  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  const sp = menuScene ? null : sweepOriginPlayer();   // one player per pass — see sweepOriginPlayer
+  if (!sp) return;
+  const px = Math.floor(sp.pos.x), py = Math.floor(sp.pos.y), pz = Math.floor(sp.pos.z);
   for (let i = 0; i < LITTER_SWEEP_TRIES; i++) {
     const x = px + (Math.random() * 48 | 0) - 24;
     const z = pz + (Math.random() * 48 | 0) - 24;
@@ -207,8 +208,9 @@ function snowLayerTop(val) {
   return -1;
 }
 function sweepSnowMelt() {
-  if (typeof player === 'undefined' || !player.spawned || menuScene) return;
-  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  const sp = menuScene ? null : sweepOriginPlayer();   // one player per pass — see sweepOriginPlayer
+  if (!sp) return;
+  const px = Math.floor(sp.pos.x), py = Math.floor(sp.pos.y), pz = Math.floor(sp.pos.z);
   for (let i = 0; i < MELT_SWEEP_TRIES; i++) {
     const x = px + (Math.random() * 48 | 0) - 24;
     const z = pz + (Math.random() * 48 | 0) - 24;
@@ -263,8 +265,9 @@ function berryStageAt(val) {
 }
 function queueBerryGrow(x, y, z) { berryGrow.set(x + ',' + y + ',' + z, _berryLife()); }
 function sweepBerryGrow() {
-  if (typeof player === 'undefined' || !player.spawned || menuScene) return;
-  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  const sp = menuScene ? null : sweepOriginPlayer();   // one player per pass — see sweepOriginPlayer
+  if (!sp) return;
+  const px = Math.floor(sp.pos.x), py = Math.floor(sp.pos.y), pz = Math.floor(sp.pos.z);
   for (let i = 0; i < BERRY_SWEEP_TRIES; i++) {
     const x = px + (Math.random() * 48 | 0) - 24;
     const z = pz + (Math.random() * 48 | 0) - 24;

@@ -10,11 +10,18 @@ distInput.value = viewDist;
 simInput.value = simRadius;
 sensInput.value = Math.round(sens * 100);
 shadowSel.value = String(shadowR);
+splitDirSel.value = splitDir;
 applyShadowDist();
 player.canFly = modeSel.value !== 'survival';
 if (!player.canFly) player.flying = false;
+/* Split screen must exist before anything reads the HUD: initSplitScreen moves the whole HUD into
+   player one's pane and takes the first snapshot of the per-player globals. */
+initSplitScreen();
+setPlayerName(0, activeProfileName());      // player one is whoever's profile is selected
 startMenuBackdrop();                        // title screen: rotating "voxicraft"-seed panorama
-refreshMenu('home');
+/* First run has no profiles at all, and a nameless player cannot own a save — so the profile
+   screen is the whole menu until one exists. refreshMenu enforces it; this just opens there. */
+refreshMenu(needsFirstProfile() ? 'profiles' : 'home');
 /* Failsafe: the veil is normally lifted from the frame loop once the panorama is built, but the
    frame loop only starts after the atlas resolves. If that ever fails, an unreachable menu is the
    worst possible outcome — so show it regardless after eight seconds. */
@@ -50,6 +57,11 @@ buildAtlas().then((tex) => {
   tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   applyViewDist();
   requestAnimationFrame(frame);                   // start drawing the panorama immediately
+  /* ...then pull the in-world art in behind it (0.724). Nothing on the title screen needs any of
+     it, so this costs the menu nothing, and by the time anyone has picked a world it is normally
+     already in hand — which is the difference between joining and staring at invisible items for
+     five seconds. ensureGameArt is idempotent; world entry awaits the same promise. */
+  ensureGameArt();
 });
 
 /* ---- deferred game assets (0.7146) ----
@@ -67,18 +79,26 @@ let _gameAssetsStarted = false;
 function ensureGameAssets() {
   if (_gameAssetsStarted) return;
   _gameAssetsStarted = true;
-  ensureItemAssets();                             // item sprites + armor sheets (drops, previews)
   ensureStructuresLoaded();                       // prefab manifest + files, fetched in parallel
   ensureVitalsSprites();                          // hearts / food / air / armor bar sprites
-  buildHotbar();
-  let i = 0;
-  const warmIcons = () => {
-    const t0 = performance.now();
-    while (i < PLACEABLE.length && performance.now() - t0 < 3) renderBlockIcon(PLACEABLE[i++]);
-    if (i < PLACEABLE.length) requestAnimationFrame(warmIcons);
-    else buildInventory();                        // icons are cached by now, so this is cheap
-  };
-  requestAnimationFrame(warmIcons);
+  /* Icons are cached for the life of the session the moment they are first drawn, and the chest,
+     bed and door draw themselves from IMAGES — so warming them before their art has arrived bakes
+     a black square in permanently. WAIT for the art (0.724); the loading screen is up anyway. */
+  ensureGameArt().then(() => {
+    /* Rebuild for EVERY player, not just whoever is installed: loadWorld already drew each seat's
+       hotbar while this art was still in flight, so those slots are holding the empty string
+       renderBlockIcon hands back for a not-yet-drawable icon. */
+    forEachPlayerSlot(() => buildHotbar());
+    let i = 0;
+    const warmIcons = () => {
+      const t0 = performance.now();
+      while (i < PLACEABLE.length && performance.now() - t0 < 3) renderBlockIcon(PLACEABLE[i++]);
+      if (i < PLACEABLE.length) { requestAnimationFrame(warmIcons); return; }
+      buildInventory();                           // icons are cached by now, so this is cheap
+      forEachPlayerSlot(() => buildHotbar());     // ...and the hotbars once more, now fully warm
+    };
+    requestAnimationFrame(warmIcons);
+  });
 }
 
 // small console/debug handle (harmless in normal play)
@@ -87,7 +107,26 @@ window.__vc = {
   look(yaw, pitch) { player.yaw = yaw; player.pitch = pitch; },
   block: getBlock,
   set: setBlock,
-  player,
+  get player() { return player; },            // the ACTIVE player — split screen swaps this
+  players: PLAYERS,
+  join: () => setPlayerCount(PSTATE.length + 1),
+  leave: () => setPlayerCount(PSTATE.length - 1),
+  /* Controller diagnostic: exactly what this browser reports, next to what the game made of it.
+     If a pad is physically connected but `raw` is empty, the browser has not been told about it
+     yet — press a button on it and run this again. */
+  pads() {
+    let raw = null;
+    try { raw = navigator.getGamepads ? navigator.getGamepads() : null; } catch (e) { raw = 'threw: ' + e; }
+    return {
+      api: typeof navigator.getGamepads,
+      rawLength: raw && raw.length,
+      raw: raw && Array.from(raw, g => g && { index: g.index, id: g.id, connected: g.connected,
+                                              buttons: g.buttons && g.buttons.length }),
+      seen: connectedPads().map(g => ({ index: g.index, id: g.id })),
+      binds: INPUT_BIND.slice(0, PSTATE.length),
+      routed: PSTATE.map((s, i) => ({ seat: i, who: s.player.name, device: inputLabelFor(i) })),
+    };
+  },
   biome: (x, z) => mainGen.biomeAt(x, z),
   height: (x, z) => mainGen.heightAt(x, z),
   lightAt: (x, y, z) => getLightWorld(x, y, z),

@@ -4,8 +4,8 @@
 /* ================================================================================================
    HUD — fps, coords, selected block, hotbar, radial picker.
    ================================================================================================ */
-const hudEl = document.getElementById('hud');
-const blocknameEl = document.getElementById('blockname');
+var hudEl = document.getElementById('hud');
+var blocknameEl = document.getElementById('blockname');
 const toastEl = document.getElementById('toast');
 let toastTimer = 0;
 function toast(msg) {
@@ -20,7 +20,24 @@ function toggleFullscreen() {
   else document.documentElement.requestFullscreen().catch(() =>
     toast('fullscreen blocked — press F1 (gamepad presses don’t count as a user gesture)'));
 }
-const hotbarEl = document.getElementById('hotbar');
+
+/* ---- debug read-out (0.723) ----
+   F3, or Back/Share on a pad, hides the corner text. It is PER SEAT: in split screen one player
+   wanting a clean view should not strip the coordinates off everyone else's quarter. The choice is
+   remembered per seat number, which is the useful default — whoever sits down there next gets the
+   same view they left. */
+let hudTextHidden = (() => {
+  try { const a = JSON.parse(localStorage.getItem('vc_hudoff')); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+})();
+function toggleDebugHud(slot = (typeof activePlayerSlot === 'function' ? activePlayerSlot() : 0)) {
+  hudTextHidden[slot] = !hudTextHidden[slot];
+  localStorage.setItem('vc_hudoff', JSON.stringify(hudTextHidden));
+  const el = PSTATE[slot] && PSTATE[slot].g.hudEl;
+  if (el) { el.style.display = hudTextHidden[slot] ? 'none' : ''; if (!hudTextHidden[slot]) hudT = 1e9; }
+}
+const debugHudHidden = (slot) => !!hudTextHidden[slot];
+var hotbarEl = document.getElementById('hotbar');
 const radialEl = document.getElementById('radial');
 const radialCtx = radialEl.getContext('2d');
 
@@ -28,14 +45,14 @@ const radialCtx = radialEl.getContext('2d');
    Shown only while a bush pickup is actually available, and labelled with the key on whichever
    device you last touched — swap from keyboard to pad mid-game and the glyph follows on the next
    frame. `lastInputDevice` is maintained in 17-input.js. */
-const interactEl = document.getElementById('interact');
+var interactEl = document.getElementById('interact');
 // North face button: Y on an Xbox pad, Triangle on a PlayStation one
 function padNorthLabel() {
   const g = typeof getPad === 'function' ? getPad() : null;
   const id = (g && g.id || '').toLowerCase();
   return /dualshock|dualsense|playstation|\bps[45]\b/.test(id) ? '△' : 'Y';
 }
-let _interactShown = '';
+var _interactShown = '';
 function updateInteractPrompt() {
   const t = typeof findBushPickup === 'function' ? findBushPickup() : null;
   if (!t) {
@@ -49,7 +66,7 @@ function updateInteractPrompt() {
 }
 
 // block name pops in above the hotbar on selection, then fades out
-let blocknameTimer = 0;
+var blocknameTimer = 0;
 function flashBlockName() {
   const id = slotId(HOTBAR[hotbarSel]);
   if (id == null) { blocknameEl.style.opacity = '0'; return; }

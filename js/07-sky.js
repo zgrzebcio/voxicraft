@@ -104,6 +104,14 @@ const DAY_LIGHT = new THREE.Color(1, 1, 1), NIGHT_LIGHT = new THREE.Color(0.55, 
 const smoothstepJS = (a, b, t) => { t = Math.min(1, Math.max(0, (t - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 const _sf = new THREE.Vector3(), _sd = new THREE.Vector3();
+const _shadowMid = new THREE.Vector3();
+function _shadowCenter() {
+  if (typeof PLAYERS === 'undefined' || PLAYERS.length < 2) return player.pos;
+  _shadowMid.set(0, 0, 0);
+  let n = 0;
+  for (const p of PLAYERS) if (p.spawned) { _shadowMid.add(p.pos); n++; }
+  return n ? _shadowMid.multiplyScalar(1 / n) : player.pos;
+}
 function renderShadowMaps(dir, key) {
   _sd.copy(dir);                            // defensive copy: callers pass shared temps
   // establish the light's basis independent of the player (rotation only depends on dir)
@@ -117,7 +125,11 @@ function renderShadowMaps(dir, key) {
 
   // snap the window centre to whole texels IN THE LIGHT'S FIXED BASIS — the world-to-map
   // alignment then never shifts sub-texel as the player moves, so edges don't shimmer
-  const p = player.pos;
+  /* One shadow map serves every split-screen viewport, so it is centred on the MIDPOINT of the
+     players rather than on any one of them (0.72). Solo that is exactly the old behaviour; with
+     players spread further apart than `shadowR` the outermost ones simply fall outside the map,
+     which is the same graceful degradation distance already causes in single player. */
+  const p = _shadowCenter();
   const texel = (Math.max(shadowR, 1) * 2) / SHADOW_SIZE;
   const tx = Math.round(p.dot(_sr) / texel) * texel;
   const ty = Math.round(p.dot(_su) / texel) * texel;
@@ -146,18 +158,30 @@ function renderShadowMaps(dir, key) {
 }
 
 const _sunW = new THREE.Vector3();
+/* The sky dome is drawn around whichever eye is rendering, so in split screen it has to be
+   re-seated for every viewport — otherwise players standing far apart would see the sun hanging
+   off to one side. Rotation and brightness are world state and stay in updateDayNight. */
+function alignSkyTo(cam) {
+  sky.position.copy(cam.position);
+  sky.scale.setScalar(cam.far * 0.008);                 // children sit at radius 100
+  sunMesh.lookAt(cam.position);
+  moonMesh.lookAt(cam.position);
+}
+/* Clean per-frame lighting values, captured before any viewport applies its own water or lava
+   murk on top. Each render pass restores from these rather than from whatever the previous
+   viewport left in the uniforms. */
+const _skyFogColor = new THREE.Color();
+let _skyAmbient = 0, _skyDirect = 0;
+
 function updateDayNight(dt) {
   const _prevTime = worldTime;
   worldTime = (worldTime + dt / DAY_LEN) % 1;
   if (worldTime < _prevTime) worldDay++;
-  sky.position.copy(camera.position);
   sky.rotation.set(0.12, 0, worldTime * Math.PI * 2);   // tilt south + spin east->west
-  sky.scale.setScalar(camera.far * 0.008);              // children sit at radius 100
+  alignSkyTo(camera);
   sunMesh.getWorldPosition(_sunW);
   const sunDir = _sunW.sub(camera.position).normalize();
   const sunElev = sunDir.y, moonElev = -sunElev;
-  sunMesh.lookAt(camera.position);
-  moonMesh.lookAt(camera.position);
 
   const dayF  = smoothstepJS(-0.06, 0.16, sunElev);
   const duskF = Math.exp(-Math.pow(sunElev / 0.12, 2));
@@ -190,5 +214,9 @@ function updateDayNight(dt) {
   } else {
     sharedUniforms.uShadowOn.value = 0;
   }
+  // snapshot the clean values for the per-viewport fog pass
+  _skyFogColor.copy(sharedUniforms.fogColor.value);
+  _skyAmbient = sharedUniforms.uAmbient.value;
+  _skyDirect  = sharedUniforms.uDirect.value;
 }
 

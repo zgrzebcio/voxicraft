@@ -100,6 +100,25 @@ function rollLootInto(slots, table) {
     slots[at] = mkSlot(id, n);
     placed++;
   }
+  /* Never hand back an empty chest (0.7291). Every roll testing its own `chance` means a table
+     with 3-6 rolls at ~35% each lands nothing surprisingly often, and walking a dungeon to open a
+     chest with nothing in it reads as a bug even when the dice were honest. So if the rolls came
+     up empty, take one entry unconditionally — chance ignored, since this IS the failure case. */
+  if (!placed) {
+    const free = [];
+    for (let i = 0; i < slots.length; i++) if (!slots[i]) free.push(i);
+    // walk from a random start so the guaranteed item is not always the first valid entry
+    const off = Math.floor(Math.random() * table.entries.length);
+    for (let j = 0; j < table.entries.length && free.length; j++) {
+      const e = table.entries[(off + j) % table.entries.length];
+      const id = e && resolveLootId(e.id);
+      if (id == null) continue;
+      const at = free[Math.floor(Math.random() * free.length)];
+      slots[at] = mkSlot(id, Math.max(1, Math.min(stackSize(id), _lootRange(e.min ?? 1, e.max ?? 1))));
+      placed++;
+      break;
+    }
+  }
   return placed;
 }
 
@@ -1165,7 +1184,7 @@ function structBlockBroken(x, y, z) {
   if (_outlineFor === lootKey(x, y, z)) hideStructOutline();
 }
 
-let activeStructBlock = null;       // "x,y,z" of the block whose panel is open
+var activeStructBlock = null;       // "x,y,z" of the block whose panel is open
 
 function openStructureBlock(x, y, z) {
   activeStructBlock = lootKey(x, y, z);
@@ -1177,7 +1196,7 @@ function openStructureBlock(x, y, z) {
 const _clampSpan = (v, d) => Math.max(1, Math.min(STRUCT_MAX_SPAN, parseInt(v, 10) || d));
 
 function buildStructPanel() {
-  const panel = document.getElementById('structPanel');
+  const panel = invPanel('structPanel');
   if (!panel) return;
   if (!activeStructBlock) { panel.style.display = 'none'; return; }
   const p = activeStructBlock.split(',').map(Number);

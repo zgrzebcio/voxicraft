@@ -9,7 +9,7 @@
    burning texture (variant V.FURNACE_ON) whenever it is actively smelting. */
 
 const FURNACES = new Map();                 // "x,y,z" -> {slots, burn, burnMax, progress, lit}
-let activeFurnace = null;                   // key of the furnace whose GUI is open (null = none)
+var activeFurnace = null;                   // key of the furnace whose GUI is open (null = none)
 
 const SMELT = { [B.SAND]: B.GLASS, [B.COBBLE]: B.STONE,       // input id -> output id
                 [ITEM.RAW_IRON]: ITEM.IRON_INGOT, [ITEM.RAW_GOLD]: ITEM.GOLD_INGOT,
@@ -94,7 +94,7 @@ function updateFurnaces(dt) {
 //          [flame]
 //          [fuel]
 function buildFurnacePanel() {
-  const panel = document.getElementById('furnacePanel');
+  const panel = invPanel('furnacePanel');
   if (!panel) return;
   const f = activeFurnace && FURNACES.get(activeFurnace);
   if (!f) { panel.style.display = 'none'; return; }
@@ -119,7 +119,7 @@ function buildFurnacePanel() {
 // refresh only the three furnace slots in place (does not disturb the drag ghost)
 function _refreshFurnaceSlots(k) {
   if (!invOpen || activeFurnace !== k) return;
-  const panel = document.getElementById('furnacePanel');
+  const panel = invPanel('furnacePanel');
   const f = FURNACES.get(k);
   if (!panel || !f) return;
   for (const el of panel.querySelectorAll('.slot'))
@@ -129,7 +129,7 @@ function _refreshFurnaceSlots(k) {
 // per-frame: fuel bar drains top-to-bottom, progress bar (rotated 90°) fills left-to-right
 function _updateFurnaceBars() {
   if (!invOpen || !activeFurnace) return;
-  const panel = document.getElementById('furnacePanel');
+  const panel = invPanel('furnacePanel');
   const f = FURNACES.get(activeFurnace);
   if (!panel || !f || panel.style.display === 'none') return;
   const fuelFill = panel.querySelector('.ffuel .ffill');

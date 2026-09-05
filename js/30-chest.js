@@ -14,8 +14,8 @@
 const CHEST_COLS = 7, CHEST_ROWS = 5;                 // wide and short so it fits without scrolling
 const CHEST_SLOTS = CHEST_COLS * CHEST_ROWS;          // 35 per cell; a double stacks to 10 x 7
 const CHESTS = new Map();                             // "x,y,z" -> record
-let activeChest = null;                               // key of the primary cell whose GUI is open
-let activeChest2 = null;                              // key of its partner, or null
+var activeChest = null;                               // key of the primary cell whose GUI is open
+var activeChest2 = null;                              // key of its partner, or null
 
 const chestKey = (x, y, z) => x + ',' + y + ',' + z;
 const mkChest = () => ({ slots: new Array(CHEST_SLOTS).fill(null) });
@@ -25,15 +25,22 @@ const mkChest = () => ({ slots: new Array(CHEST_SLOTS).fill(null) });
 const CHEST_LID_H = 5 / 16, CHEST_BASE_H = 10 / 16;
 const CHEST_INSET = 1 / 16;                           // chest is 14/16 wide, centred in the cell
 
+/* Cached per name, but NEVER cached blank (0.724): a texture built while IMAGES was still empty
+   used to keep its missing image for the rest of the session and render the chest solid black.
+   The image is re-checked on every call, so a late arrival heals the material in place. */
 const _chestTexCache = {};
 function chestTexture(name) {
-  if (_chestTexCache[name]) return _chestTexCache[name];
-  const t = new THREE.Texture(IMAGES[name]);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.needsUpdate = true;
-  _chestTexCache[name] = t;
+  let t = _chestTexCache[name];
+  if (!t) {
+    t = _chestTexCache[name] = new THREE.Texture(IMAGES[name]);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.needsUpdate = true;
+  } else if (!t.image && IMAGES[name]) {
+    t.image = IMAGES[name];
+    t.needsUpdate = true;
+  }
   return t;
 }
 const chestMat = (n) => new THREE.MeshBasicMaterial({ map: chestTexture(n) });
@@ -264,7 +271,7 @@ function updateChests(dt) {
 // stacks a second identical grid above it, giving the 14 x 5 the design calls for. The grid
 // lives in a fixed-height scroller so a double chest can't run off the screen.
 function buildChestPanel() {
-  const panel = document.getElementById('chestPanel');
+  const panel = invPanel('chestPanel');
   if (!panel) return;
   const a = activeChest && CHESTS.get(activeChest);
   if (!a) { panel.style.display = 'none'; return; }

@@ -35,14 +35,19 @@ const DOOR_ORI_R = [
 const DOOR_HINGE_R = 16;                       // variant bit 4
 const doorOri = (varb) => (varb & DOOR_HINGE_R) ? DOOR_ORI_R[varb & 3] : DOOR_ORI[varb & 3];
 
+// never cached blank — see the note on chestTexture in 30-chest.js (0.724)
 let _doorTex = null;
 function doorTexture() {
-  if (_doorTex) return _doorTex;
-  _doorTex = new THREE.Texture(IMAGES.oak_door);
-  _doorTex.colorSpace = THREE.SRGBColorSpace;
-  _doorTex.magFilter = THREE.NearestFilter;
-  _doorTex.minFilter = THREE.NearestFilter;
-  _doorTex.needsUpdate = true;
+  if (!_doorTex) {
+    _doorTex = new THREE.Texture(IMAGES.oak_door);
+    _doorTex.colorSpace = THREE.SRGBColorSpace;
+    _doorTex.magFilter = THREE.NearestFilter;
+    _doorTex.minFilter = THREE.NearestFilter;
+    _doorTex.needsUpdate = true;
+  } else if (!_doorTex.image && IMAGES.oak_door) {
+    _doorTex.image = IMAGES.oak_door;
+    _doorTex.needsUpdate = true;
+  }
   return _doorTex;
 }
 const DOOR_EDGE_RGB = 0x8a6b41;

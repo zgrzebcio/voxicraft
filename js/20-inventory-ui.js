@@ -1,9 +1,21 @@
 'use strict';
 /* voxiCraft — inventory grid UI, drag & drop, radial picker */
 
-const invEl = document.getElementById('inv');
-const invWrapEl = document.getElementById('invWrap');
-let invOpen = false;
+var invEl = document.getElementById('inv');
+var invWrapEl = document.getElementById('invWrap');
+var invOpen = false;
+
+/* Every seat owns a CLONE of #invWrap, parked in its own viewport (0.728), so
+   `document.getElementById` would hand player one's panel back to all four of them. Panel lookups
+   go through here instead: scoped to whichever player's inventory is currently installed. */
+const invPanel = (id) => (invWrapEl ? invWrapEl.querySelector('#' + id) : null);
+/* The pane's HUD scale. Slot geometry shrinks with the viewport, but the cursor lives in unscaled
+   screen pixels — so pad speed and the magnet radii have to shrink with it, or a quarter-screen
+   panel feels twice as twitchy as a full-screen one. 1 in single player. */
+const invScale = () => {
+  const st = (typeof PSTATE !== 'undefined') && PSTATE[activePlayerSlot()];
+  return (st && st.hudScale) || 1;
+};
 
 // Slot: null (empty) OR `{id, count}`. `slotInner` renders the 3D icon and a stack-count badge
 // when count > 1. Future non-block items would branch on an item table for their flat icon.
@@ -22,20 +34,27 @@ const slotDurBar = (s) => {
   const pct = s.dur / maxD;
   return `<span class="dur"><i style="width:${Math.max(4, pct * 100)}%;background:hsl(${(pct * 120) | 0},75%,45%)"></i></span>`;
 };
-const slotInner = (s) => s == null ? ''
-  : `<img class="i3d" src="${renderBlockIcon(s.id)}" alt="">${s.count > 1 ? `<span class="cnt">${s.count}</span>` : ''}${slotDurBar(s)}`;
+/* An empty src would resolve to the page itself and paint a broken-image glyph, so a slot whose
+   icon is not drawable yet renders with no <img> at all. renderBlockIcon only returns '' while a
+   block's mesh art is still loading, and the hotbar is rebuilt once it lands (see 23-boot.js). */
+const slotInner = (s) => {
+  if (s == null) return '';
+  const src = renderBlockIcon(s.id);
+  return (src ? `<img class="i3d" src="${src}" alt="">` : '') +
+         (s.count > 1 ? `<span class="cnt">${s.count}</span>` : '') + slotDurBar(s);
+};
 
 function buildInventory() {
   // hide both side panels first; the right one is rebuilt below
-  const cpEl = document.getElementById('craftPanel');
+  const cpEl = invPanel('craftPanel');
   if (cpEl) cpEl.style.display = 'none';
-  const fpEl = document.getElementById('furnacePanel');
+  const fpEl = invPanel('furnacePanel');
   if (fpEl) fpEl.style.display = 'none';
-  const chpEl = document.getElementById('chestPanel');
+  const chpEl = invPanel('chestPanel');
   if (chpEl) chpEl.style.display = 'none';
-  const eqpEl = document.getElementById('equipPanel');
+  const eqpEl = invPanel('equipPanel');
   if (eqpEl) eqpEl.style.display = 'none';
-  const stpEl = document.getElementById('structPanel');
+  const stpEl = invPanel('structPanel');
   if (stpEl) stpEl.style.display = 'none';
 
   invEl.innerHTML =
@@ -46,14 +65,14 @@ function buildInventory() {
     const grid = document.createElement('div');
     grid.className = 'grid';
     grid.dataset.region = region;
-    const rows = Math.ceil(arr.length / 9);       // row count follows the array, not a fixed 3
+    const rows = Math.ceil(arr.length / INV_COLS);   // row count follows the array, not a fixed 3
     for (let row = 0; row < rows; row++) {        // row 0 renders at the bottom
       const rowEl = document.createElement('div');
       rowEl.className = 'row';
-      for (let col = 0; col < 9; col++) {
+      for (let col = 0; col < INV_COLS; col++) {
         const div = document.createElement('div');
         div.className = 'slot';
-        div.innerHTML = slotInner(arr[row * 9 + col]);
+        div.innerHTML = slotInner(arr[row * INV_COLS + col]);
         rowEl.appendChild(div);
       }
       grid.appendChild(rowEl);
@@ -87,11 +106,11 @@ function buildInventory() {
 function refreshSlotsUI() { buildHotbar(); buildInventory(); saveAll(); }
 
 /* ---- virtual cursor + drag ghost (one shared cursor for mouse & gamepad) ---- */
-const vcurEl = document.createElement('div');  vcurEl.id = 'vcursor';  document.body.appendChild(vcurEl);
-const vdragEl = document.createElement('div'); vdragEl.id = 'vdrag';   document.body.appendChild(vdragEl);
-const ctipEl  = document.createElement('div'); ctipEl.id  = 'ctip';    document.body.appendChild(ctipEl);
-const invCursor = { x: innerWidth / 2, y: innerHeight / 2, mode: 'mouse' };
-let dragFrom = null, dragHeld = null;           // {region,i} being dragged + the block id in hand
+var vcurEl = document.createElement('div');  vcurEl.id = 'vcursor';  document.body.appendChild(vcurEl);
+var vdragEl = document.createElement('div'); vdragEl.id = 'vdrag';   document.body.appendChild(vdragEl);
+var ctipEl  = document.createElement('div'); ctipEl.id  = 'ctip';    document.body.appendChild(ctipEl);
+var invCursor = { x: innerWidth / 2, y: innerHeight / 2, mode: 'mouse' };
+var dragFrom = null, dragHeld = null;           // {region,i} being dragged + the block id in hand
 
 // slot geometry is coordinate-based (getBoundingClientRect), so the pointer-events:none hotbar
 // row is a valid drag target too — hotbar and grid behave as one connected slot space.
@@ -103,15 +122,15 @@ function slotDescriptors() {
     const region = g.dataset.region, gs = g.querySelectorAll('.slot');
     for (let i = 0; i < gs.length; i++) out.push({ region, i, el: gs[i] });   // DOM order == slot index
   }
-  const fp = document.getElementById('furnacePanel');
+  const fp = invPanel('furnacePanel');
   if (fp && fp.style.display !== 'none')
     for (const el of fp.querySelectorAll('.slot')) out.push({ region: 'fur', i: +el.dataset.fi, el });
-  const eqp = document.getElementById('equipPanel');
+  const eqp = invPanel('equipPanel');
   if (eqp && eqp.style.display !== 'none') {
     for (const el of eqp.querySelectorAll('.slot.eq')) out.push({ region: 'equip', i: +el.dataset.eq, el });
     for (const el of eqp.querySelectorAll('.slot.belt')) out.push({ region: 'belt', i: +el.dataset.belt, el });
   }
-  const chp = document.getElementById('chestPanel');
+  const chp = invPanel('chestPanel');
   if (chp && chp.style.display !== 'none')
     for (const g of chp.querySelectorAll('.grid')) {        // 'chest' and, for a double, 'chest2'
       const region = g.dataset.region, gs = g.querySelectorAll('.slot');
@@ -199,7 +218,7 @@ function showTooltip(html) {
 // crafting icons: get all .cing (ingredients) and .cbtn (output) with title attributes for tooltips
 function getCraftingElements() {
   const out = [];
-  const cp = document.getElementById('craftPanel');
+  const cp = invPanel('craftPanel');
   if (!cp || cp.style.display === 'none') return out;
   // data-id carries the real block/item so the tooltip can show the full stat panel, not just a name
   const ings = cp.querySelectorAll('.cing');
@@ -411,12 +430,20 @@ function instantTransfer(region, i) {           // shove the whole stack across 
   refreshSlotsUI();
 }
 
+/* Each player has their own inventory panel in their own viewport (0.728), so several people can
+   be rummaging at once and nobody is locked out. Only the PAUSE menu is still one shared thing
+   over the middle of the screen — that one really is for everybody. */
+/* Order of opening, so the single armour-preview renderer can follow the player who opened LAST
+   and hand itself back to whoever is still in their inventory when that player closes. A plain
+   counter: bigger means more recent. `_invSeq` is per seat (swapped); the counter is not. */
+let _invSeqNext = 0;
 function toggleInventory(open, mode) {
   if (open === undefined) open = !invOpen;
   if (open === invOpen && mode === undefined) return;
   if (open) { craftMode = mode || 'basic'; buildInventory(); }   // rebuild with the right recipe list
   if (open === invOpen) return;
   invOpen = open;
+  _invSeq = open ? ++_invSeqNext : 0;
   invWrapEl.style.display = open ? 'flex' : 'none';
   if (open) {
     if (document.pointerLockElement) document.exitPointerLock();   // free the cursor
@@ -430,7 +457,10 @@ function toggleInventory(open, mode) {
     activeChest = activeChest2 = null;          // ...and the chest, which also shuts its lid
     activeStructBlock = null;                   // structure editor closes with the inventory
     if (lastHoverEl) { lastHoverEl.classList.remove('hover'); lastHoverEl = null; }
-    vcurEl.style.display = vdragEl.style.display = 'none';
+    /* The tooltip has to be torn down HERE rather than left to the next cursor frame: since 0.72
+       updateInvCursorVisual only runs while the inventory is open, so the frame that would have
+       cleaned it up never comes and the panel stays stranded on screen. */
+    vcurEl.style.display = vdragEl.style.display = ctipEl.style.display = 'none';
     if (playing) { lockTries = 0; tryPointerLock(); }
   }
 }
@@ -440,7 +470,8 @@ function invBounds() {
   const a = invWrapEl.getBoundingClientRect(), b = hotbarEl.getBoundingClientRect();
   return { l: Math.min(a.left, b.left) - 8, r: Math.max(a.right, b.right) + 8, t: a.top - 8, bm: b.bottom + 8 };
 }
-let lastHoverEl = null;
+var lastHoverEl = null;
+var _invSeq = 0;                    // when this seat opened its inventory — see toggleInventory
 function updateInvCursorVisual(dt) {
   if (!invOpen) {
     if (lastHoverEl) { lastHoverEl.classList.remove('hover'); lastHoverEl = null; }
@@ -453,7 +484,7 @@ function updateInvCursorVisual(dt) {
   if (invCursor.mode === 'pad') {                // magnet snaps to nearest element, but ONLY when
     const n = nearestElement(invCursor.x, invCursor.y);   // the stick is idle — so an active push can
     // crafting icons are small, so they get a wider capture radius and a harder pull
-    const snapR = n && n.type === 'craft' ? 120 : 80;
+    const snapR = (n && n.type === 'craft' ? 120 : 80) * invScale();
     if (n && n.dist < snapR && (pad.invStick || 0) < 0.2) {
       const k = Math.min(1, dt * (n.type === 'craft' ? 30 : 20));
       invCursor.x += (n.cx - invCursor.x) * k;
@@ -474,7 +505,7 @@ function updateInvCursorVisual(dt) {
   // Tooltip: full item panel over any occupied slot, name-only over crafting icons. Suppressed
   // while dragging, since the cursor is already carrying a visible stack.
   const ne = nearestElement(invCursor.x, invCursor.y);
-  const tipR = invCursor.mode === 'pad' ? 60 : 24;
+  const tipR = (invCursor.mode === 'pad' ? 60 : 24) * invScale();
   const hovSlot = hov && slotArr(hov.region)[hov.i];
   if (dragHeld) {
     ctipEl.style.display = 'none';

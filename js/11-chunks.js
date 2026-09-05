@@ -72,14 +72,19 @@ let playerCX = 1e9, playerCZ = 1e9;
 // rebuild the load/mesh/unload sets — runs when the player crosses a chunk border,
 // the view distance changes, or the world resets
 function rebuildQueues() {
+  // entry 0 IS player one; 36-splitscreen.js owns entries 1..3
+  PLAYER_CHUNKS[0][0] = playerCX; PLAYER_CHUNKS[0][1] = playerCZ;
   genQueue.length = 0;
   meshQueue.length = 0;
   const R = viewDist, RG = R + 1;
   const requeue = [];                       // chunks that were awaiting a (re-)mesh
 
+  /* Distances are to the NEAREST player (0.72). With split screen the loaded set is the union of
+     every player's ring, so a chunk only unloads once it is out of range of all of them — and the
+     queue priority a chunk gets is whichever player is closest to it. */
   for (const [k, c] of chunks) {
     if (c.queuedMesh) { c.queuedMesh = false; requeue.push(c); }  // queue was just cleared
-    const dx = c.cx - playerCX, dz = c.cz - playerCZ, d2 = dx * dx + dz * dz;
+    const d2 = chunkDist2ToPlayers(c.cx, c.cz);
     if (d2 > (R + 2) * (R + 2)) {           // unload: dispose GPU resources, drop voxel data
       disposeChunkMeshes(c);
       chunks.delete(k);                     // (edits are kept in editStore)
@@ -87,14 +92,18 @@ function rebuildQueues() {
       disposeChunkMeshes(c);                // data ring beyond render radius: keep data only
     }
   }
-  for (let dz = -RG; dz <= RG; dz++) {
-    for (let dx = -RG; dx <= RG; dx++) {
-      const d2 = dx * dx + dz * dz;
-      if (d2 > RG * RG) continue;
-      const cx = playerCX + dx, cz = playerCZ + dz;
-      const c = ensureChunk(cx, cz);
-      if (!c.data && !c.generating) genQueue.push({ cx, cz, d2 });
-      else if (c.data && d2 <= R * R && !c.meshes[0] && !c.meshes[1] && !c.meshes[2] && !c.meshes[3]) tryQueueMesh(c, d2);
+  const seen = PLAYER_CHUNKS.length > 1 ? new Set() : null;   // rings overlap only in split screen
+  for (const pc of PLAYER_CHUNKS) {
+    for (let dz = -RG; dz <= RG; dz++) {
+      for (let dx = -RG; dx <= RG; dx++) {
+        if (dx * dx + dz * dz > RG * RG) continue;
+        const cx = pc[0] + dx, cz = pc[1] + dz;
+        if (seen) { const sk = key(cx, cz); if (seen.has(sk)) continue; seen.add(sk); }
+        const d2 = chunkDist2ToPlayers(cx, cz);      // priority follows the closest player
+        const c = ensureChunk(cx, cz);
+        if (!c.data && !c.generating) genQueue.push({ cx, cz, d2 });
+        else if (c.data && d2 <= R * R && !c.meshes[0] && !c.meshes[1] && !c.meshes[2] && !c.meshes[3]) tryQueueMesh(c, d2);
+      }
     }
   }
   genQueue.sort((a, b) => a.d2 - b.d2);
@@ -326,6 +335,8 @@ function finishChunkGen(c) {
   trySpawnStructureInChunk(c.cx, c.cz);
   // ...and the chunk rolls its mob population, once, the first time it ever exists
   trySpawnEntitiesInChunk(c.cx, c.cz);
+  // night mobs roll on EVERY load instead, so dusk repopulates ground the player already knows
+  trySpawnNightMobsInChunk(c.cx, c.cz);
   // this chunk (and each neighbour that was waiting on it) may be meshable now
   const R2 = viewDist * viewDist;
   for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
@@ -672,7 +683,8 @@ function glowNear(x, y, z) {
     }
   });
   if (hit) return true;
-  if (_plyGlow && Math.abs(_plyGlow[0]-x) <= GLOW_LEVEL && Math.abs(_plyGlow[1]-y) <= GLOW_LEVEL && Math.abs(_plyGlow[2]-z) <= GLOW_LEVEL) return true;
+  for (const g of _plyGlows)
+    if (g && Math.abs(g[0]-x) <= GLOW_LEVEL && Math.abs(g[1]-y) <= GLOW_LEVEL && Math.abs(g[2]-z) <= GLOW_LEVEL) return true;
   return false;
 }
 function markDirty(c) {

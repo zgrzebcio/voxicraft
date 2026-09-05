@@ -12,7 +12,7 @@ function resetWorld(seed, terrainType) {
   chunks.clear();
   editStore.clear();
   glowClear();
-  _plyGlow = null;
+  _plyGlows.fill(null);
   clearDrops();
   clearFallingLeaves();
   clearFelling();
@@ -26,11 +26,17 @@ function resetWorld(seed, terrainType) {
   clearSimWake();                           // every chunk must be seeded again in the new world
   clearBeds();
   clearChests();
-  player.spawnPos = null;
   initWorkers(seed, TERRAIN_TYPE);
-  player.spawned = false;
-  player.pos.set(8.5, 96, 8.5);
+  // every split-screen player restarts unspawned; the frame loop re-seats each of them
+  for (const p of PLAYERS) {
+    p.spawnPos = null;
+    p.spawned = false;
+    p.pos.set(8.5, 96, 8.5);
+    p.vy = 0; p.dead = false; p.sleepingAt = null;
+    if (p._kick) { p._kick.x = 0; p._kick.z = 0; }
+  }
   playerCX = 1e9; playerCZ = 1e9;           // force queue rebuild
+  for (const pc of PLAYER_CHUNKS) { pc[0] = 1e9; pc[1] = 1e9; }
 }
 
 // scan a column for the highest solid block (used by spawn + void teleport)

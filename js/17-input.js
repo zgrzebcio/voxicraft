@@ -7,6 +7,7 @@ const distInput = document.getElementById('distInput');
 const simInput  = document.getElementById('simInput');
 const sensInput = document.getElementById('sensInput');
 const shadowSel = document.getElementById('shadowSel');
+const splitDirSel = document.getElementById('splitDirSel');
 let playing = false;
 let lockTimer = 0, lockTries = 0;
 /* Which device the player last actually used. Drives the key glyph in the on-screen interact
@@ -23,7 +24,8 @@ function setPlaying(on) {
   if (!on) {
     if (currentWorld) saveWorld();          // pausing also saves — cheap insurance
     refreshMenu();
-    toggleInventory(false);                 // pause menu supersedes the inventory
+    // the pause menu is for EVERYONE, so it supersedes every seat's inventory, not just this one
+    forEachPlayerSlot(() => toggleInventory(false));
     clearTimeout(lockTimer);
     if (document.pointerLockElement) document.exitPointerLock();
   }
@@ -47,26 +49,33 @@ document.addEventListener('pointerlockerror', () => { if (playing) scheduleLockR
 function applySettings() {
   // survival-created worlds can never leave survival
   if (currentWorld && currentWorld.mode === 'survival') modeSel.value = 'survival';
-  const wasCreative = player.canFly;
-  player.canFly = modeSel.value !== 'survival';        // survival: flying disabled entirely
-  if (!player.canFly) {
-    player.flying = false;
-    // fresh vitals when entering survival, and skip fall-damage from the current arc
-    if (wasCreative) { player.hp = MAX_HP; player.food = MAX_FOOD; player.fallStart = null; player.vy = 0; }
+  // gamemode is a property of the WORLD, so it lands on every split-screen player at once
+  const creative = modeSel.value !== 'survival';
+  for (const p of PLAYERS) {
+    const wasCreative = p.canFly;
+    p.canFly = creative;                             // survival: flying disabled entirely
+    if (!creative) {
+      p.flying = false;
+      // fresh vitals when entering survival, and skip fall-damage from the current arc
+      if (wasCreative) { p.hp = MAX_HP; p.food = MAX_FOOD; p.fallStart = null; p.vy = 0; }
+    }
   }
   // swap inventory sets when the mode changes. Survival persists via saveHotbar/saveInv (they
   // gate on currentInvMode so entering creative can never clobber survival storage).
   const newMode = modeSel.value === 'survival' ? 'survival' : 'creative';
   if (newMode !== currentInvMode) {
-    loadInventoryForMode(newMode);
-    hotbarSel = 0;
-    // MUST rebuild the DOM here — updateHotbar only re-toggles the selected-slot class and
-    // would leave the previous mode's icons on screen as ghosts even though HOTBAR is empty.
-    buildHotbar();
+    // ...and each player carries their OWN stash, so the swap runs once per player context
+    forEachPlayerSlot(() => {
+      loadInventoryForMode(newMode);
+      hotbarSel = 0;
+      // MUST rebuild the DOM here — updateHotbar only re-toggles the selected-slot class and
+      // would leave the previous mode's icons on screen as ghosts even though HOTBAR is empty.
+      buildHotbar();
+      flashBlockName();
+    });
     if (invOpen) buildInventory();
-    flashBlockName();
   }
-  if (player.canFly) clearDrops();          // creative has no drops; wipe any survival leftovers
+  if (creative) clearDrops();               // creative has no drops; wipe any survival leftovers
   fpsLimit = +fpsSel.value || 0;
   localStorage.setItem('vc_fps', fpsSel.value);
   const sv = clampi(+sensInput.value || 100, 10, 400);
@@ -82,7 +91,19 @@ function applySettings() {
   if (sd !== simRadius) { simRadius = sd; localStorage.setItem('vc_sim', sd); }
   const sr = parseInt(shadowSel.value);
   if (sr !== shadowR) { shadowR = sr; applyShadowDist(); }
+  applySplitDir();
 }
+/* Split screen membership is per-world and driven by the pause-menu roster (see 37-profiles.js).
+   How the window is DIVIDED is a display preference like the others. It also applies on CHANGE,
+   not only when the menu closes, so you can see the layout you picked while picking it. */
+function applySplitDir() {
+  const sdir = splitDirSel.value === 'v' ? 'v' : 'h';
+  if (sdir === splitDir) return;
+  splitDir = sdir;
+  localStorage.setItem('vc_splitdir', sdir);
+  relayoutSplitScreen();
+}
+splitDirSel.addEventListener('change', applySplitDir);
 document.getElementById('worldsBtn').addEventListener('click', () => refreshMenu('worlds'));
 document.getElementById('newWorldBtn').addEventListener('click', () => refreshMenu('create'));
 document.getElementById('worldsBackBtn').addEventListener('click', () => refreshMenu('home'));
@@ -95,6 +116,9 @@ document.getElementById('createBtn').addEventListener('click', async () => {
               name, seed, mode: newModeSel.value === 'creative' ? 'creative' : 'survival',
               tickSpeed: clampi(+tickInput.value || 3, 0, 20),   // simulation speed for decay/flow/grass
               terrain: newTerrainSel.value === 'flat' ? 'flat' : 'default',   // fixed at creation
+              // split screen is fixed at creation too: the save keeps a roster of profiles, and a
+              // world that never had one should not sprout half-filled player records later
+              split: !!newSplitChk.checked,
               createdVersion: GAME_VERSION, lastVersion: GAME_VERSION,
               created: Date.now(), lastPlayed: Date.now() };
   WORLDS.unshift(w);
@@ -115,6 +139,8 @@ document.getElementById('quitBtn').addEventListener('click', () => {
   toast('world saved');
   currentWorld = null;
   pendingRestore = null;
+  pendingWorldRestore = null;
+  setPlayerCount(1);                        // the roster belongs to the world, not to the title screen
   startMenuBackdrop();                      // back to the rotating title panorama
   refreshMenu('home');
 });
@@ -155,10 +181,19 @@ document.addEventListener('mousemove', (e) => {
   player.pitch = Math.max(-1.5697, Math.min(1.5697, player.pitch));
 });
 document.addEventListener('keydown', (e) => {
+  /* Rebinding a seat: the keypress IS the answer, so it never reaches the game. Escape cancels
+     rather than binding — nobody means "my input device is the escape key". */
+  if (typeof inputCapture !== 'undefined' && inputCapture) {
+    e.preventDefault();
+    if (e.code === 'Escape') cancelInputCapture();
+    else if (!e.repeat) inputCaptureKey();
+    return;
+  }
   keys[e.code] = true;
   lastInputDevice = 'kbd';
   if (e.code === 'F1') { e.preventDefault(); toggleFullscreen(); return; }
   if (e.code === 'F2') { e.preventDefault(); if (playing) cycleCameraView(); return; }
+  if (e.code === 'F3') { e.preventDefault(); toggleDebugHud(0); return; }   // keyboard is seat one
   /* Tab is the inventory key. It has to be handled BEFORE the `!playing` guard below so it also
      closes an open inventory, and it must preventDefault in both directions: left to the browser,
      Tab walks focus out of the canvas onto page chrome, and once focus lands there keystrokes
@@ -178,6 +213,8 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {                // inventory first, then menu toggle / panel back
     if (invOpen) toggleInventory(false);
     else if (playing && !pointerLocked) setPlaying(false);
+    else if (!playing && menuScreen === 'profiles' && !needsFirstProfile())
+      refreshMenu(currentWorld ? 'pause' : 'home');
     else if (!playing && !currentWorld && menuScreen === 'create') refreshMenu('worlds');
     else if (!playing && !currentWorld && menuScreen === 'worlds') refreshMenu('home');
     else if (!playing) setPlaying(true);
@@ -213,8 +250,8 @@ document.addEventListener('contextmenu', (e) => {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // unified break/place hold-to-repeat (mouse buttons and gamepad triggers feed the same state)
-const act = { break: false, place: false, lastBreak: 0, lastPlace: 0, padPick: false };
-let mouseBreak = false, mousePlace = false;
+var act = { break: false, place: false, lastBreak: 0, lastPlace: 0, padPick: false };
+var mouseBreak = false, mousePlace = false;
 document.addEventListener('mousedown', (e) => {
   if (!pointerLocked) return;
   lastInputDevice = 'kbd';
@@ -268,7 +305,7 @@ document.addEventListener('mousemove', (e) => {   // shift+LMB sweep: quick-move
 });
 
 /* ---------- gamepad ---------- */
-const pad = {
+var pad = {
   deadzone: 0.16, lookX: 0, lookY: 0,       // smoothed look
   prev: [], radialOpen: false, radialSel: -1,
 };
@@ -276,7 +313,11 @@ function padAxis(v) {
   const s = Math.abs(v) < pad.deadzone ? 0 : (Math.abs(v) - pad.deadzone) / (1 - pad.deadzone) * Math.sign(v);
   return s * Math.abs(s);                   // quadratic response for fine aiming
 }
+/* The pad belonging to whichever player is currently installed. Solo, that is simply the first
+   connected pad (unchanged behaviour); in split screen player one keeps keyboard and mouse and
+   the pads go to players two upward in connection order — see padForSlot in 36-splitscreen.js. */
 function getPad() {
+  if (typeof padForSlot === 'function') return padForSlot(activePlayerSlot());
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   for (const g of pads) if (g && g.connected) return g;
   return null;
@@ -287,15 +328,16 @@ function invGamepad(g, dt, btn, edge) {
   pad.invStick = Math.hypot(mx, my);              // fed to the magnet so it yields while moving
   if (pad.invStick > 0.001) {
     invCursor.mode = 'pad';
-    invCursor.x += mx * 900 * dt;
-    invCursor.y += my * 900 * dt;
+    const cs = invScale();                 // a quarter-screen panel gets a quarter-speed cursor
+    invCursor.x += mx * 900 * cs * dt;
+    invCursor.y += my * 900 * cs * dt;
   }
   /* Right stick scrolls whichever list is under it: the crafting recipes in survival, the
      creative block palette in creative. Both are open at once for nobody, so a straight
      either/or is enough — and the palette had no pad scroll at all before 0.704. */
   const ry = padAxis(g.axes[3] || 0);
   if (Math.abs(ry) > 0.01) {
-    const list = document.getElementById('craftList') || document.querySelector('#inv .invScroll');
+    const list = invPanel('craftList') || document.querySelector('#inv .invScroll');
     if (list) list.scrollTop += ry * 700 * dt;
   }
   const hov = hoveredSlot();
@@ -310,7 +352,7 @@ function invGamepad(g, dt, btn, edge) {
   }
   if (edge(3) && hov) instantTransfer(hov.region, hov.i);       // Y = quick-move
   // LB (4) / RB (5) cycle crafting-category tabs while inventory panel is open
-  if (document.getElementById('craftTabs')) {
+  if (invPanel('craftTabs')) {
     if (edge(4)) cycleCraftCategory(-1);
     if (edge(5)) cycleCraftCategory(+1);
   }
@@ -326,6 +368,13 @@ function pollGamepad(dt) {
   const btn = (i) => !!(g.buttons[i] && g.buttons[i].pressed);
   const val = (i) => (g.buttons[i] ? g.buttons[i].value : 0);
   const edge = (i) => btn(i) && !pad.prev[i];
+  /* While a seat is being rebound, the button press IS the answer — it must not also open a menu
+     or swing a pickaxe. `prev` is still updated so releasing it afterwards can't fire a stale edge. */
+  if (typeof inputCapture !== 'undefined' && inputCapture) {
+    pad.prev = g.buttons.map(b => b.pressed);
+    act.padBreak = act.padPlace = act.padPick = false;
+    return { mx: 0, mz: 0, up: false, dn: false };
+  }
   // real pad activity (not just "a pad is plugged in") takes over the prompt's key glyph
   if (g.buttons.some(b => b.pressed || b.value > 0.5) ||
       g.axes.some(a => Math.abs(a) > 0.35)) lastInputDevice = 'pad';
@@ -340,8 +389,17 @@ function pollGamepad(dt) {
 
   // Start (9) toggles the menu (or closes the inventory); Back (8) fullscreen; B (1) inventory
   if (edge(9)) { if (invOpen) toggleInventory(false); else setPlaying(!playing); }
-  if (edge(8)) toggleFullscreen();
-  if (edge(1) && playing) toggleInventory();      // B (East) opens / closes the inventory
+  if (edge(8)) toggleFullscreen();                // Back / Share
+  if (edge(12)) toggleDebugHud(activePlayerSlot());   // D-pad Up hides this seat's debug text
+  if (edge(14) && playing) cycleCameraView();         // D-pad Left cycles perspective (F2's twin)
+  /* D-pad Down drops one of the held item — the pad's twin of Y. Deliberately no stack modifier:
+     every button that could serve as one already means something while playing (the triggers mine
+     and place, the bumpers cycle the hotbar), and a mis-modified drop throws away a whole stack. */
+  if (edge(13) && playing && !invOpen) dropFromHotbar(1);
+  /* B (East) is the "back out of this" button: it closes the pause menu if that is what is in
+     front of you, and otherwise opens or closes the inventory. setPlaying declines when there is
+     no world loaded, so on the title screen it does nothing. */
+  if (edge(1)) { if (!playing) setPlaying(true); else toggleInventory(); }
   if (invOpen) {                                   // inventory owns the pad: virtual cursor only
     invGamepad(g, dt, btn, edge);
     pad.prev = g.buttons.map(b => b.pressed);

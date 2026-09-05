@@ -26,6 +26,17 @@ function _newSkinMat() {
   return new THREE.MeshBasicMaterial({ map: _skinTex, transparent: true, alphaTest: 0.5 });
 }
 const _HURT_COL = new THREE.Color(0xff6a6a).convertSRGBToLinear();
+const _BURN_COL = new THREE.Color(0xff8a2a).convertSRGBToLinear();   // sunlight scorch on a zombie
+/* Zombie skin (textures/Entity/zombie.png): the player sheet with every skin tone pushed to
+   green and the eye pixels blacked out, so the rig, UVs and animation are shared unchanged. */
+const _zombieTex = new THREE.TextureLoader().load('textures/Entity/zombie.png');
+_zombieTex.colorSpace = THREE.SRGBColorSpace;
+_zombieTex.magFilter = THREE.NearestFilter;
+_zombieTex.minFilter = THREE.NearestFilter;
+_zombieTex.generateMipmaps = false;
+function _newZombieMat() {
+  return new THREE.MeshBasicMaterial({ map: _zombieTex, transparent: true, alphaTest: 0.5 });
+}
 // light at a cell -> 0..1 brightness, matching the world shader's day/night response
 function _lightAt(x, y, z) {
   const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
@@ -74,48 +85,80 @@ function _limb(mat, w, h, d, u, v) {
 }
 
 // Full humanoid. Returns the root group plus the pieces the animator needs.
-function buildHumanoid() {
+// `mat` lets a variant (the zombie) reuse the exact same rig with a different skin sheet.
+/* The head, chest and arms hang off a TORSO group pivoted at the hips (0.726) rather than
+   directly off the root, so leaning the upper body — sneaking — carries the head and both arms
+   with it while the legs stay planted. Everything the animators address by name (m.head, m.armR,
+   …) is unchanged; only the parenting and the local Y offsets moved. */
+function buildHumanoid(mat = _newSkinMat()) {
   const root = new THREE.Group();
-  const mat = _newSkinMat();
+  const torso = new THREE.Group();
+  torso.position.y = 12 * PX;                         // hip height: the lean pivot
   const head = _part(mat, 8, 8, 8, 0, 0);
-  head.position.y = 28 * PX;                          // 12 legs + 12 body + 4 (half head)
+  head.position.y = 16 * PX;                          // 12 body + 4 (half head), above the hips
   const body = _part(mat, 8, 12, 4, 16, 16);
-  body.position.y = 18 * PX;                          // 12 legs + 6
+  body.position.y = 6 * PX;
   const armR = _limb(mat, 4, 12, 4, 40, 16);          // character's right = -X
-  armR.position.set(-6 * PX, 24 * PX, 0);
+  armR.position.set(-6 * PX, 12 * PX, 0);
   const armL = _limb(mat, 4, 12, 4, 32, 48);
-  armL.position.set(6 * PX, 24 * PX, 0);
+  armL.position.set(6 * PX, 12 * PX, 0);
   const legR = _limb(mat, 4, 12, 4, 0, 16);
   legR.position.set(-2 * PX, 12 * PX, 0);
   const legL = _limb(mat, 4, 12, 4, 16, 48);
   legL.position.set(2 * PX, 12 * PX, 0);
-  root.add(head, body, armR, armL, legR, legL);
-  return { root, head, body, armR, armL, legR, legL, mat, mats: [mat] };
+  torso.add(head, body, armR, armL);
+  root.add(torso, legR, legL);
+  return { root, torso, head, body, armR, armL, legR, legL, mat, mats: [mat] };
 }
 
-// walk cycle + head aim, shared by the local player model and every NPC.
-// `atk` (0..1) overlays a downward chopping swing on the right arm.
-function animateHumanoid(m, phase, swing, pitch, atk = 0) {
+/* Walk cycle + head aim, shared by the local player model and every NPC.
+   `atk` (0..1) overlays a downward chopping swing on the right arm.
+   `opts` carries the poses only players strike (see poseSelfModel):
+     lean  radians the torso tips forward — sneaking
+     eat   0..1 raises the held hand to the mouth with a nibble
+     hold  true when carrying something, so the arm presents it instead of hanging      */
+function animateHumanoid(m, phase, swing, pitch, atk = 0, opts) {
   const s = Math.sin(phase) * swing;
   const c = Math.sin(phase + Math.PI) * swing;
   m.armR.rotation.x = s;  m.armL.rotation.x = c;
   m.legR.rotation.x = c;  m.legL.rotation.x = s;
-  m.head.rotation.x = pitch;
+  const lean = (opts && opts.lean) || 0;
+  if (m.torso) m.torso.rotation.x = lean;
+  // the head aims in WORLD terms, so a leaning torso has to be subtracted back out of it
+  m.head.rotation.x = pitch - lean;
+  m.armR.rotation.z = 0;
+  m.armL.rotation.z = 0;
   if (atk > 0) {
     // arm winds up over the first third of the window, then chops through
     const t = 1 - atk;                                   // 0 at swing start -> 1 at the end
     m.armR.rotation.x = -2.5 + Math.sin(Math.min(1, t * 1.4) * Math.PI) * 2.2;
     m.armR.rotation.z = -0.25 * atk;
-  } else {
-    m.armR.rotation.z = 0;
+  }
+  if (opts) {
+    if (opts.eat > 0) {
+      // both the raise and the nibble live on the right arm; the wobble sells the chewing
+      const r = Math.min(1, opts.eat * 5);               // fully raised in the first fifth
+      m.armR.rotation.x = -1.35 * r + Math.sin(opts.eat * 34) * 0.12 * r;
+      m.armR.rotation.z = 0.45 * r;
+      m.head.rotation.x = pitch - lean + 0.18 * r;       // chin dips toward the food
+    } else if (opts.hold && atk <= 0) {
+      // carrying something: the arm holds it out in front rather than swinging at the hip
+      m.armR.rotation.x -= 1.05 + pitch * 0.45;
+      m.armR.rotation.z = -0.18;
+    }
+    // sneaking tucks the arms in slightly, the way a crouch does
+    if (lean > 0.01) { m.armR.rotation.z -= 0.10; m.armL.rotation.z += 0.10; }
   }
 }
-// Bake world lighting (and the hurt flash) into this model's own material(s).
-function shadeHumanoid(m, x, y, z, hurt) {
+// Bake world lighting (and the hurt / burning flash) into this model's own material(s).
+// `burn` is the daylight scorch: an orange wash that flickers so it reads as fire, not damage.
+function shadeHumanoid(m, x, y, z, hurt, burn) {
   const b = _lightAt(x, y + 1.0, z);          // sample around chest height
+  const f = burn ? 0.8 + Math.random() * 0.45 : 0;
   for (const mat of (m.mats || [m.mat])) {
     if (!mat) continue;
     if (hurt) mat.color.setRGB(_HURT_COL.r * b, _HURT_COL.g * b, _HURT_COL.b * b);
+    else if (burn) mat.color.setRGB(_BURN_COL.r * f, _BURN_COL.g * f, _BURN_COL.b * f);
     else mat.color.setScalar(b);
   }
 }
@@ -191,11 +234,13 @@ function animateSheep(m, phase, swing, headPitch) {
 
 /* ================================ third-person view ================================ */
 // 0 = first person, 1 = over the shoulder, 2 = looking back at the face
-let camView = 0;
-const _selfModel = buildHumanoid();
+var camView = 0;
+var _selfModel = buildHumanoid();
 _selfModel.root.visible = false;
 scene.add(_selfModel.root);
-let _selfPhase = 0, _selfPrevX = 0, _selfPrevZ = 0;
+var _selfPhase = 0, _selfPrevX = 0, _selfPrevZ = 0;
+var _selfCrouch = 0;                 // 0..1 eased sneak amount, drives the torso lean
+var _selfLie = 0;                    // 0..1 eased "in bed" amount, tips the model onto its back
 
 /* Held item in the third-person right hand. Reuses the drop geometry (same meshes the
    first-person hand uses) parented to the arm pivot so it swings with the walk cycle. */
@@ -217,9 +262,9 @@ function _brightMat(p) {
   return m;
 }
 
-const _selfHeld = new THREE.Group();
+var _selfHeld = new THREE.Group();
 _selfModel.armR.add(_selfHeld);
-let _selfHeldId = undefined;
+var _selfHeldId = undefined;
 function _syncSelfHeld() {
   const id = slotId(HOTBAR[hotbarSel]);
   if (id === _selfHeldId) return;
@@ -267,28 +312,74 @@ function _camPullback(ox, oy, oz, dx, dy, dz, want) {
   return want;
 }
 
-// Called from the frame loop right after the first-person camera transform is set.
+/* Called from the frame loop right after the first-person camera transform is set.
+
+   The body is now POSED UNCONDITIONALLY (0.72), not only in third person. In split screen every
+   other player has to see this one walking around, and that means the model must be animated and
+   lit whether or not its owner is looking at it. Who actually sees it is decided per render pass:
+   36-splitscreen.js hides a player's own body in their own viewport when they are in first
+   person, and shows it in everyone else's. */
+/* How far through an arm swing this player is, as the `atk` value animateHumanoid wants: 1 at the
+   start of the stroke, falling to 0 as it lands.
+
+   This reads the SAME state the first-person hand does (24-hands.js) rather than tracking its own,
+   so the body and the arm you are holding always agree. `_swingT` is set to 0 by every action that
+   should look like a swing — breaking, a landed placement, a bush pickup — and mining drives a
+   continuous chop off the accumulated dig time instead. Both are per-player swapped globals, so
+   each seat animates from its own actions. One frame behind the hand, which nobody can see. */
+function selfSwingPhase() {
+  if (!playing || menuScene) return 0;
+  const HAND_SWING_PERIOD = 0.32;                       // must match updateHands
+  if (!player.canFly && mining.active)
+    return 1 - (mining.elapsed % HAND_SWING_PERIOD) / HAND_SWING_PERIOD;
+  return _swingT >= 0 ? 1 - _swingT : 0;
+}
+
 function applyCameraView(dt) {
-  const show = camView !== 0 && !menuScene && player.spawned;
-  _selfModel.root.visible = show;
-  if (show) {
+  const alive = !menuScene && player.spawned;
+  _selfModel.root.visible = alive;
+  player._bodyVisibleToSelf = alive && camView !== 0;
+  if (alive) {
     const dx = player.pos.x - _selfPrevX, dz = player.pos.z - _selfPrevZ;
     const spd = Math.hypot(dx, dz) / Math.max(dt, 1e-4);
     _selfPhase += Math.min(spd, 9) * dt * 2.2;
     const swing = Math.min(spd / 5.5, 1) * 0.72;
-    _selfModel.root.position.set(player.pos.x, player.pos.y, player.pos.z);
+    /* Sneaking: ease the lean in and out rather than snapping, and drop the whole body with it —
+       the first-person eye already dips from 1.62 to 1.42, so the model has to follow or the two
+       views disagree about how tall this player currently is. */
+    _selfCrouch += ((player.sneaking ? 1 : 0) - _selfCrouch) * Math.min(1, dt * 12);
+    /* Lying in a bed (0.7294): the whole model is tipped onto its back and dropped to mattress
+       height, so from another player's viewport you can see who is actually asleep. Eased, so
+       climbing in and getting up read as movements rather than a snap. */
+    _selfLie += ((player.sleepingAt ? 1 : 0) - _selfLie) * Math.min(1, dt * 9);
+    const lie = _selfLie;
+    _selfModel.root.position.set(player.pos.x,
+      player.pos.y - 0.14 * _selfCrouch * (1 - lie) - 0.72 * lie, player.pos.z);
     _selfModel.root.rotation.y = player.yaw + Math.PI;   // model faces +Z, yaw 0 looks -Z
-    animateHumanoid(_selfModel, _selfPhase, swing, -player.pitch * 0.6);
+    _selfModel.root.rotation.x = -Math.PI / 2 * lie;     // onto its back, feet toward the foot end
     _syncSelfHeld();
-    // holding something raises the arm out in front and tracks pitch, so the third-person pose
-    // matches what the first-person view shows instead of leaving the item hanging at the hip
-    if (_selfHeldId != null) {
-      _selfModel.armR.rotation.x -= 1.05 + player.pitch * 0.45;
-      _selfModel.armR.rotation.z = -0.18;
-    } else {
-      _selfModel.armR.rotation.z = 0;
+    animateHumanoid(_selfModel, _selfPhase, swing * (1 - lie), -player.pitch * 0.6 * (1 - lie),
+                    selfSwingPhase() * (1 - lie), {
+      lean: 0.5 * _selfCrouch * (1 - lie),
+      eat: player._eatProg || 0,
+      hold: _selfHeldId != null,
+    });
+    // arms tucked in at the sides while asleep, rather than hanging as if standing
+    if (lie > 0.01) {
+      _selfModel.armR.rotation.x *= (1 - lie); _selfModel.armL.rotation.x *= (1 - lie);
+      _selfModel.armR.rotation.z = 0.12 * lie;  _selfModel.armL.rotation.z = -0.12 * lie;
+      _selfModel.legR.rotation.x *= (1 - lie);  _selfModel.legL.rotation.x *= (1 - lie);
     }
     shadeHumanoid(_selfModel, player.pos.x, player.pos.y, player.pos.z, false);
+    /* Name tag: normally drawn through the world so you can find each other, but crouching hides
+       it behind blocks AND dims it — sneaking is how you stop advertising your position. The
+       depth test is a hard switch on the input; the dimming follows the eased crouch so it fades
+       with the pose rather than snapping. */
+    const tag = _selfModel.nameTag;
+    if (tag) {
+      tag.material.depthTest = !!player.sneaking;
+      tag.material.color.setScalar(1 - 0.5 * _selfCrouch);   // darker, not more transparent
+    }
   }
   _selfPrevX = player.pos.x; _selfPrevZ = player.pos.z;
   if (camView === 0) return;
@@ -361,6 +452,30 @@ const SHEEP_GRAZE_CD = 5;                // how often a shorn sheep looks for gr
 const SHEEP_GRAZE_CHANCE = 0.25;
 const SHEEP_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
 
+/* ---- zombies (0.715): the first genuinely HOSTILE mob ----
+   They are not part of the permanent per-chunk population. A chunk rolls for zombies every time
+   it finishes generating — a brand new chunk or an old one being loaded back in — but only while
+   it is night, so they accumulate after dusk and are gone by mid-morning. Each one claws its way
+   up out of the ground on arrival, hunts anything within four chunks, and catches fire the moment
+   real daylight reaches it. Nothing about them is saved: dawn is the despawn. */
+const ZOMBIE_HP = 18;
+const ZOMBIE_SPEED = 1.5, ZOMBIE_CHASE_SPEED = 3.1;
+const ZOMBIE_DMG = 4;
+// 4 chunks. That is the lowest render distance anyone plays at, so a zombie can never notice the
+// player from inside terrain the player cannot see.
+const ZOMBIE_CHASE_RANGE = 64;
+const ZOMBIE_RISE_TIME = 1.2;            // seconds spent climbing out of the ground
+const ZOMBIE_CHUNK_CHANCE = 0.10;        // per chunk load, at night
+const ZOMBIE_PACK_MIN = 1, ZOMBIE_PACK_MAX = 2;
+const ZOMBIE_CAP = 24;                   // hard ceiling — chunk reloads must not stack up forever
+const ZOMBIE_BURN_GRACE = 0.7;           // seconds in the open before it catches
+const ZOMBIE_BURN_DPS = 1.8;
+const ZOMBIE_SPAWN_MIN_DIST = 14;        // never sprouts in the player's face
+const ZOMBIE_NIGHT_FROM = 0.47;          // worldTime: 0 sunrise, .5 sunset, .75 midnight
+const ZOMBIE_DAY_UNTIL = 0.45;           // ...and this is when the sun is high enough to burn
+const isNightForMobs = () => worldTime >= ZOMBIE_NIGHT_FROM;
+const isBurningDaylight = () => worldTime < ZOMBIE_DAY_UNTIL;
+
 function _rollInventory() {
   const inv = [];
   const n = _ri(1, 4);
@@ -416,6 +531,27 @@ function spawnSheep(x, y, z, opts = {}) {
     inventory: [],
     kind: 'sheep',
     name: 'Sheep',
+  };
+  ENTITIES.push(ent);
+  return ent;
+}
+
+/* A zombie starts fully underground and `riseT` lifts it into place — the model is offset, not
+   the collision position, so it is already standing on solid ground the whole time. */
+function spawnZombie(x, y, z) {
+  const m = buildHumanoid(_newZombieMat());
+  m.root.position.set(x, y - ENT_H, z);
+  scene.add(m.root);
+  const ent = {
+    model: m, x, y, z, vy: 0, yaw: Math.random() * Math.PI * 2,
+    hp: ZOMBIE_HP, onGround: false,
+    state: 'wander', wanderT: 0, walk: 0, hurtT: 0,
+    aggroT: 0, atkCd: 0, jumpCd: 0, thinkT: 0,
+    kx: 0, kz: 0, hazCd: 0, airT: ENT_AIR_MAX, escapeT: 0, turnCd: 0,
+    atkAnimT: 0, flailT: 0,
+    riseT: ZOMBIE_RISE_TIME, burnT: 0, sunT: 0,
+    hx: x, hz: z,
+    name: 'Zombie', inventory: [], kind: 'zombie', dmg: ZOMBIE_DMG,
   };
   ENTITIES.push(ent);
   return ent;
@@ -532,6 +668,11 @@ function _entDropLoot(ent) {
   if (ent.kind === 'sheep') {
     pop(ITEM.MUTTON, _ri(1, 3));
     if (ent.woolly) { pop(B.WOOL, 1); pop(ITEM.STRING, _ri(1, 3)); }
+    return;
+  }
+  if (ent.kind === 'zombie') {
+    const n = _ri(0, 2);                       // 0 is a real outcome — some leave nothing
+    if (n > 0) pop(ITEM.ROTTEN_FLESH, n);
     return;
   }
   for (const l of ENT_LOOT) { const id = l.id(); if (id != null) pop(id, _ri(l.min, l.max)); }
@@ -663,8 +804,8 @@ function entityBeatsBlock(entHit, hit) {
    re-arms the full hand delay, so you can't scroll onto a fast sword and hit instantly. */
 const HAND_ATTACK_TIME = 0.5;
 const HAND_DAMAGE = 1;
-let _atkCooldown = 0;
-let _lastHeldForAtk;
+var _atkCooldown = 0;
+var _lastHeldForAtk;
 function attackCooldownFor(id) {
   const p = id != null && id >= 256 ? ITEM_PROPS[id] : null;
   const spd = p && p.attackSpeed > 0 ? p.attackSpeed : 1;
@@ -740,6 +881,7 @@ function tryAttackEntity(ent) {
 function serializeEntities() {
   const out = [];
   for (const e of ENTITIES) {
+    if (e.kind === 'zombie') continue;      // night spawns: dawn is their despawn, never persisted
     out.push([
       +e.x.toFixed(2), +e.y.toFixed(2), +e.z.toFixed(2),
       +e.yaw.toFixed(3), Math.max(0, +e.hp.toFixed(1)),
@@ -801,7 +943,7 @@ function _findChunkSpot(cx, cz, biomes) {
   for (let attempt = 0; attempt < 10; attempt++) {
     const x = cx * 16 + Math.floor(Math.random() * 16) + 0.5;
     const z = cz * 16 + Math.floor(Math.random() * 16) + 0.5;
-    if (!biomes.has(mainGen.biomeAt(Math.floor(x), Math.floor(z)))) continue;
+    if (biomes && !biomes.has(mainGen.biomeAt(Math.floor(x), Math.floor(z)))) continue;
     const gy = surfaceY(Math.floor(x), Math.floor(z));
     const top = getBlock(Math.floor(x), gy, Math.floor(z)) & 255;
     if (top === B.AIR || top === B.WATER || top === B.LAVA || top === B.CACTUS) continue;
@@ -839,6 +981,35 @@ function trySpawnEntitiesInChunk(cx, cz) {
     }
   }
 }
+/* Night mobs, rolled on EVERY chunk-gen finish rather than once per chunk for ever: a chunk that
+   was empty at noon is a candidate again after dusk. Called from finishChunkGen alongside the
+   permanent population roll, so a freshly generated chunk and an old one being streamed back in
+   are treated identically — which is exactly what "loading old ones" has to mean here, since a
+   chunk you walk away from is regenerated from the seed when you return. */
+function trySpawnNightMobsInChunk(cx, cz) {
+  if (menuScene || !currentWorld || !anyPlayerSpawned()) return;
+  if (!isNightForMobs()) return;
+  if (Math.random() >= ZOMBIE_CHUNK_CHANCE) return;
+  let live = 0;
+  for (const e of ENTITIES) if (e.kind === 'zombie') live++;
+  if (live >= ZOMBIE_CAP) return;
+  const s = _findChunkSpot(cx, cz, null);              // any biome — night is night everywhere
+  if (!s) return;
+  // "in the player's face" means ANY player's face in split screen
+  for (const p of PLAYERS) {
+    const dx = s.x - p.pos.x, dz = s.z - p.pos.z;
+    if (dx * dx + dz * dz < ZOMBIE_SPAWN_MIN_DIST * ZOMBIE_SPAWN_MIN_DIST) return;
+  }
+  const n = Math.min(ZOMBIE_CAP - live, _ri(ZOMBIE_PACK_MIN, ZOMBIE_PACK_MAX));
+  for (let i = 0; i < n; i++) {
+    const ox = Math.random() * 3 - 1.5, oz = Math.random() * 3 - 1.5;
+    const zx = s.x + ox, zz = s.z + oz;
+    if (_entBlocked(zx, s.y, zz) || _entHazard(zx, s.y, zz) || !_entSpawnRoom(zx, s.y, zz))
+      { spawnZombie(s.x, s.y, s.z); continue; }        // fall back to the vetted anchor spot
+    spawnZombie(zx, s.y, zz);
+  }
+}
+
 function serializeEntChunks() { return [..._entChunks]; }
 function restoreEntChunks(list) {
   _entChunks.clear();
@@ -847,18 +1018,24 @@ function restoreEntChunks(list) {
 
 /* Player shove: mob hits and body collisions feed a decaying velocity here rather than moving
    the player outright, so being struck slides you back instead of teleporting you. */
-const _plyKick = { x: 0, z: 0 };
-function _movePlayerBy(dx, dz) {
-  const p = player.pos;
-  if (!_entBlocked(p.x + dx, p.y, p.z)) p.x += dx;
-  if (!_entBlocked(p.x, p.y, p.z + dz)) p.z += dz;
+/* Shove state lives ON the player object (0.72) so each split-screen player is knocked about
+   independently. `_plyKick` stays as the active player's alias for the code that reads it. */
+var _plyKick = { x: 0, z: 0 };
+function playerKick(p) { return p._kick || (p._kick = { x: 0, z: 0 }); }
+function _movePlayerBy(p, dx, dz) {
+  const q = p.pos;
+  if (!_entBlocked(q.x + dx, q.y, q.z)) q.x += dx;
+  if (!_entBlocked(q.x, q.y, q.z + dz)) q.z += dz;
 }
 function _updatePlayerKick(dt) {
-  if (!_plyKick.x && !_plyKick.z) return;
-  _movePlayerBy(_plyKick.x * dt, _plyKick.z * dt);
-  const k = Math.max(0, 1 - PLY_KNOCK_DECAY * dt);
-  _plyKick.x *= k; _plyKick.z *= k;
-  if (Math.abs(_plyKick.x) < 0.05 && Math.abs(_plyKick.z) < 0.05) { _plyKick.x = 0; _plyKick.z = 0; }
+  for (const p of PLAYERS) {
+    const k = playerKick(p);
+    if (!k.x && !k.z) continue;
+    _movePlayerBy(p, k.x * dt, k.z * dt);
+    const d = Math.max(0, 1 - PLY_KNOCK_DECAY * dt);
+    k.x *= d; k.z *= d;
+    if (Math.abs(k.x) < 0.05 && Math.abs(k.z) < 0.05) { k.x = 0; k.z = 0; }
+  }
 }
 
 /* Bodies are solid to each other: overlapping mobs (and the player) get pushed apart so nothing
@@ -884,19 +1061,21 @@ function _separateBodies(dt) {
       if (!_entBlocked(e.x - ux, e.y, e.z - uz)) { e.x -= ux; e.z -= uz; }
       if (!_entBlocked(o.x + ux, o.y, o.z + uz)) { o.x += ux; o.z += uz; }
     }
-    // vs the player — creative flying passes through, survival gets shoved
-    if (player.canFly && player.flying) continue;
-    if (Math.abs(player.pos.y - e.y) >= ENT_H) continue;
-    let dx = player.pos.x - e.x, dz = player.pos.z - e.z;
-    let d2 = dx * dx + dz * dz;
-    const pMin = ENT_R + player.R, pMin2 = pMin * pMin;
-    if (d2 >= pMin2) continue;
-    let d = Math.sqrt(d2);
-    if (d < 1e-4) { dx = Math.random() - 0.5; dz = Math.random() - 0.5; d = Math.hypot(dx, dz) || 1; }
-    const push = (pMin - d) / pMin * ENT_PUSH * dt;
-    const ux = dx / d * push, uz = dz / d * push;
-    if (!_entBlocked(e.x - ux, e.y, e.z - uz)) { e.x -= ux; e.z -= uz; }
-    _movePlayerBy(ux, uz);
+    // vs every player — creative flying passes through, survival gets shoved
+    for (const p of PLAYERS) {
+      if (!p.spawned || (p.canFly && p.flying)) continue;
+      if (Math.abs(p.pos.y - e.y) >= ENT_H) continue;
+      let dx = p.pos.x - e.x, dz = p.pos.z - e.z;
+      const d2 = dx * dx + dz * dz;
+      const pMin = ENT_R + p.R;
+      if (d2 >= pMin * pMin) continue;
+      let d = Math.sqrt(d2);
+      if (d < 1e-4) { dx = Math.random() - 0.5; dz = Math.random() - 0.5; d = Math.hypot(dx, dz) || 1; }
+      const push = (pMin - d) / pMin * ENT_PUSH * dt;
+      const ux = dx / d * push, uz = dz / d * push;
+      if (!_entBlocked(e.x - ux, e.y, e.z - uz)) { e.x -= ux; e.z -= uz; }
+      _movePlayerBy(p, ux, uz);
+    }
   }
 }
 
@@ -1054,8 +1233,32 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
   shadeHumanoid(m, e.x, e.y, e.z, e.hurtT > 0);
 }
 
-function updateEntities(dt) {
-  if (!playing || menuScene || !player.spawned) return;
+/* Sunlight kills. The test is SKY light at head height, not the day/night shading — standing in
+   a doorway, under leaves, in a cave or one block into an overhang all read as shade, which is
+   what makes hiding spots meaningful. Water puts the fire out too. A short grace period stops a
+   zombie flickering alight every time it crosses a one-block gap in a roof.
+   Returns true if it burned to death (the caller must remove it immediately). */
+function _zombieBurnTick(e, dt) {
+  const hx = Math.floor(e.x), hz = Math.floor(e.z);
+  const wet = (getBlock(hx, Math.floor(e.y + 0.4), hz) & 255) === B.WATER;
+  const lit = isBurningDaylight() && !wet && getSkyWorld(hx, Math.floor(e.y + 1.5), hz) >= 15;
+  if (!lit) {
+    e.sunT = 0;
+    if (e.burnT > 0) e.burnT = Math.max(0, e.burnT - dt * 2);
+    return false;
+  }
+  e.sunT += dt;
+  if (e.sunT < ZOMBIE_BURN_GRACE) return false;
+  e.burnT = 0.5;
+  e.hp -= ZOMBIE_BURN_DPS * dt;
+  if (e.hp > 0) return false;
+  if (!player.canFly) _entDropLoot(e);       // no XP: the sun did it, not the player
+  return true;
+}
+
+/* Swing pacing is PER PLAYER, so it ticks inside each player's own context rather than once for
+   the world — see the per-player pass in 22-main-loop.js. */
+function updateAttackCooldown(dt) {
   if (_atkCooldown > 0) _atkCooldown -= dt;
   // swapping hotbar slot / item re-arms the full bare-hand delay
   const heldNow = slotId(HOTBAR[hotbarSel]);
@@ -1063,6 +1266,10 @@ function updateEntities(dt) {
     if (_lastHeldForAtk !== undefined) _atkCooldown = Math.max(_atkCooldown, HAND_ATTACK_TIME);
     _lastHeldForAtk = heldNow;
   }
+}
+
+function updateEntities(dt) {
+  if (!playing || menuScene || !anyPlayerSpawned()) return;
   _updatePlayerKick(dt);
 
   for (let i = ENTITIES.length - 1; i >= 0; i--) {
@@ -1086,10 +1293,18 @@ function updateEntities(dt) {
        falling gravel, or in a pocket the world has since closed — is removed rather than left
        twitching inside a wall forever. Runs once per entity per wake-up, not per frame. */
     if (sim && e.active === false && _entBlocked(e.x, e.y, e.z)) { _removeEntity(i); continue; }
+    /* Frozen zombies never reach _zombieBurnTick, so daybreak would leave a ring of them parked
+       out at the render edge waiting to combust the moment the player walked over. Sweep them at
+       dawn instead — the sun reached them too, it just had nobody to show. */
+    if (!sim && e.kind === 'zombie' && isBurningDaylight()) { _removeEntity(i); continue; }
     if (!sim) { e.active = false; continue; }
     e.active = true;
-    const pdx = player.pos.x - e.x, pdz = player.pos.z - e.z;
-    const pdy = player.pos.y - e.y;
+    /* THE mob's target is whichever player is nearest right now (0.72). Everything below reads
+       `tp` instead of the active-context `player`, because entities tick once for the world, not
+       once per viewport — a mob must not chase whoever happens to be mid-render. */
+    const tp = nearestPlayerTo(e.x, e.z);
+    const pdx = tp.pos.x - e.x, pdz = tp.pos.z - e.z;
+    const pdy = tp.pos.y - e.y;
     const distXZ = Math.hypot(pdx, pdz);
 
     /* STUCK WATCHDOG. `wantMove` is set by the movement blocks below: it means the mob asked to
@@ -1110,7 +1325,28 @@ function updateEntities(dt) {
     if (e.atkCd > 0) e.atkCd -= dt;
     if (e.jumpCd > 0) e.jumpCd -= dt;
     if (e.kind === 'sheep') { _updateSheep(e, dt, pdx, pdz, distXZ, i); continue; }
-    if (player.canFly && (e.aggroT > 0 || e.state === 'chase')) {
+    /* ---- zombie: claw out of the ground, hunt on sight, burn at dawn ---- */
+    if (e.kind === 'zombie') {
+      if (e.riseT > 0) {
+        // Emerging. The body is already at its final position; only the MODEL is sunk, so the
+        // terrain it is rising through hides the buried half for free.
+        e.riseT -= dt;
+        const sunk = ENT_H * Math.max(0, e.riseT / ZOMBIE_RISE_TIME);
+        e.model.root.position.set(e.x, e.y - sunk, e.z);
+        e.model.root.rotation.y = e.yaw;
+        // arms up out of the soil first, legs still
+        animateHumanoid(e.model, 0, 0, 0);
+        e.model.armR.rotation.x = e.model.armL.rotation.x = -2.4;
+        shadeHumanoid(e.model, e.x, e.y, e.z, false, false);
+        continue;                                    // no AI, no gravity, no damage while rising
+      }
+      if (_zombieBurnTick(e, dt)) { _removeEntity(i); continue; }
+      if (e.burnT > 0) e.burnT -= dt;
+      // Always hostile inside the hunting radius; creative flight and death call it off.
+      if (!tp.canFly && !tp.dead && distXZ <= ZOMBIE_CHASE_RANGE) e.state = 'chase';
+      else if (e.state === 'chase') e.state = 'wander';
+    }
+    if (tp.canFly && (e.aggroT > 0 || e.state === 'chase')) {
       e.aggroT = 0; e.thinkT = 0; e.state = 'wander';   // switching to creative calls off the fight
     }
     if (e.aggroT > 0) {
@@ -1152,20 +1388,21 @@ function updateEntities(dt) {
       // just got hit: stand still and process it for a beat before turning and swinging back
       e.thinkT -= dt;
       moveSpeed = 0;
-    } else if (e.state === 'chase' && !player.dead) {
+    } else if (e.state === 'chase' && !tp.dead) {
       e.yaw = Math.atan2(pdx, pdz);
-      moveSpeed = ENT_CHASE_SPEED;
+      moveSpeed = e.kind === 'zombie' ? ZOMBIE_CHASE_SPEED : ENT_CHASE_SPEED;
       if (distXZ < ENT_ATTACK_RANGE && Math.abs(pdy) < 2 && e.atkCd <= 0) {
         e.atkCd = ENT_ATTACK_CD;
         e.atkAnimT = ENT_ATK_ANIM;                 // arm chops through on the hit
         moveSpeed = 0;
-        player.hp -= ENT_ATTACK_DMG;
-        player._dmgCause = `was slain by a ${e.name}`;
+        tp.hp -= (e.dmg || ENT_ATTACK_DMG);
+        tp._dmgCause = `was slain by a ${e.name}`;
         // knock the player back with the same decaying-velocity model the mobs use
         const m = distXZ || 1;
-        _plyKick.x = pdx / m * PLY_KNOCK;
-        _plyKick.z = pdz / m * PLY_KNOCK;
-        if (!player.flying && Math.abs(player.vy) < 0.5) player.vy = PLY_KNOCK_HOP;
+        const kick = playerKick(tp);
+        kick.x = pdx / m * PLY_KNOCK;
+        kick.z = pdz / m * PLY_KNOCK;
+        if (!tp.flying && Math.abs(tp.vy) < 0.5) tp.vy = PLY_KNOCK_HOP;
       }
     } else {
       e.wanderT -= dt;
@@ -1174,14 +1411,15 @@ function updateEntities(dt) {
         e.state = Math.random() < 0.35 ? 'idle' : 'wander';
         if (e.state === 'wander') e.yaw = Math.random() * Math.PI * 2;
       }
-      moveSpeed = e.state === 'wander' ? ENT_SPEED : 0;
+      const walkSpeed = e.kind === 'zombie' ? ZOMBIE_SPEED : ENT_SPEED;
+      moveSpeed = e.state === 'wander' ? walkSpeed : 0;
       // leash: outside its home radius the next heading always points back, so a mob can drift
       // around its spawn region but never migrates across the world
       const hdx = e.hx - e.x, hdz = e.hz - e.z;
       if (Math.hypot(hdx, hdz) > ENT_HOME_RANGE) {
         e.yaw = Math.atan2(hdx, hdz);
         e.state = 'wander';
-        moveSpeed = ENT_SPEED;
+        moveSpeed = walkSpeed;
       }
     }
 
@@ -1316,7 +1554,13 @@ function updateEntities(dt) {
     const lookPitch = e.state === 'chase'
       ? Math.max(-0.7, Math.min(0.7, -Math.atan2(pdy + 1.2, Math.max(distXZ, 0.1)) * 0.8)) : 0;
     animateHumanoid(m, e.walk, swing, lookPitch, Math.max(0, e.atkAnimT) / ENT_ATK_ANIM);
-    shadeHumanoid(m, e.x, e.y, e.z, e.hurtT > 0);
+    // zombies hold both arms out in front; the attack chop still wins when it is swinging
+    if (e.kind === 'zombie' && e.atkAnimT <= 0) {
+      const sway = Math.sin(e.walk * 0.6) * 0.09;
+      m.armR.rotation.x = -1.55 + sway;  m.armL.rotation.x = -1.55 - sway;
+      m.armR.rotation.z = 0.06;          m.armL.rotation.z = -0.06;
+    }
+    shadeHumanoid(m, e.x, e.y, e.z, e.hurtT > 0, e.burnT > 0);
   }
   _separateBodies(dt);
 }

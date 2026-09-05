@@ -75,19 +75,92 @@ function loadImage(name, url) {
   });
 }
 
-/* Item sprites and armor sheets are NOT loaded at boot (0.7146). Only block tiles go into the
-   atlas, and only the atlas is needed to draw the title panorama, so awaiting these held the
-   first frame hostage to a pile of files the menu never touches. They are read from IMAGES by
-   drop geometry and the armor preview — both strictly in-world — and hotbar/inventory icons do
-   not need them at all (renderItemIcon hands the browser the URL and lets it decode there).
-   ensureItemAssets() is called on world load and runs once. */
-let _itemAssetsPromise = null;
-function ensureItemAssets() {
-  if (!_itemAssetsPromise) _itemAssetsPromise = Promise.all([
-    ...Object.entries(ITEM_TEXTURES).map(([n, u]) => loadImage(n, u).catch(() => {})),
-    ...Object.entries(EQUIP_TEXTURES).map(([n, u]) => loadImage(n, u).catch(() => {})),
-  ]);
-  return _itemAssetsPromise;
+/* ================================================================================================
+   IN-WORLD ART — item sprites, armour sheets, and the block art that is NOT in the atlas
+   ================================================================================================
+
+   None of this is needed to draw the title panorama, so 0.7146 stopped loading it at boot; the
+   first frame no longer waited on a pile of files the menu never touches. The cost landed on world
+   ENTRY instead — around a hundred separate PNG requests — which is the five to ten seconds of
+   invisible items and blank icons after joining.
+
+   Two changes fix that (0.724), the same two the atlas already uses:
+
+   1. It is CACHED. Every image is stored, once, as a PNG blob inside a single IndexedDB record,
+      so later boots do one read instead of a hundred round trips. The key carries GAME_VERSION and
+      the number of images, so adding or changing art misses the cache and refetches.
+
+   2. It is STARTED AT BOOT, in the background, the moment the atlas is ready — while the player is
+      still looking at the title screen. Entering a world then usually finds it already done. It is
+      still awaited before icons are drawn, because an icon is a rasterised snapshot: taken early,
+      it is a blank square for the rest of the session.
+
+   MESH_TEXTURES is the part that has to be here rather than in the atlas: the door panel, the bed,
+   the chest and the sheep's fleece own their own three.js meshes and sample IMAGES directly.
+   buildAtlas loads all of TEXTURES on its stitching path, so they used to come along for free —
+   but the atlas cache short-circuits that loop, so from the second boot onward nothing fetched
+   them, `new THREE.Texture(undefined)` produced a blank map, and those meshes rendered BLACK. */
+const MESH_TEXTURES = ['oak_door',
+                       'bed_top', 'bed_long', 'bed_end', 'bed_leg', 'bed_down',
+                       'chest_top', 'chest_bottom', 'chest_side', 'chest_front',
+                       'wool'];
+// name -> url for everything in this group; MESH_TEXTURES resolve through TEXTURES like block art
+const _gameArtSources = () => ({
+  ...ITEM_TEXTURES, ...EQUIP_TEXTURES,
+  ...Object.fromEntries(MESH_TEXTURES.map(n => [n, TEXTURES[n]])),
+});
+
+/* Decoded images are kept as CANVASES, never as ImageBitmaps: three.js treats a bitmap source
+   differently on upload (notably flipY), and the atlas cache learned that the hard way. */
+function _bitmapToCanvas(bmp) {
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.drawImage(bmp, 0, 0);
+  bmp.close?.();
+  return c;
+}
+async function _loadCachedArt(names) {
+  try {
+    await idbReady;
+    const rec = await idbGet(_artCacheKey(names));
+    if (!rec || typeof rec !== 'object') return false;
+    // an incomplete pack is not worth patching up — refetch the lot rather than half-load
+    for (const n of names) if (!(rec[n] instanceof Blob)) return false;
+    // same colour-management trap as the atlas cache above — decode the stored bytes verbatim
+    await Promise.all(names.map(async (n) => {
+      IMAGES[n] = _bitmapToCanvas(await createImageBitmap(rec[n], { colorSpaceConversion: 'none' }));
+    }));
+    return true;
+  } catch { return false; }              // any failure at all: silently fetch from source
+}
+function _cacheArt(names) {
+  const rec = {};
+  Promise.all(names.map(n => new Promise((res) => {
+    const img = IMAGES[n];
+    if (!img) return res();
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.getContext('2d').drawImage(img, 0, 0);
+    try { c.toBlob(b => { if (b) rec[n] = b; res(); }, 'image/png'); } catch { res(); }
+  }))).then(() => {
+    if (Object.keys(rec).length === names.length) idbPut(_artCacheKey(names), rec).catch(() => {});
+  });
+}
+const _artCacheKey = (names) => 'art:' + GAME_VERSION + ':' + names.length;
+
+let _gameArtPromise = null;
+function ensureGameArt() {
+  if (_gameArtPromise) return _gameArtPromise;
+  const src = _gameArtSources();
+  const names = Object.keys(src);
+  _gameArtPromise = (async () => {
+    if (await _loadCachedArt(names)) return;                       // no network at all
+    await Promise.all(names.map(n => loadImage(n, src[n]).catch(() => {})));
+    _cacheArt(names);          // async, off the critical path — next boot skips every fetch above
+  })();
+  return _gameArtPromise;
 }
 
 /* ---- atlas cache (0.7147) ----
@@ -114,7 +187,13 @@ async function _loadCachedAtlas() {
     await idbReady;
     const blob = await idbGet(ATLAS_CACHE_KEY);
     if (!(blob instanceof Blob)) return null;
-    const bmp = await createImageBitmap(blob);
+    /* colorSpaceConversion:'none' is NOT optional (0.7291). Decoding a PNG defaults to letting the
+       browser apply colour management, and how much it applies depends on the browser and the
+       display profile — so the cached sheet came back subtly DARKER than the one stitched from the
+       source images, and only on some machines. The world runs with THREE.ColorManagement off and
+       does its own sRGB encoding, so any decode-time conversion is pure error. Asking for none
+       makes the cached path byte-identical to the fresh one everywhere. */
+    const bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
     /* Draw the bitmap back into a real canvas rather than handing the ImageBitmap straight to
        CanvasTexture. three.js treats an ImageBitmap source differently from a canvas on upload —
        notably flipY — so the cached sheet came out mirrored against its own UVs and every block

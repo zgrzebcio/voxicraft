@@ -23,20 +23,47 @@ const mkSlot    = (id, n = 1) => {
 };
 // split/move n items out of an existing slot, KEEPING its wear (mkSlot would reset dur to full)
 const carrySlot = (src, n) => { const t = mkSlot(src.id, n); if (src.dur != null) t.dur = src.dur; return t; };
+/* ---- inventory shape (0.7292) ----
+   One place decides how many slots there are, because a dozen files used to spell "9" and "27"
+   out by hand. The grid is INV_COLS wide; the hotbar is one row of the same width, so the two
+   line up on screen and a quick-move lands where you expect. */
+const INV_COLS = 8, INV_ROWS = 4;
+const HOTBAR_SLOTS = INV_COLS;                 // 8
+const INV_SLOTS = INV_COLS * INV_ROWS;         // 32
+const INV2_SLOTS = INV_SLOTS;                  // second grid matches (creative palette overflows it)
+
 function _defaultCreativeInventory() {
   // blocks (sorted) then a few useful items (infinite water bucket) appended to the palette
   const sorted = PLACEABLE.slice().sort((a, b) => a - b).concat([ITEM.WATER_BUCKET, ITEM.LAVA_BUCKET]);
-  const hot = new Array(9).fill(null);
-  const inv = new Array(27).fill(null);
+  const hot = new Array(HOTBAR_SLOTS).fill(null);
+  const inv = new Array(INV_SLOTS).fill(null);
   // overflow palette — scrolls in the UI. Sized well past the current block count so newly
   // registered blocks (structure block, spruce set, ...) don't silently fall off the end.
-  const inv2 = new Array(72).fill(null);
+  const inv2 = new Array(Math.max(72, INV_SLOTS)).fill(null);
+  const n1 = HOTBAR_SLOTS, n2 = n1 + INV_SLOTS;
   for (let i = 0; i < sorted.length; i++) {
-    if (i < 9) hot[i] = mkSlot(sorted[i]);
-    else if (i - 9 < 27) inv[i - 9] = mkSlot(sorted[i]);
-    else if (i - 36 < inv2.length) inv2[i - 36] = mkSlot(sorted[i]);
+    if (i < n1) hot[i] = mkSlot(sorted[i]);
+    else if (i < n2) inv[i - n1] = mkSlot(sorted[i]);
+    else if (i - n2 < inv2.length) inv2[i - n2] = mkSlot(sorted[i]);
   }
   return { hot, inv, inv2 };
+}
+
+/* Reshape a saved stash into the current slot counts without losing anything. A world written
+   before 0.7292 has a 9-slot hotbar and 27-slot grids; trimming those with _validArr alone would
+   quietly bin whatever sat in the slots that no longer exist. Instead everything is poured into
+   one list and dealt back out, so the items survive even though their positions shift once. */
+function migrateStash(hot, inv, inv2) {
+  const all = [];
+  for (const a of [hot, inv, inv2])
+    if (Array.isArray(a)) for (const s of a) { const v = _validateSlot(s); if (v) all.push(v); }
+  const out = { hot: new Array(HOTBAR_SLOTS).fill(null),
+                inv: new Array(INV_SLOTS).fill(null),
+                inv2: new Array(INV2_SLOTS).fill(null) };
+  let i = 0;
+  for (const key of ['hot', 'inv', 'inv2'])
+    for (let j = 0; j < out[key].length && i < all.length; j++) out[key][j] = all[i++];
+  return out;
 }
 // Legacy inventories were arrays of raw IDs; migrate on load so old saves stack from 1.
 const _isValidId = (id) => id >= 256 ? ITEM_PROPS[id] != null : PLACEABLE.includes(id);
@@ -64,19 +91,19 @@ const _validArr = (a, len) => {
   if (Array.isArray(a)) for (let i = 0; i < len; i++) out[i] = _validateSlot(a[i]);
   return out;
 };
-let currentInvMode = localStorage.getItem('vc_mode') === 'survival' ? 'survival' : 'creative';
+var currentInvMode = localStorage.getItem('vc_mode') === 'survival' ? 'survival' : 'creative';
 // per-world survival items: lives in memory, persisted inside the world save (vc_world_<id>)
 // inv2 = second grid. Creative: overflow block palette. Survival: reserved for a future backpack
 // (kept empty + persisted for now, but not shown in the survival UI yet).
-let survStash = { hot: new Array(9).fill(null), inv: new Array(27).fill(null), inv2: new Array(27).fill(null) };
-let HOTBAR, invSlots, invSlots2;
+var survStash = { hot: new Array(HOTBAR_SLOTS).fill(null), inv: new Array(INV_SLOTS).fill(null), inv2: new Array(INV2_SLOTS).fill(null) };
+var HOTBAR, invSlots, invSlots2;
 function loadInventoryForMode(mode) {
   currentInvMode = mode;
   if (mode === 'creative') {
     const d = _defaultCreativeInventory();
     HOTBAR = d.hot; invSlots = d.inv; invSlots2 = d.inv2;     // wiped fresh — no save; creative is ephemeral
   } else {
-    if (!survStash.inv2) survStash.inv2 = new Array(27).fill(null);   // migrate older saves
+    if (!survStash.inv2) survStash.inv2 = new Array(INV2_SLOTS).fill(null);   // migrate older saves
     HOTBAR = survStash.hot; invSlots = survStash.inv; invSlots2 = survStash.inv2;   // live refs — world save persists them
   }
   // equipment follows the same survival/creative split. Guarded: this runs once at script-load
@@ -87,7 +114,7 @@ loadInventoryForMode(currentInvMode);
 const saveHotbar = () => { if (currentInvMode === 'survival') survStash.hot = HOTBAR; };
 const saveInv    = () => { if (currentInvMode === 'survival') { survStash.inv = invSlots; survStash.inv2 = invSlots2; } };
 const saveAll = () => { saveHotbar(); saveInv(); if (typeof saveEquip === 'function') saveEquip(); };
-let hotbarSel = 0;
+var hotbarSel = 0;
 
 /* Blocks a placement simply overwrites, the way air does. Only the grass billboards qualify —
    flowers, saplings and torches are deliberate placements and must not be silently destroyed. */
@@ -291,7 +318,7 @@ const BUSH_REPEAT = 0.3;                         // seconds between picks while 
    repeat would let one held key strip a ripe bush AND immediately re-pick the empty one it just
    became, in the same breath. The longer cooldown makes each stage a deliberate, separate pick. */
 const BERRY_REPEAT = 1.1;
-let _bushCd = 0;
+var _bushCd = 0;
 function updateBushPickup(dt, wantPick) {
   if (!wantPick) { _bushCd = 0; return; }
   _bushCd -= dt;
@@ -299,8 +326,8 @@ function updateBushPickup(dt, wantPick) {
   const cd = harvestAtPlayer();
   if (cd) _bushCd = cd;
 }
-let handPlaceSwing = false;   // set on a SUCCESSFUL place; 24-hands consumes it for the swing
-let handPickSwing  = false;   // same, for a successful bush pickup
+var handPlaceSwing = false;   // set on a SUCCESSFUL place; 24-hands consumes it for the swing
+var handPickSwing  = false;   // same, for a successful bush pickup
 // complete a half-filled slab cell with the held slab → double slab. Same type → same-type
 // double (6+axis). Different type → mixed double: baseId keeps half v, heldId gets complement,
 // encoded 16 + partnerIdx*8 + v (partnerIdx = heldId's slab-registry index, must fit 0..15).

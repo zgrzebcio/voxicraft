@@ -4,7 +4,10 @@
 /* ================================================================================================
    PLAYER — creative fly (no gravity), AABB collision vs solid blocks, voxel-DDA targeting.
    ================================================================================================ */
-const player = {
+/* THE ACTIVE player, swapped per viewport by 36-splitscreen.js — see the note on `camera`.
+   Everything downstream still reads a single `player`; split screen just changes which one it is
+   for the duration of that player's tick and render pass. */
+var player = {
   pos: new THREE.Vector3(8.5, 96, 8.5),     // feet position
   yaw: -0.6, pitch: -0.3,
   speed: 12, fastMul: 2.2, walkSpeed: 5.6,
@@ -19,6 +22,32 @@ const player = {
   spawnPos: null,                           // first-spawn point — respawn target after death
   sneaking: false,
 };
+/* Every player currently in the world, in join order; entry 0 is player one and is what `player`
+   points at outside any split-screen context swap. World systems that used to steer by "the
+   player" — mob AI, item pickup, body separation — ask nearestPlayerTo() instead, so with one
+   player they behave exactly as before and with four they follow whoever is closest. */
+const PLAYERS = [player];
+function nearestPlayerTo(x, z) {
+  if (PLAYERS.length === 1) return PLAYERS[0];
+  let best = null, bd = Infinity;
+  for (const p of PLAYERS) {
+    if (!p.spawned || p.dead) continue;
+    const dx = p.pos.x - x, dz = p.pos.z - z, d2 = dx * dx + dz * dz;
+    if (d2 < bd) { bd = d2; best = p; }
+  }
+  return best || PLAYERS[0];            // everyone dead: still need a body to measure against
+}
+const anyPlayerSpawned = () => PLAYERS.some(p => p.spawned);
+/* The probabilistic world sweeps (litter rot, snow melt, berry regrowth) scatter a fixed number
+   of samples around "the player" every few seconds. With several players the honest thing is to
+   rotate: pick one at random per pass, so the per-frame cost stays flat and everyone's
+   surroundings get covered over time — the sampling was already random. */
+function sweepOriginPlayer() {
+  let n = 0, pick = null;
+  for (const p of PLAYERS) if (p.spawned && Math.random() < 1 / ++n) pick = p;   // reservoir of 1
+  return pick;
+}
+
 const MAX_HP = 20, MAX_FOOD = 20, MAX_SATURATION = 20, MAX_AIR = 10;
 // food economy — baseline is passive (very slow); activity + regen speed it up
 const FOOD_IDLE_PER_S      = 1 / 150;       // 150s per food point when standing still

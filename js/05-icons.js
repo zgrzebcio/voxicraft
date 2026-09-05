@@ -22,8 +22,23 @@ function renderItemIcon(id) {
 }
 
 // shared tail: render a prepared icon scene to a transparent data URL
+/* An icon is a PHOTOGRAPH: rasterised once and cached for the session. So it must never be taken
+   under the world's current lighting, or an icon first drawn at dusk — or underwater, or in a cave
+   — is dark for as long as the tab is open. The crafting list is where this showed (0.7293): its
+   recipe icons are rendered when the panel is first built, mid-game, rather than warmed at load
+   with the rest.
+
+   Pinning the uniforms to their neutral defaults makes every icon deterministic whenever it is
+   taken. Same trick renderHandPass uses to stop a held block going black at night. */
 function _renderIconScene(scene, cam) {
   const SIZE = 256;
+  const u = sharedUniforms;
+  const save = { a: u.uAmbient.value, d: u.uDirect.value, s: u.uShadowOn.value,
+                 fn: u.fogNear.value, ff: u.fogFar.value, lc: u.uLightColor.value.clone() };
+  u.uAmbient.value = 0.30; u.uDirect.value = 0.70;   // the material defaults: a flat, full 1.0
+  u.uShadowOn.value = 0.0;
+  u.uLightColor.value.set(1, 1, 1);
+  u.fogNear.value = 1e6; u.fogFar.value = 1e7;       // icons are never fogged
   const rt = new THREE.WebGLRenderTarget(SIZE, SIZE);
   renderer.setRenderTarget(rt);
   renderer.setClearColor(0x000000, 0);
@@ -34,6 +49,9 @@ function _renderIconScene(scene, cam) {
   renderer.setRenderTarget(null);
   renderer.setClearColor(SKY, 1);
   rt.dispose();
+  u.uAmbient.value = save.a; u.uDirect.value = save.d; u.uShadowOn.value = save.s;
+  u.fogNear.value = save.fn; u.fogFar.value = save.ff;
+  u.uLightColor.value.copy(save.lc);
   const cvs = document.createElement('canvas');
   cvs.width = cvs.height = SIZE;
   const ctx = cvs.getContext('2d');
@@ -44,12 +62,26 @@ function _renderIconScene(scene, cam) {
   return cvs.toDataURL();
 }
 
+/* The chest, bed and door have no chunk-mesh model: their icons are photographs of their real
+   three.js meshes, which sample IMAGES directly. An icon is a rasterised PNG — a snapshot — so
+   taking one before that art has loaded bakes a blank square in for the session. loadWorld builds
+   the hotbar and inventory synchronously, well before ensureGameArt() resolves, which is exactly
+   when that used to happen. So these three declare what they need, and an icon whose art is not
+   ready yet is neither drawn nor cached: the next call renders it properly. */
+const ICON_MESH_ART = {
+  [B.CHEST]: ['chest_front', 'chest_side', 'chest_top', 'chest_bottom'],
+  [B.BED]:   ['bed_top', 'bed_long', 'bed_end', 'bed_leg', 'bed_down'],
+  [B.DOOR]:  ['oak_door'],
+};
+const iconArtReady = (id) => (ICON_MESH_ART[id] || []).every(n => IMAGES[n]);
+
 function renderBlockIcon(id, variant = 0) {
   if (id >= 256) return renderItemIcon(id);
   // inventory logs read as a full block, matching the item they place
   if (!variant && PROPS[id]?.model === 'log') variant = CORE.LOG_W_BLOCK << 2;
   const key = id + ':' + variant;
   if (ICON3D[key]) return ICON3D[key];
+  if (!iconArtReady(id)) return '';               // art still loading — ask again, don't cache
   if (id === B.CHEST) {                   // chest has no chunk-mesh model — render its real mesh
     const scene = new THREE.Scene();
     const m = buildChestMesh();

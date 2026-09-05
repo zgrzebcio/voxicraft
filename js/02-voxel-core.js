@@ -2551,7 +2551,8 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                IRON_HELMET: 331, IRON_CHESTPLATE: 332, IRON_LEGGINGS: 333, IRON_BOOTS: 334,
                GOLDEN_HELMET: 335, GOLDEN_CHESTPLATE: 336, GOLDEN_LEGGINGS: 337, GOLDEN_BOOTS: 338,
                DIAMOND_HELMET: 339, DIAMOND_CHESTPLATE: 340, DIAMOND_LEGGINGS: 341, DIAMOND_BOOTS: 342,
-               IRON_GLOVES: 343, BELT: 344, BARK: 345, FIBER: 346, CLOTH: 347, BERRIES: 348 };
+               IRON_GLOVES: 343, BELT: 344, BARK: 345, FIBER: 346, CLOTH: 347, BERRIES: 348,
+               ROTTEN_FLESH: 349 };
 const ITEM_PROPS = {
   [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: 'Used as crafting ingredient' },
   [ITEM.BARK]:          { name: 'Bark',          stack: 99, icon: 'bark', desc: 'Used as fuel for 0.75 smelt' },
@@ -2633,6 +2634,7 @@ const ITEM_PROPS = {
   [ITEM.GOLDEN_APPLE]:  { name: 'Golden apple',   stack: 30, icon: 'golden_apple',  foodSatFull: 8, food: 5,  foodSat: 15,  eatTime: 2.0, desc: '' },
   [ITEM.MUTTON]:        { name: 'Mutton',         stack: 99, icon: 'mutton',        foodSatFull: 1, food: 2,  foodSat: 4,  eatTime: 1.8, desc: '' },
   [ITEM.COOKED_MUTTON]: { name: 'Cooked mutton',  stack: 99, icon: 'cooked_mutton', foodSatFull: 4, food: 6,  foodSat: 7,  eatTime: 2.1, desc: '' },
+  [ITEM.ROTTEN_FLESH]:  { name: 'Rotten flesh',   stack: 99, icon: 'rotten_flesh',  foodSatFull: 0, food: 2,  foodSat: 1,  eatTime: 1.6, desc: 'Edible, but barely' },
 // Armor. `equip` names the equipment slot the piece goes into; `armor` is its point value.
 // 20 armor points = a full 10-icon bar. `armorMat` picks both the armor-bar sprite theme and the
 // overlay sheet on the preview (<mat>_tophalf.png / <mat>_downhalf.png).

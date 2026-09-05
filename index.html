@@ -16,18 +16,26 @@
 <div id="bootCover" style="position:fixed;inset:0;background:#000;z-index:9999;pointer-events:none"></div>
 
 <div id="hud" class="mono"></div>
-<div id="version">alpha 0.7149</div>
+<div id="version">alpha 0.7294</div>
 <div id="crosshair"></div>
 <div id="interact"></div>
 <div id="blockname"></div>
 <div id="toast"></div>
+<!-- shown while a seat is being rebound: the game watches every device until one speaks -->
+<div id="inputWait">
+  <div class="iwbox">
+    <div id="inputWaitText"></div>
+    <div id="inputWaitHint"></div>
+    <div class="iwdots"><span></span><span></span><span></span></div>
+  </div>
+</div>
 <div id="worldLoading">
   <div>
     <div id="worldLoadingName"></div>
     <div class="wl-dots"><span></span><span></span><span></span></div>
   </div>
 </div>
-<canvas id="vitals" width="860" height="70"></canvas>
+<canvas id="vitals" width="980" height="70"></canvas>
 <div id="xpBar"><div id="xpFill"></div><div id="xpLevel"></div></div>
 <div id="xpPops"></div>
 <div id="deathScreen">
@@ -60,6 +68,22 @@
       <div class="seedrow">
         <button id="worldsBtn" style="min-width:230px">Singleplayer</button>
       </div>
+      <div class="seedrow">
+        <button id="profilesBtn" class="grey" style="min-width:230px">Profile: <b id="profileNameLbl">—</b></button>
+      </div>
+    </div>
+    <!-- Profiles are local accounts: one per person who plays on this machine. Player one plays
+         as the selected profile; split-screen players are picked from the same list. -->
+    <div id="menuProfiles" style="display:none">
+      <div id="profileFirstNote" class="splitNote" style="display:none">
+        Welcome — create a profile to play as. Everything you build is saved under it.
+      </div>
+      <div id="profileList" class="splitList"></div>
+      <div class="seedrow">
+        <input id="profileNameIn" maxlength="16" spellcheck="false" placeholder="profile name">
+        <button id="profileAddBtn">Create Profile</button>
+        <button id="profilesBackBtn" class="grey">Back</button>
+      </div>
     </div>
     <div id="menuWorlds" style="display:none">
       <div id="worldList" class="wlist"></div>
@@ -85,11 +109,25 @@
         <label style="color:#9ab;font-size:13px;display:flex;align-items:center;gap:6px;">random tick
           <input id="tickInput" type="number" min="0" max="20" step="1" value="3" style="width:56px;">
         </label>
+        <label style="color:#9ab;font-size:13px;display:flex;align-items:center;gap:6px;"
+               title="Let up to four people share this world on one screen. Player 1 uses keyboard and mouse; each other player needs a gamepad. Fixed at creation.">
+          <input id="newSplitChk" type="checkbox"> split screen
+        </label>
         <button id="createBtn">Create World</button>
         <button id="createBackBtn" class="grey">Back</button>
       </div>
     </div>
     <div id="menuPause" style="display:none">
+      <!-- roster: only rendered for worlds created with split screen enabled -->
+      <div id="splitPanel" style="display:none">
+        <div class="splitTitle">Players</div>
+        <div id="splitList" class="splitList"></div>
+        <div id="splitAddRow" class="seedrow">
+          <select id="splitProfileSel"></select>
+          <button id="splitAddBtn">Add Player</button>
+        </div>
+        <div id="splitNote" class="splitNote"></div>
+      </div>
       <div class="seedrow">
         <button id="resumeBtn">Resume</button>
         <button id="quitBtn" style="background:#7d5a32">Save &amp; Quit</button>
@@ -101,6 +139,12 @@
         <select id="modeSel">
           <option value="creative">Creative</option>
           <option value="survival">Survival</option>
+        </select>
+      </label>
+      <label title="How split screen divides the window. Four players are always a 2x2 grid.">split
+        <select id="splitDirSel">
+          <option value="h">horizontal (top / bottom)</option>
+          <option value="v">vertical (side by side)</option>
         </select>
       </label>
       <label>fps limit
@@ -137,6 +181,8 @@
       <div><b>Space / Shift</b> up &middot; down / jump</div>
       <div><b>2×Space / 2×A</b> toggle flying</div>
       <div><b>sneak-land</b> also stops flying</div>
+      <div><b>sneak</b> crouches the body (others see it)</div>
+      <div><b>bed</b> lie down &middot; <b>sneak</b> to get up</div>
       <div><b>LMB / RMB</b> break / place</div>
       <div><b>1–9 / wheel</b> select block</div>
       <div><b>Tab</b> inventory</div>
@@ -148,10 +194,14 @@
       <div><b>LB / RB</b> cycle block</div>
       <div><b>hold Y</b> radial picker (aim R-stick)</div>
       <div><b>L3</b> toggle fast move</div>
+      <div><b>split screen</b> add players in pause menu</div>
       <div><b>Esc / Start</b> open / close menu</div>
       <div><b>F1 / Back</b> fullscreen</div>
-      <div><b>F2</b> change perspective</div>
-      <div><b>B</b> inventory &middot; <b>A</b> drag &middot; <b>Y</b> quick-move</div>
+      <div><b>F2 / D-pad &larr;</b> change perspective</div>
+      <div><b>F3 / D-pad &uarr;</b> hide debug text</div>
+      <div><b>Y / D-pad &darr;</b> drop item &middot; <b>Shift+Y</b> stack</div>
+      <div><b>B</b> close menu &middot; else inventory</div>
+      <div><b>A</b> drag &middot; <b>Y</b> quick-move (inventory)</div>
       <div><b>sun &amp; moon</b> rise east, set west</div>
     </div>
     </div>
@@ -202,6 +252,9 @@ window.THREE = THREE;
 <script defer src="js/22-main-loop.js"></script>
 <script defer src="js/24-hands.js"></script>
 <script defer src="js/28-entities.js"></script>
+<!-- last before boot: it snapshots the per-player globals every other file has just declared -->
+<script defer src="js/36-splitscreen.js"></script>
+<script defer src="js/37-profiles.js"></script>
 <script defer src="js/23-boot.js"></script>
 </body>
 </html>

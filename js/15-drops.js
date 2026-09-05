@@ -267,7 +267,6 @@ function updateProjectiles(dt) {
 }
 
 function updateDrops(dt) {
-  const py = player.pos.y + player.H * 0.5;
   for (let i = DROPS.length - 1; i >= 0; i--) {
     const d = DROPS[i];
     d.age += dt;
@@ -336,11 +335,18 @@ function updateDrops(dt) {
     if (p.y < -30) { removeDrop(i); continue; }
     // pickup — grace so a fresh drop isn't grabbed before the pop is visible; player-tossed
     // items get a much longer grace so throwing them doesn't loop back into your hotbar.
-    if (d.age > d.pickupDelay && !player.dead) {    // a corpse doesn't vacuum its own death drops
-      const dx = p.x - player.pos.x, dyv = p.y - py, dz = p.z - player.pos.z;
-      if (dx*dx + dyv*dyv + dz*dz < DROP_PICKUP_R * DROP_PICKUP_R) {
-        if (tryPickup(d.id, d.dur ?? null)) { removeDrop(i); continue; }
+    /* Whoever is closest and still alive gets it (0.72). tryPickup writes into the ACTIVE
+       player's hotbar and inventory, so the grab runs inside that player's context — otherwise a
+       split-screen pickup would land in whichever player happened to be mid-tick. */
+    if (d.age > d.pickupDelay) {                    // a corpse doesn't vacuum its own death drops
+      let taker = null, bestD2 = DROP_PICKUP_R * DROP_PICKUP_R;
+      for (const pl of PLAYERS) {
+        if (pl.dead || !pl.spawned) continue;
+        const dx = p.x - pl.pos.x, dyv = p.y - (pl.pos.y + pl.H * 0.5), dz = p.z - pl.pos.z;
+        const d2 = dx*dx + dyv*dyv + dz*dz;
+        if (d2 < bestD2) { bestD2 = d2; taker = pl; }
       }
+      if (taker && withPlayer(taker, () => tryPickup(d.id, d.dur ?? null))) { removeDrop(i); continue; }
     }
     if (d.age > DROP_LIFETIME) removeDrop(i);
   }

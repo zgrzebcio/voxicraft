@@ -20,9 +20,9 @@
    Each level costs THREE TIMES the last: 40, 120, 360, 1080, ... Deliberately steep — a level is
    meant to be an achievement worth a skill point, not a thing you tick over every few minutes. */
 
-let playerXP = 0;                  // total experience points earned this world, never spent
-let playerLevel = 0;               // derived from playerXP; cached so the HUD needn't recompute
-let playerXPInLevel = 0, playerXPNeeded = 40;  // progress within the current level
+var playerXP = 0;                  // total experience points earned this world, never spent
+var playerLevel = 0;               // derived from playerXP; cached so the HUD needn't recompute
+var playerXPInLevel = 0, playerXPNeeded = 40;  // progress within the current level
 
 const XP_LEVEL_BASE = 40, XP_LEVEL_MUL = 3;
 // points needed to go from `lvl` to `lvl + 1`: 40, 120, 360, 1080, ...
@@ -178,12 +178,12 @@ function restoreXP(rec) {
 /* ---- HUD bar ----
    Minecraft's placement (a strip above the hotbar, level number centred on it) but a plain
    smooth bar rather than the segmented notch sprite — a light-green fill on a dark track. */
-const xpBarEl = document.getElementById('xpBar');
-const xpFillEl = document.getElementById('xpFill');
-const xpLevelEl = document.getElementById('xpLevel');
-const xpPopsEl = document.getElementById('xpPops');
-let xpBarDirty = true;
-let _xpFlash = 0;                  // seconds of level-up glow left
+var xpBarEl = document.getElementById('xpBar');
+var xpFillEl = document.getElementById('xpFill');
+var xpLevelEl = document.getElementById('xpLevel');
+var xpPopsEl = document.getElementById('xpPops');
+var xpBarDirty = true;
+var _xpFlash = 0;                  // seconds of level-up glow left
 
 /* ---- gain popups ----
    A "+N" that drifts up off the RIGHT end of the bar and fades. Every gain gets its OWN number:
@@ -196,7 +196,7 @@ let _xpFlash = 0;                  // seconds of level-up glow left
    even when they arrive in the same second. */
 const XP_POP_SLOTS = 5;            // rungs before the ladder wraps
 const XP_POP_STEP = 15;            // px of vertical separation per rung
-let _popSlot = 0;
+var _popSlot = 0;
 function _queueXPPop(n) {
   if (!xpPopsEl || n <= 0) return;
   const el = document.createElement('div');

@@ -27,13 +27,13 @@ const EQUIP_INDEX = {};
 EQUIP_SLOTS.forEach((s, i) => { EQUIP_INDEX[s.key] = i; });
 
 // live array, indexed to match EQUIP_SLOTS. Swapped out with the inventory on mode change.
-let equipSlots = new Array(EQUIP_SLOTS.length).fill(null);
+var equipSlots = new Array(EQUIP_SLOTS.length).fill(null);
 
 /* Belt: wearing one opens a row of quick-access slots above the equipment panel, sized by the
    belt's own `beltSlots`. They are reserved for utility gear (lantern, spyglass, map, compass,
    clock) — items tagged `beltItem: true`. None exist yet, so the row renders as placeholders. */
 const BELT_MAX = 5;
-let beltSlots = new Array(BELT_MAX).fill(null);
+var beltSlots = new Array(BELT_MAX).fill(null);
 // how many belt slots are currently usable (0 = no belt worn)
 function beltCapacity() {
   const s = equipSlots[EQUIP_INDEX.belt];
@@ -120,8 +120,8 @@ const PLAYER_EFFECTS = [];
 
 /* ---------------------------------- persistence ---------------------------------- */
 // creative gets its own throwaway set so survival gear is never touched
-let survEquip = new Array(EQUIP_SLOTS.length).fill(null);
-let survBelt  = new Array(BELT_MAX).fill(null);
+var survEquip = new Array(EQUIP_SLOTS.length).fill(null);
+var survBelt  = new Array(BELT_MAX).fill(null);
 function saveEquip() {
   if (currentInvMode === 'survival') { survEquip = equipSlots; survBelt = beltSlots; }
 }
@@ -200,7 +200,7 @@ function _armorPiece(tex, w, h, d, u, v, grow) {
 
 function _pvInit() {
   if (_pvRenderer) return true;
-  const host = document.getElementById('equipPreview');
+  const host = invPanel('equipPreview');
   if (!host) return false;
   _pvRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
   _pvRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -276,6 +276,16 @@ function _pvSyncArmor() {
 let _pvSpin = 0;
 function updateEquipPreview(dt) {
   if (!invOpen || !_pvRenderer) return;
+  /* One WebGL renderer, one canvas, and up to four inventories open at once (0.728) — so make
+     sure the canvas is actually parented into THIS seat's preview box before drawing this seat's
+     armour into it. The caller picks a single owner per frame, so this settles immediately rather
+     than tugging the canvas back and forth. */
+  const host = invPanel('equipPreview');
+  if (!host) return;
+  if (_pvRenderer.domElement.parentNode !== host) {
+    host.appendChild(_pvRenderer.domElement);
+    _pvArmorKey = '';                                // different player: force an overlay refresh
+  }
   _pvSyncArmor();
   _pvSpin += dt * 0.5;
   _pvModel.root.rotation.y = Math.sin(_pvSpin) * 0.45;   // gentle turntable around front-on
@@ -284,7 +294,7 @@ function updateEquipPreview(dt) {
 
 /* ---------------------------------- panel ---------------------------------- */
 function buildEquipPanel() {
-  const panel = document.getElementById('equipPanel');
+  const panel = invPanel('equipPanel');
   if (!panel) return;
   // Creative has no gear: loadEquipForMode already hands it an empty throwaway array, so leaving
   // the panel hidden is enough to disable armor entirely — slotDescriptors only registers equip
@@ -334,7 +344,7 @@ function buildEquipPanel() {
     '<div class="ctitle stTitle">Stats</div>' +
     `<div id="equipStats">${stats}</div>`;
   if (_pvRenderer) {                                 // re-attach the existing canvas after rebuild
-    document.getElementById('equipPreview').appendChild(_pvRenderer.domElement);
+    invPanel('equipPreview').appendChild(_pvRenderer.domElement);
     _pvArmorKey = '';                                // force an overlay refresh
   } else _pvInit();
 }

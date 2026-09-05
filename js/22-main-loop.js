@@ -122,24 +122,28 @@ function simWakeInvalidate(cx, cz) {
    the whole radius to prove it, every single frame, forever. `_wakeIdle` latches that result and
    is cleared by the only two things that can invalidate it: crossing a chunk border, and a chunk
    arriving (simWakeInvalidate). Standing still therefore costs nothing at all. */
-let _wakeIdle = false, _wakeIdleCX = 1e9, _wakeIdleCZ = 1e9;
+let _wakeIdle = false, _wakeIdleKey = '';
+// the latch key must name EVERY player's chunk — one of them moving is new work (0.72)
+const _wakeKey = () => PLAYER_CHUNKS.map(p => p[0] + ',' + p[1]).join(';');
 // pick the nearest un-woken loaded chunk inside the radius; false when there is nothing to do
 function _beginNextWake() {
-  if (_wakeIdle && _wakeIdleCX === playerCX && _wakeIdleCZ === playerCZ) return false;
+  const wk = _wakeKey();
+  if (_wakeIdle && _wakeIdleKey === wk) return false;
   const r = simDist();
   for (let ring = 0; ring <= r; ring++)
-    for (let dz = -ring; dz <= ring; dz++)
-      for (let dx = -ring; dx <= ring; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;      // ring shell only
-        if (dx * dx + dz * dz > r * r) continue;
-        const cx = playerCX + dx, cz = playerCZ + dz;
-        if (_simWoken.has(cx + ',' + cz)) continue;
-        const c = getChunk(cx, cz);
-        if (!c || !c.data) continue;                    // not streamed in yet — try again later
-        _wake = { cx, cz, d: c.data, y: 1 };
-        return true;
-      }
-  _wakeIdle = true; _wakeIdleCX = playerCX; _wakeIdleCZ = playerCZ;
+    for (const pc of PLAYER_CHUNKS)
+      for (let dz = -ring; dz <= ring; dz++)
+        for (let dx = -ring; dx <= ring; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;      // ring shell only
+          if (dx * dx + dz * dz > r * r) continue;
+          const cx = pc[0] + dx, cz = pc[1] + dz;
+          if (_simWoken.has(cx + ',' + cz)) continue;
+          const c = getChunk(cx, cz);
+          if (!c || !c.data) continue;                  // not streamed in yet — try again later
+          _wake = { cx, cz, d: c.data, y: 1 };
+          return true;
+        }
+  _wakeIdle = true; _wakeIdleKey = wk;
   return false;
 }
 // scan up to `budget` cells of the current chunk; returns how many were actually spent
@@ -344,7 +348,7 @@ function tryThrow() {
 }
 
 /* ---- eating ---- */
-let _eatTimer = 0;
+var _eatTimer = 0;
 const EAT_TIME = 1.1;   // default eat duration; override per-item via eatTime in ITEM_PROPS
 function updateEating(dt, wantPlace) {
   if (!playing || player.canFly || invOpen || menuScene) { _eatTimer = 0; return 0; }
@@ -877,11 +881,11 @@ function waterFlowVec(x, y, z, out) {
 let lastT = performance.now();
 let fps = 0, fpsFrames = 0, fpsT = lastT;
 let hudT = 0;
-let wasMoving = false, lastFlying = player.flying;   // sprint auto-release tracking
+var wasMoving = false, lastFlying = player.flying;   // sprint auto-release tracking
 
 // held-light state: track last-known position + item to detect changes
-let _hlId = undefined, _hlLevel = 0, _hlX = null, _hlY = null, _hlZ = null;
-let _hlRaw = 0;  // raw light value of current held item (exposed for arm glow in 24-hands.js)
+var _hlId = undefined, _hlLevel = 0, _hlX = null, _hlY = null, _hlZ = null;
+var _hlRaw = 0;  // raw light value of current held item (exposed for arm glow in 24-hands.js)
 const _handSaveLC = new THREE.Color();  // reusable save slot for uLightColor during hand render
 
 function frame(now) {
@@ -891,7 +895,10 @@ function frame(now) {
   lastT = now;
   sharedUniforms.uTime.value += dt;
   updateMusic();                            // menu track on/off follows menuScene
-  updateXPBar(dt);
+  /* Input routing, before anybody is ticked: which pad drives which seat, and — while the player
+     is rebinding from the pause menu — whether a device has just spoken up. Both run whether or
+     not the game is unpaused, because binding is done with the menu open. */
+  pollInputCapture();
   /* The title panorama is scenery, not a world (0.7144). Nothing in it is meant to change: no
      rot, no melt, no regrowth, no felling, no structures assembling, no leaves coming down. Each
      of these was individually harmless there — their queues are empty on a backdrop — but they
@@ -911,6 +918,21 @@ function frame(now) {
   fpsFrames++;
   if (now - fpsT >= 500) { fps = Math.round(fpsFrames * 1000 / (now - fpsT)); fpsFrames = 0; fpsT = now; }
 
+  /* ---- each player, in their own context (0.72) ----
+     `useSlot` repoints `player`, `camera`, the hotbar, the arm rig and the HUD at one player, so
+     everything inside tickPlayer is the same single-player code it always was. The WORLD is then
+     stepped exactly once afterwards, never once per player. */
+  for (let i = 0; i < PSTATE.length; i++) { useSlot(i); tickPlayer(dt, now, i); }
+  useSlot(0);
+  runWorldTick(dt, now);
+}
+
+/* ================================================================================================
+   PER-PLAYER TICK — input, movement, camera, targeting, mining/placing, vitals, hand.
+   Runs once per player per frame with that player's globals installed.
+   ================================================================================================ */
+function tickPlayer(dt, now, slot) {
+  const kbOwner = slot === 0;               // keyboard and mouse belong to player one only
   /* ---- input & movement ---- */
   const _preYaw = player.yaw, _prePitch = player.pitch;
   const gp = pollGamepad(dt);
@@ -918,7 +940,7 @@ function frame(now) {
     player.yaw = _preYaw; player.pitch = _prePitch;   // no movement, no fly/jump input
     gp.mx = gp.mz = 0; gp.up = gp.dn = false;
   }
-  const kb = playing && !invOpen && !player.dead;   // keyboard steers when no menu/inventory is open
+  const kb = kbOwner && playing && !invOpen && !player.dead;   // keyboard steers when no menu/inventory is open
   let fwd = (kb && keys.KeyW ? 1 : 0) - (kb && keys.KeyS ? 1 : 0) - gp.mz;
   let str = (kb && keys.KeyD ? 1 : 0) - (kb && keys.KeyA ? 1 : 0) + gp.mx;
   const upHeld = (kb && keys.Space) || gp.up;
@@ -927,6 +949,12 @@ function frame(now) {
   const len = Math.hypot(fwd, str);
   if (len > 1) { fwd /= len; str /= len; }
 
+  /* ---- lying in a bed (0.7294) ----
+     Sneak is the only control that still means anything: it gets you back up. Everything else is
+     zeroed below, next to the title-screen case, so the body stays pinned to the mattress. The
+     look stick stays live so you can glance around from the pillow. */
+  if (player.sleepingAt && dnHeld) leaveBed(player);
+  const lying = !!player.sleepingAt;
   const grounded = onGround();
   const inWater = (getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y + 0.4), Math.floor(player.pos.z)) & 255) === B.WATER;
   player._inWater = inWater;               // exposed for fall damage + hand animation
@@ -972,6 +1000,11 @@ function frame(now) {
   }
   if (!player.spawned) { player.vy = 0; dy = 0; }   // hold still until the spawn chunk exists
   if (menuScene) { fwd = 0; str = 0; dy = 0; player.vy = 0; }   // title camera: rotation only
+  if (lying) {                                  // asleep: pinned to the mattress, look only
+    fwd = 0; str = 0; dy = 0; player.vy = 0; player.sneaking = false; player._movingH = 0;
+    const s = player.sleepingAt, d = BED_DIR[s.facing & 3];
+    player.pos.set(s.x + 0.5 + d[0] * 0.5, s.y + BED_H, s.z + 0.5 + d[1] * 0.5);
+  }
   if (fwd || str || dy) {
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
     let mdx = (str * cos - fwd * sin) * hSpeed * dt, mdz = (-fwd * cos - str * sin) * hSpeed * dt;
@@ -1015,7 +1048,15 @@ function frame(now) {
   // one-time spawn snap once a valid spawn column is loaded. A loaded save restores the
   // exact player state instead, as soon as the chunk under the saved position exists.
   if (!player.spawned) {
-    if (pendingRestore) {
+    // Players two and up either restore from the save (once the ground under their stored
+    // position has streamed in) or, having none, step out next to player one.
+    if (slot > 0) {
+      /* A saved player WAITS for their own chunk — the fallback seat next to player one must
+         never win that race, or their inventory and position would be silently thrown away the
+         moment player one happened to spawn a frame earlier. */
+      if (!applyExtraPlayerRestore(slot) && !hasPendingExtraRestore(slot) && PLAYERS[0].spawned)
+        seatNewPlayer(player);
+    } else if (pendingRestore) {
       const c = getChunk(Math.floor(pendingRestore.pos[0] / 16), Math.floor(pendingRestore.pos[2] / 16));
       if (c && c.data) {
         const pr = pendingRestore; pendingRestore = null;
@@ -1029,11 +1070,9 @@ function frame(now) {
         player.vy = 0; player.fallStart = null;
         player.spawnPos = Array.isArray(pr.spawnPos)
           ? new THREE.Vector3(pr.spawnPos[0], pr.spawnPos[1], pr.spawnPos[2]) : null;
-        if (typeof pr.hotSel === 'number' && pr.hotSel >= 0 && pr.hotSel < 9) {
+        if (typeof pr.hotSel === 'number' && pr.hotSel >= 0 && pr.hotSel < HOTBAR_SLOTS) {
           hotbarSel = pr.hotSel; buildHotbar();
         }
-        restoreDrops(pr.drops);
-        restoreEntities(pr.entities);
         player.spawned = true;
       }
     } else {
@@ -1045,6 +1084,14 @@ function frame(now) {
         if (!player.spawnPos) player.spawnPos = player.pos.clone();
       }
     }
+  }
+  /* Loose drops and wandering mobs belong to the WORLD, not to whoever is in seat one — a profile
+     opening this world for the first time has no record of its own, so restoring them alongside a
+     player's spawn (as it used to be) would have quietly lost them. */
+  if (slot === 0 && pendingWorldRestore && player.spawned) {
+    const pw = pendingWorldRestore; pendingWorldRestore = null;
+    restoreDrops(pw.drops);
+    restoreEntities(pw.entities);
   }
 
   if (menuScene) player.yaw += dt * 0.06;   // title panorama slowly circles the overlook
@@ -1062,10 +1109,11 @@ function frame(now) {
   applyCameraView(dt);            // F5 third-person: moves the camera back + shows the body
 
   /* ---- break / place (mouse + gamepad share repeat timing) ---- */
-  const wantBreak = (mouseBreak && pointerLocked) || act.padBreak;
-  const wantPlace = (mousePlace && pointerLocked) || act.padPlace;
+  // in bed you can look around and nothing else — no swinging, no placing, no eating
+  const wantBreak = !lying && ((mouseBreak && pointerLocked) || act.padBreak);
+  const wantPlace = !lying && ((mousePlace && pointerLocked) || act.padPlace);
   // selection highlight
-  updateInvCursorVisual(dt);                 // virtual cursor / drag ghost / slot hover
+  updateInvCursorVisual(dt);                 // this seat's cursor / drag ghost / hover / tooltip
   const hit = (playing && !invOpen) ? currentRay() : null;
 
   // Swinging at a mob takes priority over the block behind it. Priority is decided by AIM alone,
@@ -1094,7 +1142,7 @@ function frame(now) {
 
   updateInteractPrompt();                   // "(E) to pickup grass" under the crosshair
   // bush pickup: held on KeyE or pad North, repeating on its own short cooldown
-  updateBushPickup(dt, (playing && !invOpen && !menuScene) && (!!keys['KeyE'] || act.padPick));
+  updateBushPickup(dt, (playing && !invOpen && !menuScene) && ((kbOwner && !!keys['KeyE']) || act.padPick));
 
   // Single-press throw (edge: was not held last frame). Must run before doPlace calls.
   const _didThrow = (wantPlace && !act.place) ? tryThrow() : false;
@@ -1210,12 +1258,54 @@ function frame(now) {
   }
   act.break = wantBreak; act.place = wantPlace;
 
-  /* ---- chunk streaming ---- */
-  const cx = Math.floor(player.pos.x / 16), cz = Math.floor(player.pos.z / 16);
-  if (cx !== playerCX || cz !== playerCZ) {
-    playerCX = cx; playerCZ = cz;
-    rebuildQueues();
+  /* ---- held-block light: a virtual glow source that follows this player ---- */
+  {
+    const slotH = HOTBAR[hotbarSel];
+    const id   = slotH ? slotH.id : null;
+    const raw  = id === null ? 0 : id < 256 ? (PROPS[id]?.light ?? 0) : (ITEM_PROPS[id]?.light ?? 0);
+    const hand = id === null ? null : id < 256 ? PROPS[id]?.handLight : ITEM_PROPS[id]?.handLight;
+    const lvl  = (playing && player.spawned && raw > 0) ? (hand ?? Math.max(1, Math.round(raw * 0.65))) : 0;
+    _hlRaw = raw;
+    // Math.round for XZ: triggers 0.5 blocks early so mesh is ready when player arrives
+    const px = Math.round(player.pos.x), py = Math.floor(player.pos.y + player.EYE), pz = Math.round(player.pos.z);
+    if (lvl !== _hlLevel || id !== _hlId || px !== _hlX || py !== _hlY || pz !== _hlZ) {
+      _hlId = id; _hlLevel = lvl; _hlX = px; _hlY = py; _hlZ = pz;
+      updatePlayerLight(slot, px, py, pz, lvl);     // each player owns one glow slot
+    }
   }
+
+  /* ---- eating ---- */
+  const eatProg = updateEating(dt, wantPlace);
+  // the third-person body mirrors it next frame, so everyone else sees this player eating
+  player._eatProg = eatProg;
+
+  /* ---- this player's own upkeep: swing pacing, vitals, XP bar, first-person arm ---- */
+  updateAttackCooldown(dt);
+  if (!menuScene) updateVitals(dt);
+  updateXPBar(dt);
+  updateHands(dt, wantBreak, wantPlace, eatProg);
+
+  /* Selection outline and crack overlay are single scene objects shared by every viewport, so
+     each player records the transform it wants and the render pass re-applies it per view. The
+     crack TEXTURE is genuinely shared — two players mining at once see the further-along stage —
+     which is a cosmetic overlap nobody can be looking at from both viewports at once anyway. */
+  const st = PSTATE[slot];
+  st.handVisible = handRoot.visible;
+  st.sel = selBox.visible
+    ? { px: selBox.position.x, py: selBox.position.y, pz: selBox.position.z,
+        sx: selBox.scale.x,    sy: selBox.scale.y,    sz: selBox.scale.z } : null;
+  st.crack = crackMesh.visible
+    ? { px: crackMesh.position.x, py: crackMesh.position.y, pz: crackMesh.position.z,
+        sx: crackMesh.scale.x,    sy: crackMesh.scale.y,    sz: crackMesh.scale.z } : null;
+}
+
+/* ================================================================================================
+   WORLD TICK — everything that belongs to the world rather than to a player. Runs exactly once a
+   frame no matter how many people are playing.
+   ================================================================================================ */
+function runWorldTick(dt, now) {
+  /* ---- chunk streaming, centred on the union of every player's position ---- */
+  syncPlayerChunks();
   /* Finish arrived chunks before uploading meshes — a chunk must be lit before it is meshed.
      Generous while the loading screen is up (nothing is on screen to stutter), tight in play.
 
@@ -1297,31 +1387,11 @@ function frame(now) {
     }
   }
 
-  /* ---- held-block light: virtual glow source that follows the player ---- */
-  {
-    const slot = HOTBAR[hotbarSel];
-    const id   = slot ? slot.id : null;
-    const raw  = id === null ? 0 : id < 256 ? (PROPS[id]?.light ?? 0) : (ITEM_PROPS[id]?.light ?? 0);
-    const hand = id === null ? null : id < 256 ? PROPS[id]?.handLight : ITEM_PROPS[id]?.handLight;
-    const lvl  = (playing && player.spawned && raw > 0) ? (hand ?? Math.max(1, Math.round(raw * 0.65))) : 0;
-    _hlRaw = raw;
-    // Math.round for XZ: triggers 0.5 blocks early so mesh is ready when player arrives
-    const px = Math.round(player.pos.x), py = Math.floor(player.pos.y + player.EYE), pz = Math.round(player.pos.z);
-    if (lvl !== _hlLevel || id !== _hlId || px !== _hlX || py !== _hlY || pz !== _hlZ) {
-      _hlId = id; _hlLevel = lvl; _hlX = px; _hlY = py; _hlZ = pz;
-      updatePlayerLight(px, py, pz, lvl);
-    }
-  }
-
-  /* ---- eating ---- */
-  const eatProg = updateEating(dt, wantPlace);
-
-  /* ---- survival: food drain, fall damage, respawn on death; also tick drops ---- */
+  /* ---- world simulation: fluids, mobs, growth, falling blocks ---- */
   /* The whole simulation block is skipped on the title screen. The panorama has no physics, no
      fluids, no mobs and no growth — it is a camera pointed at generated terrain — so every one of
      these is dead weight there, and the boot frames are better spent streaming the backdrop in. */
   if (!menuScene) {
-    updateVitals(dt);
     updateSimWake();                        // seed physics for chunks entering the sim radius
     processFalling(dt);
     if (!player.canFly) { updateDrops(dt); updateProjectiles(dt); processLeavesDecay(dt); }
@@ -1335,70 +1405,93 @@ function frame(now) {
     updateBed(dt);
     updateChests(dt);
   }
-  updateEquipPreview(dt);
+  /* The armour-stand preview is a single WebGL renderer whose canvas can only live in one panel at
+     a time. It follows whoever opened their inventory MOST RECENTLY, and the moment they close it
+     falls back to whoever is still in theirs — so opening a second inventory borrows the preview
+     and closing it hands the preview straight back, instead of stranding the first player with an
+     empty box until they reopen. */
+  let pv = -1, pvSeq = -1;
+  forEachPlayerState((g, i) => { if (g.invOpen && (g._invSeq || 0) > pvSeq) { pvSeq = g._invSeq || 0; pv = i; } });
+  if (pv >= 0) withSlot(pv, () => updateEquipPreview(dt));
 
-  /* ---- sky, lighting & shadow maps, then the main render ---- */
+  /* ---- sky, lighting & shadow maps, then one render pass per player ---- */
   updateDayNight(dt);
-  // underwater: dark blue murk — short fog, dark tint, dimmed ambient (restored when surfacing)
-  {
-    const eyeId = getBlock(Math.floor(camera.position.x), Math.floor(camera.position.y), Math.floor(camera.position.z)) & 255;
-    const eyeWater = eyeId === B.WATER;
-    const eyeLava  = eyeId === B.LAVA;
-    if (eyeLava) {
-      sharedUniforms.fogColor.value.set(0.72, 0.22, 0.0);
-      renderer.setClearColor(sharedUniforms.fogColor.value);
-      sharedUniforms.fogNear.value = 1;
-      sharedUniforms.fogFar.value = 6;
-      sharedUniforms.uAmbient.value = Math.min(sharedUniforms.uAmbient.value + 0.5, 1.0);
-    } else if (eyeWater) {
-      sharedUniforms.fogColor.value.multiplyScalar(0.45).lerp(_uwTint, 0.4);
-      renderer.setClearColor(sharedUniforms.fogColor.value);
-      sharedUniforms.fogNear.value = 5;
-      sharedUniforms.fogFar.value = 36;
-      sharedUniforms.uAmbient.value *= 0.78;
-      sharedUniforms.uDirect.value *= 0.65;
-    } else {
-      const far = viewDist * 16;                 // restore surface fog range
-      sharedUniforms.fogNear.value = far * 0.55;
-      sharedUniforms.fogFar.value  = far * 0.98;
-    }
-  }
-  renderer.render(scene, camera);
-  /* ---- first-person hand (own depth buffer, always on top) ---- */
-  updateHands(dt, wantBreak, wantPlace, eatProg);
-  // third person shows the actual body, so the first-person arm is skipped entirely
-  if (camView === 0) {
-    renderer.autoClear = false;
-    renderer.clearDepth();
-    /* hand scene: force neutral-bright uniforms so held items are never dark at night or in caves.
-       Shadow coords (vSC) are in world space and meaningless for hand geometry, so disable shadow. */
-    const _hsa = sharedUniforms.uAmbient.value, _hsd = sharedUniforms.uDirect.value, _hss = sharedUniforms.uShadowOn.value;
-    _handSaveLC.copy(sharedUniforms.uLightColor.value);
-    sharedUniforms.uAmbient.value = 1.0; sharedUniforms.uDirect.value = 0.0; sharedUniforms.uShadowOn.value = 0.0;
-    sharedUniforms.uLightColor.value.set(1, 1, 1);
-    renderer.render(handScene, handCam);
-    sharedUniforms.uAmbient.value = _hsa; sharedUniforms.uDirect.value = _hsd; sharedUniforms.uShadowOn.value = _hss;
-    sharedUniforms.uLightColor.value.copy(_handSaveLC);
-    renderer.autoClear = true;
-  }
+  renderAllViews(dt);
 
-  /* ---- HUD (after the render so draw/tri stats reflect the main pass) ---- */
+  /* ---- HUD text (after the render so draw/tri stats reflect the main pass) ---- */
   hudT += dt;
   if (hudT > 0.15) {
     hudT = 0;
-    const p = player.pos, info = renderer.info.render;
-    const heading = ((-player.yaw * 180 / Math.PI) % 360 + 360) % 360;
-    const cdir = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(heading / 45) % 8];
-    const mins = ((worldTime * 24 + 6) % 24) * 60;          // clock: sunrise = 06:00
-    const clock = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(Math.floor(mins % 60)).padStart(2, '0')}`;
-    hudEl.innerHTML =
-      `FPS ${fps} / ${fpsLimit ? Math.min(fpsLimit, rafHz) : rafHz} &middot; ${player.flying ? 'flying' : (player._inWater ? 'swim' : 'walking')}${player.fast ? ' &middot; fast' : ''}${player.canFly ? '' : ' &middot; survival'}<br>` +
-      `facing ${cdir} ${heading.toFixed(0)}&deg; &middot; ${clock} &middot; Day ${worldDay}<br>` +
-      `XYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}<br>` +
-      `biome ${mainGen.biomeAt(Math.floor(p.x), Math.floor(p.z))}<br>` +
-      `chunk ${cx} , ${cz} &middot; loaded ${chunks.size}<br>` +
-      `seed ${SEED} &middot; dist ${viewDist} [ ] &middot; sim ${simDist()}<br>` +
-      `draws ${info.calls} &middot; tris ${(info.triangles / 1000).toFixed(0)}k`;
+    forEachPlayerSlot(paintDebugHud);
   }
+}
+
+/* Volume fog for the camera currently installed: lava murk, water murk, or the ordinary surface
+   range. Called once per viewport so each player's eye gets its own tint — one player underwater
+   must not turn everyone else's view blue. */
+function applyEyeVolumeFog() {
+  const eyeId = getBlock(Math.floor(camera.position.x), Math.floor(camera.position.y), Math.floor(camera.position.z)) & 255;
+  const far = viewDist * 16;
+  if (eyeId === B.LAVA) {
+    sharedUniforms.fogColor.value.set(0.72, 0.22, 0.0);
+    renderer.setClearColor(sharedUniforms.fogColor.value);
+    sharedUniforms.fogNear.value = 1;
+    sharedUniforms.fogFar.value = 6;
+    sharedUniforms.uAmbient.value = Math.min(sharedUniforms.uAmbient.value + 0.5, 1.0);
+  } else if (eyeId === B.WATER) {
+    sharedUniforms.fogColor.value.copy(_skyFogColor).multiplyScalar(0.45).lerp(_uwTint, 0.4);
+    renderer.setClearColor(sharedUniforms.fogColor.value);
+    sharedUniforms.fogNear.value = 5;
+    sharedUniforms.fogFar.value = 36;
+    sharedUniforms.uAmbient.value = _skyAmbient * 0.78;
+    sharedUniforms.uDirect.value  = _skyDirect  * 0.65;
+  } else {
+    // restore whatever updateDayNight computed for this instant — the previous viewport may have
+    // been submerged and left the murk behind
+    sharedUniforms.fogColor.value.copy(_skyFogColor);
+    renderer.setClearColor(sharedUniforms.fogColor.value);
+    sharedUniforms.uAmbient.value = _skyAmbient;
+    sharedUniforms.uDirect.value  = _skyDirect;
+    sharedUniforms.fogNear.value = far * 0.55;
+    sharedUniforms.fogFar.value  = far * 0.98;
+  }
+}
+
+/* The first-person arm, drawn on top of the finished view with its own cleared depth buffer.
+   Split into its own function because it now runs once per viewport. */
+function renderHandPass() {
+  renderer.autoClear = false;
+  renderer.clearDepth();
+  /* hand scene: force neutral-bright uniforms so held items are never dark at night or in caves.
+     Shadow coords (vSC) are in world space and meaningless for hand geometry, so disable shadow. */
+  const _hsa = sharedUniforms.uAmbient.value, _hsd = sharedUniforms.uDirect.value, _hss = sharedUniforms.uShadowOn.value;
+  _handSaveLC.copy(sharedUniforms.uLightColor.value);
+  sharedUniforms.uAmbient.value = 1.0; sharedUniforms.uDirect.value = 0.0; sharedUniforms.uShadowOn.value = 0.0;
+  sharedUniforms.uLightColor.value.set(1, 1, 1);
+  renderer.render(handScene, handCam);
+  sharedUniforms.uAmbient.value = _hsa; sharedUniforms.uDirect.value = _hsd; sharedUniforms.uShadowOn.value = _hss;
+  sharedUniforms.uLightColor.value.copy(_handSaveLC);
+  renderer.autoClear = true;
+}
+
+// the debug read-out, written into whichever player's pane is currently installed
+function paintDebugHud() {
+  if (debugHudHidden(activePlayerSlot())) return;    // F3 / pad Back turned it off for this seat
+  const p = player.pos, info = renderer.info.render;
+  const heading = ((-player.yaw * 180 / Math.PI) % 360 + 360) % 360;
+  const cdir = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(heading / 45) % 8];
+  const mins = ((worldTime * 24 + 6) % 24) * 60;          // clock: sunrise = 06:00
+  const clock = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(Math.floor(mins % 60)).padStart(2, '0')}`;
+  const cx = Math.floor(p.x / 16), cz = Math.floor(p.z / 16);
+  hudEl.innerHTML =
+    `FPS ${fps} / ${fpsLimit ? Math.min(fpsLimit, rafHz) : rafHz} &middot; ${player.flying ? 'flying' : (player._inWater ? 'swim' : 'walking')}${player.fast ? ' &middot; fast' : ''}${player.canFly ? '' : ' &middot; survival'}<br>` +
+    `facing ${cdir} ${heading.toFixed(0)}&deg; &middot; ${clock} &middot; Day ${worldDay}<br>` +
+    `XYZ ${p.x.toFixed(1)} / ${p.y.toFixed(1)} / ${p.z.toFixed(1)}<br>` +
+    `biome ${mainGen.biomeAt(Math.floor(p.x), Math.floor(p.z))}<br>` +
+    `chunk ${cx} , ${cz} &middot; loaded ${chunks.size}<br>` +
+    `seed ${SEED} &middot; dist ${viewDist} [ ] &middot; sim ${simDist()}<br>` +
+    // what this seat is actually listening to — the quickest answer to "is my controller detected"
+    `input ${escapeHtml(inputLabelFor(activePlayerSlot()))}<br>` +
+    `draws ${info.calls} &middot; tris ${(info.triangles / 1000).toFixed(0)}k`;
 }
 

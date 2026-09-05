@@ -16,23 +16,18 @@ window.addEventListener('resize', () => {
    so raw hex colors render ~53% brighter without the correction. */
 const _skinBase  = new THREE.Color(0xf0c080).convertSRGBToLinear();
 const _skinGlow  = new THREE.Color(0xfde8b8).convertSRGBToLinear();  // warm brightened for held-light tint
-const _matSkin   = new THREE.MeshBasicMaterial({ color: _skinBase.clone() });
-const _matSleeve = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x4a6ecc).convertSRGBToLinear() });
-
-const _armFore  = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.96), _matSkin);
-_armFore.position.z = 0.06;
-
+const _sleeveCol = new THREE.Color(0x4a6ecc).convertSRGBToLinear();
+/* Geometry is shared; MATERIALS are not. Each split-screen player owns a whole arm rig, because
+   the pose is integrated frame to frame (lerped, bobbed, swung) rather than recomputed from
+   scratch — four players sharing one arm would each drag it toward their own target. The skin
+   material is per-rig too, since the held-light glow tint is per player. */
+const _armForeGeo  = new THREE.BoxGeometry(0.24, 0.24, 0.96);
 /* sleeve is long and pushed far back so its end goes off-screen, never clips into view */
-const _armUpper = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.27, 0.72), _matSleeve);
-_armUpper.position.z = 0.84;
+const _armUpperGeo = new THREE.BoxGeometry(0.27, 0.27, 0.72);
 
 /* ─── held-item container ─── */
 /* Pose is re-applied per item in _rebuildHeld: blocks/generic items keep the old loose grip,
    while tools and weapons get a dedicated "held by the handle" pose (see HELD_POSE). */
-const heldGroup = new THREE.Group();
-heldGroup.position.set(0.02, 0.12, -0.44);  // connected to hand tip
-heldGroup.scale.setScalar(0.60);             // larger item in hand
-heldGroup.rotation.set(-0.15, -0.52, 0.30); // -0.52 rad ≈ 30° left rotation
 
 /* Tool/weapon grip.
    Item sprites are built as an upright quad in the XY plane with the icon's handle in the
@@ -48,37 +43,54 @@ const HELD_POSE = {
   block: { pos: [0.02, 0.12, -0.44],  scale: 0.60, rot: [-0.15, -0.52, 0.30],        grip: 0 },
 };
 
-/* ─── arm pivot — swing / bob animations rotate this ─── */
-const armPivot = new THREE.Group();
-armPivot.add(_armFore, _armUpper, heldGroup);
-
-/* ─── screen-space root — start at rest position to avoid near-clip pop on frame 1 ─── */
-const handRoot = new THREE.Group();
-handRoot.add(armPivot);
-handScene.add(handRoot);
-// initialized after constants are defined (below)
-
 /* rest position: lower-right of screen, arm angled inward
    Large H_RX tips the arm up so its LENGTH is visible on screen (not just the end-face).
    H_RY angles it toward screen center. At rest the sleeve goes off bottom-right. */
 const H_X  =  0.82, H_Y  = -1.04, H_Z  = -2.10;
 const H_RX =  0.92, H_RY =  0.48;
 
-handRoot.position.set(H_X, H_Y, H_Z);
-armPivot.rotation.set(H_RX, H_RY, 0);
+/* ─── one whole arm rig per player ─── */
+const HAND_RIGS = [];
+function buildHandRig() {
+  const matSkin   = new THREE.MeshBasicMaterial({ color: _skinBase.clone() });
+  const matSleeve = new THREE.MeshBasicMaterial({ color: _sleeveCol.clone() });
+  const fore  = new THREE.Mesh(_armForeGeo, matSkin);    fore.position.z  = 0.06;
+  const upper = new THREE.Mesh(_armUpperGeo, matSleeve); upper.position.z = 0.84;
+  const held = new THREE.Group();
+  held.position.set(0.02, 0.12, -0.44);   // connected to hand tip
+  held.scale.setScalar(0.60);              // larger item in hand
+  held.rotation.set(-0.15, -0.52, 0.30);  // -0.52 rad ≈ 30° left rotation
+  const pivot = new THREE.Group();
+  pivot.add(fore, upper, held);
+  pivot.rotation.set(H_RX, H_RY, 0);
+  // screen-space root — starts at rest position to avoid near-clip pop on frame 1
+  const root = new THREE.Group();
+  root.add(pivot);
+  root.position.set(H_X, H_Y, H_Z);
+  handScene.add(root);
+  const rig = { root, pivot, held, matSkin };
+  HAND_RIGS.push(rig);
+  return rig;
+}
+// player one's rig IS the default binding; 36-splitscreen.js swaps these per viewport
+var _hand0    = buildHandRig();
+var handRoot  = _hand0.root;
+var armPivot  = _hand0.pivot;
+var heldGroup = _hand0.held;
+var _matSkin  = _hand0.matSkin;
 
 /* ─── state ─── */
-let _armGlow   = 0;   // animated 0-1 glow factor for arm skin tint
-let _bobT      = 0;
-let _swimT     = 0;
-let _eatBobT   = 0;
-let _inactive  = 0;   // seconds without any input
-let _swingT    = -1;  // -1 = idle; 0..1 = swing progress
-let _prevMining = false;
-let _prevBreak  = false;
-let _prevPlace  = false;
-let _prevYaw   = 0, _prevPitch = 0;
-let _heldId    = undefined;  // undefined forces first build
+var _armGlow   = 0;   // animated 0-1 glow factor for arm skin tint
+var _bobT      = 0;
+var _swimT     = 0;
+var _eatBobT   = 0;
+var _inactive  = 0;   // seconds without any input
+var _swingT    = -1;  // -1 = idle; 0..1 = swing progress
+var _prevMining = false;
+var _prevBreak  = false;
+var _prevPlace  = false;
+var _prevYaw   = 0, _prevPitch = 0;
+var _heldId    = undefined;  // undefined forces first build
 
 function _rebuildHeld(id) {
   _heldId = id;

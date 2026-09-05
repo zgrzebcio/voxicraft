@@ -5,8 +5,8 @@
 // 10 hearts on the left (each = 2HP), 10 drumsticks on the right (each = 2 food). Food
 // depletes over time; saturation (gold outline) drains 3× faster first. Icons are drawn
 // pixel-by-pixel into the canvas with a 16x16 stamp for the icon shape (Minecraft-style silhouette).
-const vitalsEl = document.getElementById('vitals');
-const vctx = vitalsEl.getContext('2d');
+var vitalsEl = document.getElementById('vitals');
+var vctx = vitalsEl.getContext('2d');
 vctx.imageSmoothingEnabled = false;
 
 // pre-render the 4 icon variants (full/half/empty × heart/drumstick) into offscreen buffers
@@ -192,7 +192,7 @@ function paintVitals() {
     }
   }
 }
-let vitalsDirty = true, vitalsShown = false;
+var vitalsDirty = true, vitalsShown = false;
 
 // GUI sprite textures — loaded async on world entry; vitalsDirty set per load to force a repaint
 const GUI_IMG = {};
@@ -259,6 +259,15 @@ function updateVitals(dt) {
   if (!survival) return;
   if (!player.dead) player.aliveT = (player.aliveT || 0) + dt;   // survival stopwatch for the death screen
   const prevFood = player.food, prevHp = player.hp, prevSat = player.saturation;
+  /* The damage baseline is the HP this player had when updateVitals LAST FINISHED, not the HP it
+     has on entry (0.7293).
+
+     Mobs hit in updateEntities, which is part of the world tick and therefore runs AFTER every
+     player's updateVitals. Diffing within the call could only ever see damage the call inflicted
+     itself — fall, cactus, drowning, starvation — so a mob landing a blow produced no red flash,
+     no camera kick, no hit sound, and (worse) skipped the armour soak entirely, since that used
+     the same in-call baseline. Carrying the value across the frame boundary catches both. */
+  const dmgBase = (typeof player._hpLast === 'number') ? player._hpLast : player.hp;
 
   // food drain: idle baseline, sprint multiplier, and a discrete tick per jump edge.
   // sprinting only counts when actually moving on the ground (not fly-fast, not falling)
@@ -381,10 +390,10 @@ function updateVitals(dt) {
      frame's loss is reduced here — before the death check, so armor can actually save you.
      The 0.5 floor keeps the slow starvation drip from counting as a hit. */
   {
-    const lost = prevHp - player.hp;
+    const lost = dmgBase - player.hp;      // cross-frame, so a mob's blow is soaked too (0.7293)
     if (lost >= 0.5 && !player.dead) {
       const mult = armorDamageMultiplier();
-      if (mult < 1) player.hp = Math.min(MAX_HP, prevHp - lost * mult);
+      if (mult < 1) player.hp = Math.min(MAX_HP, dmgBase - lost * mult);
       damageArmorDurability();
     }
   }
@@ -394,6 +403,7 @@ function updateVitals(dt) {
   // respawn happens when the player clicks Respawn (respawnPlayer below)
   if (player.hp <= 0 && !player.dead) {
     player.dead = true;
+    if (player.sleepingAt) leaveBed(player);     // dying in your sleep still gets you out of it
     playSound('death', { gain: 1 });
     const dx0 = Math.floor(player.pos.x), dy0 = Math.floor(player.pos.y + 0.5), dz0 = Math.floor(player.pos.z);
     for (const arr of [HOTBAR, invSlots, equipSlots])   // worn gear drops with everything else
@@ -412,24 +422,27 @@ function updateVitals(dt) {
   if (player.dead) for (const k in keys) keys[k] = false;   // no wandering while dead
   // discrete hit this frame (fall / cactus / drown — slow starve drain stays below threshold):
   // red flash + camera kick, both scaled by how hard the hit was
-  const lostHp = prevHp - player.hp;
+  const lostHp = dmgBase - player.hp;
   if (lostHp >= 0.5 && !player.dead) {
     hurtFlash(lostHp);
     // central hook: every damage source (fall, cactus, lava, drowning, mobs) lands here
-    playSound('hit', { gain: 0.9, rate: 0.95 + Math.random() * 0.1 });
+    playSound('hit', { gain: 0.9, rate: 0.95 + Math.random() * 0.1,
+                       pos: { x: player.pos.x, y: player.pos.y + 1, z: player.pos.z } });
   }
-  if (Math.floor(player.hp * 2) !== Math.floor(prevHp * 2)
+  player._hpLast = player.hp;                 // baseline for whatever hurts them before next tick
+  if (Math.floor(player.hp * 2) !== Math.floor(dmgBase * 2)     // dmgBase: sees mob hits too
       || Math.floor(player.food * 2) !== Math.floor(prevFood * 2)
       || Math.floor(player.saturation * 2) !== Math.floor(prevSat * 2)) vitalsDirty = true;
   if (vitalsDirty) { paintVitals(); vitalsDirty = false; }
 }
 
 /* ---- hurt feedback: red vignette (strength scales with damage) + camera kick ---- */
-const camShake = { t: 0, dur: 0.25, amp: 0 };
-const hurtEl = document.createElement('div');
+var camShake = { t: 0, dur: 0.25, amp: 0 };
+/* The red damage vignette is per player: it is created here but PLACED by 36-splitscreen.js,
+   inside the owning player's HUD pane, so only the player who got hit sees red. */
+var hurtEl = document.createElement('div');
 hurtEl.id = 'hurtOverlay';
-document.body.appendChild(hurtEl);
-let _hurtA = 0;
+var _hurtA = 0;
 function hurtFlash(lost) {
   _hurtA = Math.min(0.9, 0.3 + lost * 0.09);
   camShake.t = camShake.dur;
@@ -437,18 +450,24 @@ function hurtFlash(lost) {
   hurtEl.style.opacity = _hurtA.toFixed(3);
 }
 
-/* ---- death screen ---- */
+/* ---- death screen ----
+   `deathEl` and friends are per-player pane elements, swapped with the rest of the HUD, so a
+   player dying in split screen darkens only their own quarter of the screen. The pointer lock is
+   released only when the player who died is the one holding the mouse (player one). */
+var deathEl = null, deathCauseEl = null, deathStatsEl = null;
 function showDeathScreen(cause) {
-  const el = document.getElementById('deathScreen');
-  document.getElementById('deathCause').textContent = 'You ' + cause;
+  if (!deathEl) return;
+  if (deathCauseEl) deathCauseEl.textContent = 'You ' + cause;
   const t = Math.floor(player.aliveT || 0);
   const tStr = t >= 60 ? `${Math.floor(t / 60)}m ${t % 60}s` : `${t}s`;
-  document.getElementById('deathStats').textContent = `Survived ${tStr} · Day ${worldDay + 1}`;
-  el.style.display = 'flex';
-  if (document.pointerLockElement) document.exitPointerLock();
+  if (deathStatsEl) deathStatsEl.textContent = `Survived ${tStr} · Day ${worldDay + 1}`;
+  deathEl.style.display = 'flex';
+  if (player === PLAYERS[0] && document.pointerLockElement) document.exitPointerLock();
 }
 function respawnPlayer() {
   player.hp = MAX_HP; player.food = MAX_FOOD; player.saturation = 0; player.air = MAX_AIR;
+  player._hpLast = MAX_HP;                    // a respawn is not a heal — don't diff across it
+  if (player.sleepingAt) leaveBed(player);     // never respawn still flagged as in a bed
   player.vy = 0; player.fallStart = null; player._kbT = 0; player._dmgCause = null; player.aliveT = 0;
   const s = findValidSpawn();
   if (s) {
@@ -461,9 +480,9 @@ function respawnPlayer() {
     player.pos.y = Math.max(sy + 2, WATER_Y + 3);
   }
   player.dead = false;
-  document.getElementById('deathScreen').style.display = 'none';
+  if (deathEl) deathEl.style.display = 'none';
   paintVitals();
-  if (playing) { lockTries = 0; tryPointerLock(); }
+  // only player one owns the mouse, so only their respawn re-grabs the pointer lock
+  if (playing && player === PLAYERS[0]) { lockTries = 0; tryPointerLock(); }
 }
-document.getElementById('respawnBtn').addEventListener('click', respawnPlayer);
 

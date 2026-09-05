@@ -21,12 +21,14 @@ const menuHome    = document.getElementById('menuHome');
 const menuWorlds  = document.getElementById('menuWorlds');
 const menuCreate  = document.getElementById('menuCreate');
 const menuPause   = document.getElementById('menuPause');
+const menuProfiles = document.getElementById('menuProfiles');
 const menuExtras  = document.getElementById('menuExtras');
 const menuSub     = document.getElementById('menuSub');
 const worldListEl = document.getElementById('worldList');
 const worldNameIn = document.getElementById('worldName');
 const newModeSel  = document.getElementById('newModeSel');
 const newTerrainSel = document.getElementById('newTerrainSel');
+const newSplitChk = document.getElementById('newSplitChk');
 const tickInput   = document.getElementById('tickInput');
 const modeLabel   = document.getElementById('modeLabel');
 
@@ -36,7 +38,8 @@ let _loadingWorld = false;   // true while initial chunks are generating; hides 
 
 let WORLDS = (() => { try { const a = JSON.parse(localStorage.getItem('vc_worlds')); return Array.isArray(a) ? a : []; } catch { return []; } })();
 let currentWorld = null;
-let pendingRestore = null;                  // saved player+drops, applied once the chunk under them loads
+let pendingRestore = null;                  // player one's own saved state, applied once their chunk loads
+let pendingWorldRestore = null;             // drops + loose mobs, applied once anything is loaded (0.721)
 
 /* World DATA lives in IndexedDB (structured clone — no localStorage 5MB ceiling); only the
    small registry stays in localStorage. Legacy localStorage saves migrate over on load, and
@@ -101,8 +104,12 @@ function saveWorld(syncToLS = false) {
     xp: serializeXP(),                    // total experience + the player-placed block ledger
     player: { pos: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw, pitch: player.pitch,
               hp: player.hp, food: player.food, saturation: player.saturation, flying: player.flying,
-              hotSel: hotbarSel,
+              hotSel: hotbarSel, profile: player.profileId || null,
               spawnPos: player.spawnPos ? player.spawnPos.toArray() : null },
+    /* One record per person who has played this world, tagged with their profile (0.721) — see
+       the header of 36-splitscreen.js's persistence section. Player one ALSO keeps writing the
+       original top-level fields above, so an older build still opens this save. */
+    players: serializePlayerRecords(),
   };
   const id = currentWorld.id;
   if (syncToLS) {           // unload path: synchronous localStorage copy, IDB may not finish
@@ -142,6 +149,7 @@ async function loadWorld(w) {
   let ls = null;
   try { ls = JSON.parse(localStorage.getItem('vc_world_' + w.id)); } catch {}
   if (ls && (!data || (ls.savedAt || 0) > (data.savedAt || 0))) data = ls;   // pick the newest copy
+  setPlayerCount(1);                  // the roster is per world; the previous one's players leave
   resetWorld(w.seed, w.terrain);      // worlds saved before 0.665 have no `terrain` -> 'default'
   if (data && data.edits)
     for (const k in data.edits) { const m = new Map(data.edits[k]); if (m.size) editStore.set(k, m); }
@@ -185,26 +193,42 @@ async function loadWorld(w) {
         registerChest(gx + (i & 15), i >> 8, gz + ((i >> 4) & 15), (v >> 8) & 3);
     }
   }
-  // only restore survival inventory when the world has a real player save (proves they played it).
+  /* Who is player one in this world?  (0.721)
+     The save holds one record per profile, so the person sitting at the keyboard gets THEIR OWN
+     things back — even if they were player three last time. Only when the save has no record for
+     them (a world they have never joined, or one written before profiles existed) does the legacy
+     top-level record apply, and that in turn only when it is unowned. */
+  restorePlayerRecords(data);
+  const _mine = playerRecordFor(player.profileId);
+  const _legacy = (data && data.player && Array.isArray(data.player.pos) && !data.player.profile)
+                ? data.player : null;
+  const _own = _mine || _legacy;
+  // only restore survival inventory when there is a real record to restore (proves they played it).
   // Any other case (fresh world, ID collision, corrupt/missing data) starts empty.
-  const _hasSurvSave = !!(data && data.player && Array.isArray(data.player.pos));
-  survStash = {
-    hot: _hasSurvSave ? _validArr(data.survHot, 9) : new Array(9).fill(null),
-    inv: _hasSurvSave ? _validArr(data.survInv, 27) : new Array(27).fill(null),
-    inv2: _hasSurvSave ? _validArr(data.survInv2, 27) : new Array(27).fill(null),   // future backpack
-  };
+  survStash = _own
+    ? migrateStash(_own.survHot ?? data.survHot, _own.survInv ?? data.survInv, _own.survInv2 ?? data.survInv2)
+    : migrateStash(null, null, null);
   // worn gear (and anything on the belt) rides with the survival stash
-  restoreEquip(_hasSurvSave ? data.survEquip : null, _hasSurvSave ? data.survBelt : null);
-  restoreXP(_hasSurvSave ? data.xp : null);
+  restoreEquip(_own ? (_own.survEquip ?? data.survEquip) : null,
+               _own ? (_own.survBelt ?? data.survBelt) : null);
+  restoreXP(_own ? (typeof _own.xp === 'number' ? { xp: _own.xp, placed: (data.xp && data.xp.placed) } : data.xp) : null);
   if (data && typeof data.time === 'number') { worldTime = ((data.time % 1) + 1) % 1; worldDay = typeof data.worldDay === 'number' ? data.worldDay : 0; }
   else { worldTime = 1 / 24; worldDay = 0; }  // new world: start at 07:00, day 0
   // survival-created worlds are locked to survival; creative worlds resume their last mode
   modeSel.value = w.mode === 'survival' ? 'survival' : ((data && data.curMode) || w.mode);
   loadInventoryForMode(modeSel.value === 'survival' ? 'survival' : 'creative');
   hotbarSel = 0; buildHotbar(); buildInventory();
-  pendingRestore = (data && data.player && Array.isArray(data.player.pos))
-    ? { ...data.player, drops: data.drops, entities: data.entities } : null;
+  /* Drops and loose mobs are WORLD state, not player state: they are restored exactly once, no
+     matter whose profile is sitting in seat one — including a profile that has never opened this
+     world and therefore has no record of its own to spawn from. */
+  pendingWorldRestore = (data && (data.drops || data.entities))
+    ? { drops: data.drops, entities: data.entities } : null;
+  pendingRestore = _own ? { ..._own } : null;
   if (pendingRestore) player.pos.set(pendingRestore.pos[0], 96, pendingRestore.pos[2]); // stream the right chunks
+  else if (data && data.player && Array.isArray(data.player.pos))
+    player.pos.set(data.player.pos[0], 96, data.player.pos[2]);  // new face: still start where the world is built
+  // everyone else this world was last played with rejoins, if their profile still exists
+  autoJoinSavedRoster();
   refreshMenu();
   // capture first thumbnail after chunks settle (~4s)
   const _thumbId = w.id;
@@ -266,6 +290,7 @@ function renderWorldList() {
       `created ${_stamp(w.created)}`,
       `played ${_stamp(w.lastPlayed || w.created)}`,
     ];
+    if (w.split) bits.push('split screen');
     if (typeof w.savedDay === 'number') bits.push(`day ${w.savedDay}`);
     bits.push(`v${escapeHtml(w.lastVersion || w.createdVersion || 'pre-0.443')}`);
     row.innerHTML =
@@ -299,24 +324,35 @@ function renderWorldList() {
   }
 }
 
-let menuScreen = 'home';                    // 'home' | 'worlds' | 'create' | 'pause'
+let menuScreen = 'home';                    // 'home' | 'worlds' | 'create' | 'pause' | 'profiles'
 function refreshMenu(screen) {
   if (screen) menuScreen = screen;
-  if (currentWorld) menuScreen = 'pause';
-  else if (menuScreen === 'pause') menuScreen = 'home';
+  /* First run has no profile, and a save has to belong to somebody — so until one exists the
+     profile screen IS the menu. Enforced here rather than only at boot, so no path (Escape, a quit
+     to title, deleting the last profile) can slip past it. */
+  if (needsFirstProfile()) menuScreen = 'profiles';
+  else if (menuScreen !== 'profiles') {
+    if (currentWorld) menuScreen = 'pause';
+    else if (menuScreen === 'pause') menuScreen = 'home';
+  }
   const s = menuScreen;
-  menuHome.style.display   = s === 'home'   ? 'block' : 'none';
-  menuWorlds.style.display = s === 'worlds' ? 'block' : 'none';
-  menuCreate.style.display = s === 'create' ? 'block' : 'none';
-  menuPause.style.display  = s === 'pause'  ? 'block' : 'none';
+  menuHome.style.display     = s === 'home'     ? 'block' : 'none';
+  menuWorlds.style.display   = s === 'worlds'   ? 'block' : 'none';
+  menuCreate.style.display   = s === 'create'   ? 'block' : 'none';
+  menuPause.style.display    = s === 'pause'    ? 'block' : 'none';
+  menuProfiles.style.display = s === 'profiles' ? 'block' : 'none';
   menuExtras.style.display = (s === 'home' || s === 'pause') ? 'block' : 'none';
   // the gamemode dropdown only exists inside worlds CREATED as creative
   modeLabel.style.display  = (s === 'pause' && currentWorld && currentWorld.mode === 'creative') ? 'flex' : 'none';
-  menuSub.textContent = s === 'pause'  ? `${currentWorld.name} — paused (auto-saves)`
-                      : s === 'worlds' ? 'select a world'
-                      : s === 'create' ? 'create a new world'
+  menuSub.textContent = s === 'pause'    ? `${currentWorld.name} — paused (auto-saves)`
+                      : s === 'worlds'   ? 'select a world'
+                      : s === 'create'   ? 'create a new world'
+                      : s === 'profiles' ? (needsFirstProfile() ? 'who is playing?' : 'profiles on this device')
                       : 'infinite voxel world · greedy-meshed · worker-generated';
   if (s === 'worlds') renderWorldList();
+  if (s === 'profiles') renderProfiles();
+  if (s === 'pause') renderSplitPanel();     // the split-screen roster lives on the pause screen
+  paintProfileLabel();
 }
 
 /* Minecraft-style title panorama: a fixed scenic overlook on the dedicated "voxicraft" seed
@@ -329,17 +365,26 @@ function setHudVisible(v) {
      hearts, hunger and level bar sitting over the panorama. They own their own visibility while
      playing (survival only), so hiding is unconditional but SHOWING is left to them — otherwise
      this would force a creative player's heart row back on. */
-  for (const id of ['hud', 'hotbar', 'crosshair'])
-    document.getElementById(id).style.display = v ? '' : 'none';
-  if (!v) {
-    for (const id of ['vitals', 'xpBar', 'xpPops']) {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
+  /* Every one of these lives inside a per-player HUD pane now (0.72), so the sweep runs over all
+     the panes rather than over document ids — with four players there are four of each. */
+  for (const [i, pane] of hudPanes().entries()) {
+    for (const sel of ['#hud', '#hotbar', '#crosshair']) {
+      const el = pane.querySelector(sel);
+      if (!el) continue;
+      // ...but never un-hide debug text this seat deliberately turned off with F3 / pad Back
+      const off = !v || (sel === '#hud' && debugHudHidden(i));
+      el.style.display = off ? 'none' : '';
     }
+    if (!v) for (const sel of ['#vitals', '#xpBar', '#xpPops'])
+      { const el = pane.querySelector(sel); if (el) el.style.display = 'none'; }
+  }
+  if (!v) {
     // both of those cache their last shown state and only touch the DOM on a change, so the
-    // cached flags have to be cleared or neither would ever come back
-    vitalsShown = false;
-    if (typeof xpBarEl !== 'undefined' && xpBarEl) xpBarEl._shown = undefined;
+    // cached flags have to be cleared or neither would ever come back — for every player
+    forEachPlayerState((g) => {
+      g.vitalsShown = false;
+      if (g.xpBarEl) g.xpBarEl._shown = undefined;
+    });
   }
 }
 /* The panorama is not allowed to be watched while it assembles: the canvas is held at zero

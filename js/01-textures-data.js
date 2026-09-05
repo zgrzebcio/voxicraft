@@ -182,6 +182,7 @@ const ITEM_TEXTURES = {
   iron_shears:     'textures/Items/Tools/iron_shears.png',
   feather:         'textures/Items/Materials/feather.png',
   mutton:          'textures/Items/Consumables/mutton.png',
+  rotten_flesh:    'textures/Items/Materials/rotten_flesh.png',
   cooked_mutton:   'textures/Items/Consumables/cooked_mutton.png',
   leather_helmet:     'textures/Items/Armor/leather_helmet.png',
   leather_chestplate: 'textures/Items/Armor/leather_chestplate.png',

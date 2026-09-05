@@ -44,7 +44,7 @@ crackMesh.visible = false;
 crackMesh.renderOrder = 2;
 crackMesh.layers.set(1);
 scene.add(crackMesh);
-const mining = { active:false, x:0, y:0, z:0, elapsed:0, needed:0, stage:-1 };
+var mining = { active:false, x:0, y:0, z:0, elapsed:0, needed:0, stage:-1 };
 function resetMining() {
   mining.active = false;
   mining.stage = -1;

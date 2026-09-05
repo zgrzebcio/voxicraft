@@ -44,6 +44,8 @@ const RECIPES_BASIC = [
 const RECIPES_ADVANCED = [
   { in: [[ITEM.COAL_CHUNK, 8]],                                              out: [ITEM.COAL, 1] },
   { in: [[B.STONE, 1], [ITEM.FLINT, 1], [ITEM.COAL, 1]],                     out: [ITEM.GLOW_DUST, 1] },
+  // dust packs back into the block it came from, so a light source is craftable rather than found
+  { in: [[ITEM.GLOW_DUST, 4]],                                               out: [B.GLOWSTONE, 1] },
   { in: [[V_PLANKS, 3]],                                                     out: [ITEM.BOWL, 4] },
   { in: [[V_STONE, 10]],                                                     out: [B.FURNACE, 1] },
   { in: [[ITEM.IRON_INGOT, 1]],                                              out: [ITEM.IRON_NUGGET, 9] },
@@ -96,7 +98,7 @@ const RECIPES_ADVANCED = [
 ];
 
 // which list is shown: 'basic' (E / pocket) or 'advanced' (crafting bench = basic + advanced)
-let craftMode = 'basic';
+var craftMode = 'basic';
 const craftRecipes = () => craftMode === 'advanced' ? [...RECIPES_BASIC, ...RECIPES_ADVANCED] : RECIPES_BASIC;
 const idName = (id) => id >= 256 ? ITEM_PROPS[id].name : PROPS[id].name;
 
@@ -157,14 +159,14 @@ function recipeCategory(r) {
   return p?.tool ? 'tools' : 'materials';
 }
 const CRAFT_CATS = ['all', 'blocks', 'materials', 'tools', 'armor', 'food'];
-let craftCat = 'all';                      // active tab; kept across rebuilds
+var craftCat = 'all';                      // active tab; kept across rebuilds
 function cycleCraftCategory(dir) {         // dir = +1 (RB) / -1 (LB); wraps
   const i = CRAFT_CATS.indexOf(craftCat);
   craftCat = CRAFT_CATS[(i + dir + CRAFT_CATS.length) % CRAFT_CATS.length];
   _craftScroll = 0;
   buildCraftPanel();
 }
-let _craftScroll = 0;                       // saved scroll position preserved across doCraft rebuild
+var _craftScroll = 0;                       // saved scroll position preserved across doCraft rebuild
 
 /* Variant cycling: rather than rebuilding the panel (which would fight the scroll position),
    a ticker rewrites the icon and tooltip of every ingredient that has a variant group. */
@@ -172,7 +174,7 @@ const CRAFT_VARIANT_MS = 2000;
 let _variantPhase = 0;
 setInterval(() => {
   _variantPhase++;
-  const panel = document.getElementById('craftPanel');
+  const panel = invPanel('craftPanel');
   if (!panel || panel.style.display === 'none') return;
   for (const el of panel.querySelectorAll('.cing[data-ids]')) {
     const ids = el.dataset.ids.split(',').map(Number);
@@ -185,7 +187,7 @@ setInterval(() => {
 
 // populates the permanent #craftPanel div whenever the inventory rebuilds
 function buildCraftPanel() {
-  const panel = document.getElementById('craftPanel');
+  const panel = invPanel('craftPanel');
   if (!panel) return;
   panel.style.display = 'flex';
   // category tabs: All has no icon (label only), the rest use a themed icon from ITEM/BLOCK
