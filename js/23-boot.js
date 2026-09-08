@@ -75,30 +75,46 @@ buildAtlas().then((tex) => {
    actually being entered, where there is a loading screen to hide it behind.
 
    Idempotent: entering a second world re-uses everything the first one warmed. */
+/* `gameAssetsReady` is what the loading screen waits on (0.732). It used to dismiss purely on
+   CHUNK readiness, so entering a world with a cold cache dropped you into a finished landscape
+   holding invisible items, next to black chests and doors — the art was still in flight. The
+   screen now stays up until the art has landed AND every icon has been rasterised.
+
+   The timeout is a deliberate escape hatch: nothing below can reject (ensureGameArt swallows its
+   own failures per image), but a wedged fetch must never leave someone staring at a loading
+   screen for ever. Fifteen seconds in, the world opens regardless. */
 let _gameAssetsStarted = false;
+var gameAssetsReady = false;
+const GAME_ASSET_TIMEOUT = 15000;
 function ensureGameAssets() {
   if (_gameAssetsStarted) return;
   _gameAssetsStarted = true;
-  ensureStructuresLoaded();                       // prefab manifest + files, fetched in parallel
+  const structures = ensureStructuresLoaded();    // prefab manifest + files, fetched in parallel
   ensureVitalsSprites();                          // hearts / food / air / armor bar sprites
-  /* Icons are cached for the life of the session the moment they are first drawn, and the chest,
-     bed and door draw themselves from IMAGES — so warming them before their art has arrived bakes
-     a black square in permanently. WAIT for the art (0.724); the loading screen is up anyway. */
-  ensureGameArt().then(() => {
-    /* Rebuild for EVERY player, not just whoever is installed: loadWorld already drew each seat's
-       hotbar while this art was still in flight, so those slots are holding the empty string
-       renderBlockIcon hands back for a not-yet-drawable icon. */
-    forEachPlayerSlot(() => buildHotbar());
-    let i = 0;
-    const warmIcons = () => {
-      const t0 = performance.now();
-      while (i < PLACEABLE.length && performance.now() - t0 < 3) renderBlockIcon(PLACEABLE[i++]);
-      if (i < PLACEABLE.length) { requestAnimationFrame(warmIcons); return; }
-      buildInventory();                           // icons are cached by now, so this is cheap
-      forEachPlayerSlot(() => buildHotbar());     // ...and the hotbars once more, now fully warm
-    };
-    requestAnimationFrame(warmIcons);
+  const iconsWarm = new Promise((resolve) => {
+    /* Icons are cached for the life of the session the moment they are first drawn, and the chest,
+       bed and door draw themselves from IMAGES — so warming them before their art has arrived bakes
+       a black square in permanently. WAIT for the art (0.724); the loading screen is up anyway. */
+    ensureGameArt().then(() => {
+      /* Rebuild for EVERY player, not just whoever is installed: loadWorld already drew each seat's
+         hotbar while this art was still in flight, so those slots are holding the empty string
+         renderBlockIcon hands back for a not-yet-drawable icon. */
+      forEachPlayerSlot(() => buildHotbar());
+      let i = 0;
+      const warmIcons = () => {
+        const t0 = performance.now();
+        while (i < PLACEABLE.length && performance.now() - t0 < 3) renderBlockIcon(PLACEABLE[i++]);
+        if (i < PLACEABLE.length) { requestAnimationFrame(warmIcons); return; }
+        buildInventory();                           // icons are cached by now, so this is cheap
+        forEachPlayerSlot(() => buildHotbar());     // ...and the hotbars once more, now fully warm
+        resolve();
+      };
+      requestAnimationFrame(warmIcons);
+    });
   });
+  const done = () => { gameAssetsReady = true; };
+  Promise.all([iconsWarm, Promise.resolve(structures).catch(() => {})]).then(done);
+  setTimeout(done, GAME_ASSET_TIMEOUT);
 }
 
 // small console/debug handle (harmless in normal play)
@@ -137,7 +153,9 @@ window.__vc = {
   inv: () => ({ mode: currentInvMode,
                 HOTBAR: HOTBAR.map(s => s ? {id: s.id, count: s.count} : null),
                 invSlots: invSlots.map(s => s ? {id: s.id, count: s.count} : null),
-                spawnPos: player.spawnPos && player.spawnPos.toArray() }),
+                spawnPos: player.spawnPos && player.spawnPos.toArray(),
+                homeSpawn: player.homeSpawn && player.homeSpawn.toArray(),
+                spawnBedKey: player.spawnBedKey || null }),
   hardness: (id) => PROPS[id].hardness,
   stack: (id) => stackSize(id),
   mining: () => ({ active: mining.active, x: mining.x, y: mining.y, z: mining.z, elapsed: mining.elapsed, needed: mining.needed, stage: mining.stage }),

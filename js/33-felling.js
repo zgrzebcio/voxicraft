@@ -69,6 +69,14 @@ const isStrippedLog = (id) => UNSTRIPPED_OF[id] !== undefined;
 const isAnyLog      = (id) => isLiveLog(id) || isStrippedLog(id);
 const isLeaf        = (id) => LITTER_OF[id] !== undefined;
 
+/* A log the PLAYER placed carries no width bits — every generated trunk cell writes an explicit
+   width (see the `put(... w << 2 ...)` calls in the tree generator), a placed one leaves them 0
+   and falls back to LOG_W_NORMAL for display. That is the only marker we need to tell a built
+   structure from a grown tree, and it is what stops chopping one log out of a log wall from
+   collapsing everything above it: a placed log is cut ALONE, and a real tree's flood refuses to
+   spread into placed wood. */
+const isPlacedLog = (val) => isAnyLog(val & 255) && ((((val >> 8) & 255) >> 2) & 63) === 0;
+
 // holding an axe? felling is an axe mechanic — bare hands still mine a log the plain way
 function _holdingAxe() {
   const held = slotId(HOTBAR[hotbarSel]);
@@ -257,11 +265,11 @@ const BERRY_STAGE_LIFE = 0.8, BERRY_STAGE_JITTER = 0.9;           // in-game day
 const BERRY_TICK = 1.0, BERRY_SWEEP_TICK = 5.0, BERRY_SWEEP_TRIES = 20;
 let _berryTimer = 0, _berrySweep = 0;
 const _berryLife = () => (BERRY_STAGE_LIFE + Math.random() * BERRY_STAGE_JITTER) * _dayLen();
-// stage of the bush at this cell, or -1 when it is not a bush (or already fully grown)
+// stage of the bush at this cell, or -1 when it is not a bush or is already ripe
 function berryStageAt(val) {
-  if ((val & 255) !== B.BERRY_BUSH) return -1;
-  const v = (val >> 8) & 255;
-  return v >= BERRY_STAGE.GROWN ? -1 : v;
+  if (!isBerryBush(val & 255)) return -1;
+  const st = berryStage((val >> 8) & 255);
+  return st < BERRY_STAGE.GROWN ? st : -1;
 }
 function queueBerryGrow(x, y, z) { berryGrow.set(x + ',' + y + ',' + z, _berryLife()); }
 function sweepBerryGrow() {
@@ -287,12 +295,14 @@ function updateBerryGrow(dt) {
   for (const [k, t] of berryGrow) {
     const [x, y, z] = k.split(',').map(Number);
     if (!inSimRange(x, z)) continue;             // regrow clock pauses outside the sim radius
-    const stage = berryStageAt(getBlock(x, y, z));
+    const cur = getBlock(x, y, z);
+    const stage = berryStageAt(cur);
     if (stage < 0) { berryGrow.delete(k); continue; }             // picked clean, mined, or ripe
     const left = t - step;
     if (left > 0) { berryGrow.set(k, left); continue; }
-    setBlock(x, y, z, B.BERRY_BUSH | ((stage + 1) << 8));
-    if (stage + 1 >= BERRY_STAGE.GROWN) berryGrow.delete(k);
+    const next = stage + 1;                                       // stage numbers ARE the order
+    setBlock(x, y, z, (cur & 255) | (next << 8));                 // keeps whichever bush it is
+    if (next >= BERRY_STAGE.GROWN) berryGrow.delete(k);           // ripe: nothing further to do
     else berryGrow.set(k, _berryLife());
   }
 }
@@ -405,6 +415,9 @@ const CUT_STEP = 4;                 // width indices removed per swing (8 textur
 function tryChopLog(x, y, z) {
   const val = getBlock(x, y, z), id = val & 255;
   if (!isAnyLog(id) || !_holdingAxe()) return false;
+  /* A placed log is not a tree: no bark strip, no width countdown, no flood. Hand it back to the
+     normal mining path so it breaks once and drops itself, like any other building block. */
+  if (isPlacedLog(val)) return false;
   const variant = (val >> 8) & 255;
 
   // first swing: take the bark off. Same width — nothing has been cut away yet.
@@ -448,7 +461,9 @@ function fellTreeFrom(x, y, z) {
           const k = nx + ',' + ny + ',' + nz;
           if (seen.has(k)) continue;
           seen.add(k);
-          if (isAnyLog(getBlock(nx, ny, nz) & 255)) stack.push([nx, ny, nz]);
+          const nval = getBlock(nx, ny, nz);
+          // a placed log ends the flood: a tree grown against a build must not take the build
+          if (isAnyLog(nval & 255) && !isPlacedLog(nval)) stack.push([nx, ny, nz]);
         }
   }
   if (!logs.length) return;

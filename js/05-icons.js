@@ -79,6 +79,9 @@ function renderBlockIcon(id, variant = 0) {
   if (id >= 256) return renderItemIcon(id);
   // inventory logs read as a full block, matching the item they place
   if (!variant && PROPS[id]?.model === 'log') variant = CORE.LOG_W_BLOCK << 2;
+  // a berry bush shows RIPE in the inventory: stage 0 is a bare sprout, and the two bushes are
+  // identical until they fruit, so the sprout icon could not tell red from blue
+  if (!variant && isBerryBush(id)) variant = BERRY_STAGE.GROWN;
   const key = id + ':' + variant;
   if (ICON3D[key]) return ICON3D[key];
   if (!iconArtReady(id)) return '';               // art still loading — ask again, don't cache
@@ -162,9 +165,29 @@ function renderBlockIcon(id, variant = 0) {
     mesh.renderOrder = p;
     scene.add(mesh);
   }
-  const cam = new THREE.OrthographicCamera(-0.82, 0.82, 0.82, -0.82, 0.1, 10);
-  cam.position.set(1.6, 1.5, 1.6);              // MC-ish dimetric: top + two shaded sides
-  cam.lookAt(0, 0, 0);
+  /* Frame it. A full cell fills a +/-0.82 frustum centred on the origin, and that is the default.
+     But a SMALL model — the flint pebble is a quarter of a cell wide and an eighth tall — is a
+     speck in that frame, and it sits on the cell floor rather than at its centre, so it is a speck
+     in the corner. When the meshed geometry is well under a cell, the camera recentres on what was
+     actually built and shrinks the frustum in proportion, so the icon reads at the same size a
+     full block's does. Anything cell-sized (slabs, carpets, cubes) keeps the original framing. */
+  const bounds = new THREE.Box3();
+  scene.traverse(o => {
+    if (!o.geometry) return;
+    o.geometry.computeBoundingBox();
+    bounds.union(o.geometry.boundingBox);
+  });
+  const ctr = new THREE.Vector3();
+  let half = 0.82;
+  if (!bounds.isEmpty()) {
+    const size = new THREE.Vector3();
+    bounds.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 1e-4 && maxDim < 0.6) { bounds.getCenter(ctr); half = 0.82 * maxDim; }
+  }
+  const cam = new THREE.OrthographicCamera(-half, half, half, -half, 0.1, 10);
+  cam.position.set(ctr.x + 1.6, ctr.y + 1.5, ctr.z + 1.6);   // dimetric: top plus two shaded sides
+  cam.lookAt(ctr);
 
   const url = _renderIconScene(scene, cam);     // supersampled; browser smooth-downscales
   scene.traverse(o => o.geometry && o.geometry.dispose());

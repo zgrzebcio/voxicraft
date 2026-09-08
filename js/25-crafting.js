@@ -16,13 +16,15 @@ const V_OLOG   = [B.LOG, B.STRIPPED_LOG];
 const V_BLOG   = [B.BIRCH_LOG, B.STRIPPED_BIRCH_LOG];
 const V_SLOG   = [B.SPRUCE_LOG, B.STRIPPED_SPRUCE_LOG];
 const V_STONE  = [B.COBBLE, B.STONE, B.MARBLE, B.LIMESTONE, B.GRANITE];          // anything that takes cobble takes stone too
+// leather gear is riveted, not forged: any soft-metal nugget does the job
+const V_NUGGET = [ITEM.IRON_NUGGET, ITEM.TIN_NUGGET, ITEM.COPPER_NUGGET];
 
 const RECIPES_BASIC = [
   { in: [[V_OLOG, 1]],                                                       out: [B.PLANKS, 3] },
   { in: [[V_BLOG, 1]],                                                       out: [B.BIRCH_PLANKS, 3] },
   { in: [[V_SLOG, 1]],                                                       out: [B.SPRUCE_PLANKS, 3] },
   { in: [[V_PLANKS, 2]],                                                     out: [ITEM.STICK, 6] },
-  { in: [[V_PLANKS, 1]],                                                     out: [B.OAKSLAB, 2] },
+  { in: [[V_PLANKS, 1]],                                                     out: [B.OAKSLAB, 2] },   // disabled (0.7295)
   { in: [[ITEM.SNOWBALL, 4]],                                                out: [B.SNOW, 1] },
   { in: [[ITEM.WHEAT, 9]],                                                   out: [B.HAY, 1] },
   { in: [[ITEM.CLAY_BALL, 4]],                                               out: [B.CLAY, 1] },
@@ -35,11 +37,16 @@ const RECIPES_BASIC = [
   { in: [[B.STONE, 1]],                                                      out: [B.STONE_BRICK, 1] },
   { in: [[ITEM.BRICK, 4]],                                                   out: [B.BRICKS, 1] },
   { in: [[ITEM.STRING, 4]],                                                  out: [B.WOOL, 1] },
-  { in: [[V_PLANKS, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_SWORD, 1] },
-  { in: [[V_PLANKS, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_SHOVEL, 1] },
-  { in: [[V_PLANKS, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_PICKAXE, 1] },
-  { in: [[V_PLANKS, 4], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_HATCHET, 1] },
-  { in: [[V_PLANKS, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5], [ITEM.FLINT, 1]],  out: [ITEM.WOODEN_HOE, 1] },
+  /* Flint tools (0.7341) — the FIRST tier, and the only one reachable with nothing in hand. A
+     knapped edge, a handle and a lashing, and every part of that comes out of a bare-handed
+     gather: flint from flint stones, fiber from grass, sticks off leaves. No PLANKS, because
+     planks need a log and a log is behind the tool gate — but sticks are fine (0.7342), since
+     leaves are one of the few things hands still break, and they are a slow drip on purpose. */
+  { in: [[ITEM.FLINT, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]],                 out: [ITEM.FLINT_SWORD, 1] },
+  { in: [[ITEM.FLINT, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                 out: [ITEM.FLINT_SHOVEL, 1] },
+  { in: [[ITEM.FLINT, 5], [ITEM.STICK, 3], [ITEM.FIBER, 6]],                 out: [ITEM.FLINT_PICKAXE, 1] },
+  { in: [[ITEM.FLINT, 4], [ITEM.STICK, 3], [ITEM.FIBER, 6]],                 out: [ITEM.FLINT_HATCHET, 1] },
+  { in: [[ITEM.FLINT, 2], [ITEM.STICK, 3], [ITEM.FIBER, 5]],                 out: [ITEM.FLINT_HOE, 1] },
 ];
 const RECIPES_ADVANCED = [
   { in: [[ITEM.COAL_CHUNK, 8]],                                              out: [ITEM.COAL, 1] },
@@ -61,7 +68,7 @@ const RECIPES_ADVANCED = [
   { in: [[V_PLANKS, 10], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 10]],            out: [B.CHEST, 1] },
   { in: [[B.WOOL, 4], [V_PLANKS, 4], [ITEM.CLOTH, 5], [ITEM.FIBER, 10]],     out: [B.BED, 1] },
   { in: [[V_PLANKS, 8], [ITEM.IRON_INGOT, 1], [ITEM.FIBER, 4]],              out: [B.DOOR, 1] },
-  { in: [[V_PLANKS, 3]],                                                     out: [B.STAIRS, 2] },
+  { in: [[V_PLANKS, 3]],                                                     out: [B.STAIRS, 2] },   // disabled (0.7295)
   { in: [[ITEM.DIAMOND, 3], [ITEM.STICK, 2], [ITEM.FIBER, 5]],               out: [ITEM.DIAMOND_SWORD, 1] },
   { in: [[ITEM.DIAMOND, 1], [ITEM.STICK, 3], [ITEM.FIBER, 5]],               out: [ITEM.DIAMOND_SHOVEL, 1] },
   { in: [[ITEM.DIAMOND, 5], [ITEM.STICK, 3], [ITEM.FIBER, 5]],               out: [ITEM.DIAMOND_PICKAXE, 1] },
@@ -90,6 +97,16 @@ const RECIPES_ADVANCED = [
   { in: [[ITEM.GUNPOWDER, 7], [B.SAND, 10]],                                 out: [B.TNT, 1] },
   { in: [[ITEM.SUGAR_CANE, 3]],                                              out: [ITEM.PAPER, 1] },
   { in: [[ITEM.GOLD_INGOT, 10], [ITEM.APPLE, 1]],                            out: [ITEM.GOLDEN_APPLE, 1] },
+  /* Leather set — the tier below iron, and the first armour a player can reach: it costs hide off
+     cows and bush fiber rather than ore, with a nugget or two for the buckles. The five pieces
+     form one rising ladder, cheapest (gloves) to dearest (chestplate), 2-7 leather / 8-18 fiber /
+     1-2 nuggets end to end. */
+  { in: [[ITEM.LEATHER, 2], [ITEM.FIBER, 8],  [V_NUGGET, 1]],                out: [ITEM.LEATHER_GLOVES, 1] },
+  { in: [[ITEM.LEATHER, 3], [ITEM.FIBER, 10], [V_NUGGET, 1]],                out: [ITEM.LEATHER_BOOTS, 1] },
+  { in: [[ITEM.LEATHER, 4], [ITEM.FIBER, 12], [V_NUGGET, 1]],                out: [ITEM.LEATHER_HELMET, 1] },
+  { in: [[ITEM.LEATHER, 5], [ITEM.FIBER, 15], [V_NUGGET, 2]],                out: [ITEM.LEATHER_LEGGINGS, 1] },
+  { in: [[ITEM.LEATHER, 7], [ITEM.FIBER, 18], [V_NUGGET, 2]],                out: [ITEM.LEATHER_CHESTPLATE, 1] },
+  { in: [[ITEM.FIBER, 20], [ITEM.LEATHER, 5], [ITEM.IRON_INGOT, 2], [ITEM.IRON_NUGGET, 5]], out: [ITEM.SADDLE, 1] },
   { in: [[ITEM.IRON_INGOT, 6],  [ITEM.FIBER, 4], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_GLOVES, 1] },
   { in: [[ITEM.IRON_INGOT, 8],  [ITEM.FIBER, 5], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_BOOTS, 1] },
   { in: [[ITEM.IRON_INGOT, 10], [ITEM.FIBER, 6], [ITEM.CLOTH, 1]],           out: [ITEM.IRON_HELMET, 1] },
@@ -99,7 +116,13 @@ const RECIPES_ADVANCED = [
 
 // which list is shown: 'basic' (E / pocket) or 'advanced' (crafting bench = basic + advanced)
 var craftMode = 'basic';
-const craftRecipes = () => craftMode === 'advanced' ? [...RECIPES_BASIC, ...RECIPES_ADVANCED] : RECIPES_BASIC;
+/* Recipes for a disabled block (slabs, stairs — see DISABLED_BLOCKS in 13-actions.js) stay in the
+   lists above rather than being deleted, so re-enabling one is a single-line change. They are
+   filtered out here, which is the only place the UI ever reads the recipes from, so a hidden
+   recipe cannot be crafted by any path. */
+const _recipeEnabled = (r) => isObtainable(r.out[0]);
+const craftRecipes = () =>
+  (craftMode === 'advanced' ? [...RECIPES_BASIC, ...RECIPES_ADVANCED] : RECIPES_BASIC).filter(_recipeEnabled);
 const idName = (id) => id >= 256 ? ITEM_PROPS[id].name : PROPS[id].name;
 
 // an ingredient entry is either a bare id or a variant group; normalise to a list

@@ -1070,6 +1070,11 @@ function tickPlayer(dt, now, slot) {
         player.vy = 0; player.fallStart = null;
         player.spawnPos = Array.isArray(pr.spawnPos)
           ? new THREE.Vector3(pr.spawnPos[0], pr.spawnPos[1], pr.spawnPos[2]) : null;
+        // the world spawn and which bed (if any) currently overrides it — see releaseBedSpawns
+        player.homeSpawn = Array.isArray(pr.homeSpawn)
+          ? new THREE.Vector3(pr.homeSpawn[0], pr.homeSpawn[1], pr.homeSpawn[2])
+          : (player.spawnPos ? player.spawnPos.clone() : null);   // pre-0.7341 save: best guess
+        player.spawnBedKey = pr.spawnBedKey || null;
         if (typeof pr.hotSel === 'number' && pr.hotSel >= 0 && pr.hotSel < HOTBAR_SLOTS) {
           hotbarSel = pr.hotSel; buildHotbar();
         }
@@ -1082,6 +1087,8 @@ function tickPlayer(dt, now, slot) {
         player.spawned = true;
         player.saturation = MAX_SATURATION;  // new world: start fully saturated
         if (!player.spawnPos) player.spawnPos = player.pos.clone();
+        // the world spawn, kept apart from spawnPos so a broken bed has somewhere to fall back to
+        if (!player.homeSpawn) player.homeSpawn = player.pos.clone();
       }
     }
   }
@@ -1165,7 +1172,9 @@ function tickPlayer(dt, now, slot) {
         act.lastBreak = now;
         }
       }
-    } else if (wantMine && hit && Number.isFinite(PROPS[hit.id].hardness) && PROPS[hit.id].hardness > 0) {
+    } else if (wantMine && hit && Number.isFinite(PROPS[hit.id].hardness) && PROPS[hit.id].hardness > 0
+               && (isToolItem(slotId(HOTBAR[hotbarSel])) || handBreakable(hit.id))) {
+      // no tool, no crack (0.7341) — bare hands only take foliage; see handBreakable
       if (isTNTFuseActive(hit.x, hit.y, hit.z)) { resetMining(); }
       else
       if (!mining.active || mining.x !== hit.x || mining.y !== hit.y || mining.z !== hit.z
@@ -1209,7 +1218,10 @@ function tickPlayer(dt, now, slot) {
         // NOT an early return — the rest of frame() still has to stream chunks and render.
         const chopped = tryChopLog(mx, my, mz);
         if (!chopped) playBlockSound(minedId, 'break', mx, my, mz);
-        awardBlockXP(mx, my, mz, minedId);       // natural blocks only; your own placements pay 0
+        // the wrong tool for the job (a pickaxe on dirt): double wear below, and no experience
+        const wrongTool = isWrongTool(slotId(HOTBAR[hotbarSel]), minedId);
+        // natural blocks only; your own placements pay 0
+        if (!wrongTool) awardBlockXP(mx, my, mz, minedId);
         // tier gate: wrong/too-weak tool still breaks the block but yields no drops
         const dropsOk = mineDropAllowed(slotId(HOTBAR[hotbarSel]), minedId);
         const inf = chopped ? null : slabBreakInfo(mval, mbi);   // double slab: break only the mined half
@@ -1238,10 +1250,12 @@ function tickPlayer(dt, now, slot) {
             for (const drop of blockDrop(minedId, false))
               for (let i = 0; i < drop.count; i++) spawnDrop(drop.id, mx, my, mz);
         }
-        // tool wear: every survival block broken with a tool in hand costs 1 durability
+        /* Tool wear: an ordinary survival break costs 1 durability, 2 when the tool had no
+           business on that block (isWrongTool), and NOTHING at all for a billboard — a torch or
+           a flower is brushed aside rather than dug, so no edge dulls on it (0.7345). */
         const tslot = HOTBAR[hotbarSel];
-        if (tslot && tslot.dur != null) {
-          tslot.dur--;
+        if (tslot && tslot.dur != null && !isFreeBreak(minedId)) {
+          tslot.dur -= wrongTool ? 2 : 1;
           if (tslot.dur <= 0) { HOTBAR[hotbarSel] = null; toast(`${ITEM_PROPS[tslot.id].name} broke`); }
           saveHotbar(); buildHotbar(); updateHotbar();
         }
@@ -1285,10 +1299,11 @@ function tickPlayer(dt, now, slot) {
   updateXPBar(dt);
   updateHands(dt, wantBreak, wantPlace, eatProg);
 
-  /* Selection outline and crack overlay are single scene objects shared by every viewport, so
-     each player records the transform it wants and the render pass re-applies it per view. The
-     crack TEXTURE is genuinely shared — two players mining at once see the further-along stage —
-     which is a cosmetic overlap nobody can be looking at from both viewports at once anyway. */
+  /* Selection outline and crack overlay are single scene MESHES shared by every viewport, so each
+     player records the transform it wants and the render pass re-applies it per view. The crack
+     MATERIAL is per seat since 0.734 — sharing it was not the harmless overlap the old note here
+     claimed: both players wrote their own stage into it as their progress crossed each 10%, so
+     both viewports flickered between the two stages several times a second. */
   const st = PSTATE[slot];
   st.handVisible = handRoot.visible;
   st.sel = selBox.visible
@@ -1369,8 +1384,13 @@ function runWorldTick(dt, now) {
     liftBootCover();
   }
 
-  /* loading screen: dismiss once player has spawned and chunks within radius 4 are all ready */
-  if (_loadingWorld && player.spawned) {
+  /* Loading screen: dismiss once the player has spawned, the chunks within radius 4 are ready,
+     AND the art is in (0.732). Chunk readiness alone used to be enough, which is how a cold join
+     landed you in a finished world holding invisible items beside a black chest. */
+  if (_loadingWorld) setLoadingStep(!player.spawned ? 'generating terrain'
+                                  : !gameAssetsReady ? 'loading textures'
+                                  : 'building chunks');
+  if (_loadingWorld && player.spawned && gameAssetsReady) {
     let _ldDone = true;
     const _ldR = 4;
     outer: for (let ldz = -_ldR; ldz <= _ldR; ldz++) {

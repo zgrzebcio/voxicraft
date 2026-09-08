@@ -97,10 +97,18 @@ const TEXTURES = {
   stripped_spruce_log_top:  'textures/Blocks/Woods/stripped_spruce_log_top.png',
   pincushions:              'textures/Billboards/Plants/Flowers/pincushions.png',
   structure_block:          'textures/Blocks/Interactables/Structure_block.png',
-  // berry bush: three growth stages, all one block driven by its variant byte
-  berry_bush_empty:         'textures/Billboards/Plants/empty_berry_bush_.png',
-  berry_bush_fruitling:     'textures/Billboards/Plants/fruitling_berry_bush_.png',
-  berry_bush:               'textures/Billboards/Plants/berry_bush.png',
+  /* Berry bush: FOUR growth stages and two fruit colours, all one block driven by its variant
+     byte. Small and empty carry no fruit, so red and blue share those two sheets; only the ripe
+     stage differs. Art moved into its own folder in 0.733. */
+  berry_bush_small:         'textures/Billboards/Plants/Berry_bush/berry_bush_small.png',
+  berry_bush_empty:         'textures/Billboards/Plants/Berry_bush/empty_berry_bush_.png',
+  berry_bush_fruitling:     'textures/Billboards/Plants/Berry_bush/fruitling_berry_bush_.png',
+  berry_bush_red:           'textures/Billboards/Plants/Berry_bush/redberry_bush.png',
+  berry_bush_blue:          'textures/Billboards/Plants/Berry_bush/blueberry_bush.png',
+  // flint stone (0.732) — PLACEHOLDER art: blackstone, which was already in the repo and unused.
+  // Swap both of these for a real flint texture when one exists; nothing else has to change.
+  flint_rock:               'textures/Blocks/Natures/blackstone.png',
+  flint_rock_top:           'textures/Blocks/Natures/blackstone_top.png',
 };
 
 const ITEM_TEXTURES = {
@@ -129,7 +137,8 @@ const ITEM_TEXTURES = {
   copper_nugget: 'textures/Items/Ores/copper_nugget.png',
   tin_nugget:    'textures/Items/Ores/tin_nugget.png',
   melon_slice:   'textures/Items/Consumables/melon_slice.png',
-  berries:       'textures/Items/Consumables/berries.png',
+  redberries:    'textures/Items/Consumables/redberries.png',
+  blueberries:   'textures/Items/Consumables/blueberries.png',
   brick:         'textures/Items/Materials/brick.png',
   potato:        'textures/Items/Plants/potato.png',
   potato_bake:   'textures/Items/Consumables/baked_potato.png',
@@ -143,10 +152,10 @@ const ITEM_TEXTURES = {
   iron_pickaxe:  'textures/Items/Tools/iron_pickaxe.png',
   iron_hatchet:  'textures/Items/Tools/iron_hatchet.png',
   iron_hoe:        'textures/Items/Tools/iron_hoe.png',
-  wooden_shovel:   'textures/Items/Tools/wooden_shovel.png',
-  wooden_pickaxe:  'textures/Items/Tools/wooden_pickaxe.png',
-  wooden_hatchet:  'textures/Items/Tools/wooden_hatchet.png',
-  wooden_hoe:      'textures/Items/Tools/wooden_hoe.png',
+  flint_shovel:   'textures/Items/Tools/flint_shovel.png',
+  flint_pickaxe:  'textures/Items/Tools/flint_pickaxe.png',
+  flint_hatchet:  'textures/Items/Tools/flint_hatchet.png',
+  flint_hoe:      'textures/Items/Tools/flint_hoe.png',
   stone_shovel:    'textures/Items/Tools/stone_shovel.png',
   stone_pickaxe:   'textures/Items/Tools/stone_pickaxe.png',
   stone_hatchet:   'textures/Items/Tools/stone_hatchet.png',
@@ -171,7 +180,7 @@ const ITEM_TEXTURES = {
   bread:           'textures/Items/Consumables/bread.png',
   golden_apple:    'textures/Items/Consumables/golden_apple.png',
   glow_dust:       'textures/Items/Materials/glow_dust.png',
-  wooden_sword:    'textures/Items/Weapons/wooden_sword.png',
+  flint_sword:     'textures/Items/Weapons/flint_sword.png',
   stone_sword:     'textures/Items/Weapons/stone_sword.png',
   iron_sword:      'textures/Items/Weapons/iron_sword.png',
   golden_sword:    'textures/Items/Weapons/golden_sword.png',
@@ -184,10 +193,15 @@ const ITEM_TEXTURES = {
   mutton:          'textures/Items/Consumables/mutton.png',
   rotten_flesh:    'textures/Items/Materials/rotten_flesh.png',
   cooked_mutton:   'textures/Items/Consumables/cooked_mutton.png',
+  leather:         'textures/Items/Materials/leather.png',
+  beef:            'textures/Items/Consumables/beef.png',
+  cooked_beef:     'textures/Items/Consumables/cooked_beef.png',
+  saddle:          'textures/Items/Useables/saddle.png',
   leather_helmet:     'textures/Items/Armor/leather_helmet.png',
   leather_chestplate: 'textures/Items/Armor/leather_chestplate.png',
   leather_leggings:   'textures/Items/Armor/leather_leggings.png',
   leather_boots:      'textures/Items/Armor/leather_boots.png',
+  leather_gloves:     'textures/Items/Armor/leather_gloves.png',
   iron_helmet:        'textures/Items/Armor/iron_helmet.png',
   iron_chestplate:    'textures/Items/Armor/iron_chestplate.png',
   iron_leggings:      'textures/Items/Armor/iron_leggings.png',
@@ -207,6 +221,8 @@ const ITEM_TEXTURES = {
 /* Armor overlay sheets drawn on the equipment preview. 64x32 skin-layer layout (at 4x here):
    <mat>_tophalf = helmet + chestplate, <mat>_downhalf = leggings + boots. */
 const EQUIP_TEXTURES = {
-  iron_tophalf:  'textures/Entity/equipment/iron_tophalf.png',
-  iron_downhalf: 'textures/Entity/equipment/iron_downhalf.png',
+  iron_tophalf:     'textures/Entity/equipment/iron_tophalf.png',
+  iron_downhalf:    'textures/Entity/equipment/iron_downhalf.png',
+  leather_tophalf:  'textures/Entity/equipment/leather_tophalf.png',
+  leather_downhalf: 'textures/Entity/equipment/leather_downhalf.png',
 };

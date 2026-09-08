@@ -40,7 +40,9 @@ function VOXEL_CORE() {
               STRIPPED_LOG:72, STRIPPED_LOG_TOP:73, STRIPPED_BIRCH_LOG:74, STRIPPED_BIRCH_LOG_TOP:75,
               SPRUCE_LOG:76, SPRUCE_LOG_TOP:77, SPRUCE_PLANKS:78, SPRUCE_LEAVES:79, SPRUCE_SAPLING:80,
               STRIPPED_SPRUCE_LOG:81, STRIPPED_SPRUCE_LOG_TOP:82, PINCUSHION:83, STRUCTURE_BLOCK:84,
-              BERRY_BUSH_EMPTY:85, BERRY_BUSH_FRUITLING:86, BERRY_BUSH:87 };
+              BERRY_BUSH_EMPTY:85, BERRY_BUSH_FRUITLING:86, BERRY_BUSH_RED:87,
+              FLINT_ROCK:88, FLINT_ROCK_TOP:89,
+              BERRY_BUSH_BLUE:90, BERRY_BUSH_SMALL:91 };
   const B = { AIR:0, GRASS:1, DIRT:2, STONE:3, LOG:4, PLANKS:5, LEAVES:6, SAND:7,
               GLASS:8, BEDROCK:9, WATER:10, GLOWSTONE:11, OAKSLAB:12, CLAY:13, SNOW:14, COBBLE:15,
               COAL_ORE:16, IRON_ORE:17, DIAMOND_ORE:18, GRAVEL:19, RED_MUSHROOM:20, BROWN_MUSHROOM:21,
@@ -57,8 +59,13 @@ function VOXEL_CORE() {
               SPRUCE_LEAF_CARPET:77, SPRUCE_SAPLING:78, PINCUSHION:79, STRUCTURE_BLOCK:80,
               // one cell, many carpet layers of mixed material (0.69) — see CARPET_MAT below
               CARPET:81,
-              // berry bush (0.698): one block, variant 0 = empty, 1 = fruitling, 2 = grown
-              BERRY_BUSH:82, };
+              /* Berry bushes (0.698, split in two in 0.7332): TWO blocks, one per fruit, each
+                 running the same four growth stages in its variant byte. Red keeps id 82 so
+                 existing worlds are untouched. */
+              REDBERRY_BUSH:82,
+              // flint stone (0.732): a dark nodule lying on the turf, picked by hand for flint
+              FLINT_ROCK:83,
+              BLUEBERRY_BUSH:84, };
   /* variant byte layout:
      - grass: 1 = snowy sides
      - rot:'side' blocks (furnace, bench): bits 0-1 = facing (0:+Z 1:-Z 2:+X 3:-X);
@@ -368,23 +375,70 @@ function VOXEL_CORE() {
   /* Build tool, not a material: it has no recipe, so it only ever reaches a player through the
      creative palette. Left fully solid so a capture volume can be lined up against it. */
   PROPS[B.STRUCTURE_BLOCK] = { name:'Structure block', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:1, hardness:1.0, type:'stone', faces:[T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK,T.STRUCTURE_BLOCK], desc: '' };
-  /* Berry bush — cross billboard, three growth stages in the variant byte (0 empty, 1 fruitling,
-     2 grown). `noTarget` like the grass billboards, so the crosshair passes through it and the
-     ONLY way to work it is bush pickup: a grown bush hands over berries and drops back to empty,
-     then regrows on its own. tilesByVar swaps the texture per stage. */
-  const BERRY_STAGE = { EMPTY: 0, FRUITLING: 1, GROWN: 2 };
-  PROPS[B.BERRY_BUSH] = { name:'Berry bush', solid:false, opaque:false, raycast:true, noTarget:true,
-                          pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass',
-                          boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.BERRY_BUSH_EMPTY],
-                          tilesByVar:[T.BERRY_BUSH_EMPTY, T.BERRY_BUSH_FRUITLING, T.BERRY_BUSH],
-                          desc: '' };
+  /* Berry bushes (0.7332) — TWO separate blocks, red and blue, rather than one block with a
+     colour bit. They share the first three stages of art (a sprout and a bare bush look the same
+     whatever they will fruit into) and differ only at ripe, which is exactly how the art is
+     drawn, so the split costs one block id and removes the bit-packing entirely.
+
+     Cross billboards, `noTarget` like the grass, so the crosshair passes through and the ONLY way
+     to work one is bush pickup: a ripe bush hands over its berries and drops back to empty, then
+     regrows on its own. The variant byte is now nothing but the STAGE, and the stage numbers are
+     the growth order, so advancing is stage + 1.
+
+     Red keeps block id 82, so an existing world's bushes stay bushes. They do each shift down one
+     stage once (0.7331 renumbering), which the regrow timer undoes on its own. */
+  const BERRY_STAGE = { SMALL: 0, EMPTY: 1, FRUITLING: 2, GROWN: 3 };
+  const berryStage = (v) => v & 3;
+  const isBerryBush = (id) => id === B.REDBERRY_BUSH || id === B.BLUEBERRY_BUSH;
+  const _berryBush = (name, ripe) => ({
+    name, solid:false, opaque:false, raycast:true, noTarget:true,
+    pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass',
+    boxes:[[0.1,0,0.1,0.9,0.9,0.9]], faces:[T.BERRY_BUSH_EMPTY],
+    // indexed by stage: only the ripe tile differs between the two bushes
+    tilesByVar:[T.BERRY_BUSH_SMALL, T.BERRY_BUSH_EMPTY, T.BERRY_BUSH_FRUITLING, ripe],
+    desc: '',
+  });
+  PROPS[B.REDBERRY_BUSH]  = _berryBush('Red berry bush',  T.BERRY_BUSH_RED);
+  PROPS[B.BLUEBERRY_BUSH] = _berryBush('Blue berry bush', T.BERRY_BUSH_BLUE);
   PROPS[B.PINCUSHION] = { name:'Pincushion', solid:false, opaque:false, raycast:true, pass:1, model:'cross', topOnly:true, stack:99, hardness:0, type:'grass', boxes:[[0.25,0,0.25,0.75,0.7,0.75]], faces:[T.PINCUSHION], desc: '' };
+  /* Flint stone (0.732) — a dark nodule lying on the turf. Built on the `carpet` model, which is
+     just "one flat box, chosen by variant", so it renders as a low slab rather than a full cube;
+     it has a single variant because nothing about it stacks. `noTarget` puts it in the same class
+     as the grass and the berry bush: the crosshair passes straight through and BUSH PICKUP is how
+     you take it, which is what makes it a stoop-and-grab rather than something you mine. */
+  /* 16 x 8 x 16 of this game's 64-pixel block (0.7332), i.e. a quarter of a cell wide and an
+     eighth of one tall — a pebble sitting in the middle of its cell, not a slab covering it.
+     0.733 shipped this eight times too big by reading the pixel sizes against a 16-unit block;
+     voxiCraft's unit is 64, so every pixel dimension here divides by 64.
+     One entry, because the variant byte means nothing here; the array shape is only what the
+     carpet model expects. */
+  const FR = 1 / 64;
+  const FLINT_ROCK_BOX = [[[24 * FR, 0, 24 * FR, 40 * FR, 8 * FR, 40 * FR]]];
+  PROPS[B.FLINT_ROCK] = { name:'Flint pebble', solid:false, opaque:false, raycast:true, noTarget:true,
+                          pass:0, model:'carpet', topOnly:true, stack:60, hardness:0.4, type:'stone',
+                          boxes:FLINT_ROCK_BOX[0], boxesByVar:FLINT_ROCK_BOX,
+                          faces:[T.FLINT_ROCK, T.FLINT_ROCK, T.FLINT_ROCK_TOP, T.FLINT_ROCK_TOP,
+                                 T.FLINT_ROCK, T.FLINT_ROCK],
+                          desc: 'Pick it up by hand for flint' };
   PROPS[B.COBBLESLAB]    = { name:'Cobblestone slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:8, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE,T.COBBLE], desc: '' };
   PROPS[B.BRICKS]    = { name:'Bricks', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:6.5, type:'stone', faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
   PROPS[B.BRICKSSLAB]    = { name:'Brick slab',   solid:true,  opaque:false, raycast:true,  pass:0, model:'slab', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
   PROPS[B.BRICKSSTAIRS] = { name:'Oak stairs', solid:true, opaque:false, raycast:true, pass:0, model:'stairs', rot:'all', stack:60, hardness:6.5, type:'stone', boxes:STAIR_BOXES[0], boxesByVar:STAIR_BOXES,faces:[T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS,T.BRICKS], desc: '' };
-  PROPS[B.MELON]    = { name:'Watermelon', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.MELON_SIDE,T.MELON_SIDE,T.MELON_TOP,T.MELON_TOP,T.MELON_SIDE,T.MELON_SIDE], desc: '' };
-  PROPS[B.PUMPKIN]  = { name:'Pumpkin', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60, hardness:2.5, type:'wood', faces:[T.PUMPKIN_SIDE,T.PUMPKIN_SIDE,T.PUMPKIN_TOP,T.PUMPKIN_TOP,T.PUMPKIN_SIDE,T.PUMPKIN_SIDE], desc: '' };
+  /* Gourds (0.7343) — 32 x 32 x 32 of this game's 64-pixel block, so half a cell across and half
+     a cell tall, centred on the floor of its cell rather than filling it. They are FRUIT lying in
+     a field, not masonry: you walk straight through one (`solid:false`), the crosshair passes over
+     it (`noTarget:true`), and bush pickup is what gathers it — the same stoop-and-grab the berry
+     bushes and flint stones use. Built on the `carpet` model, which is just "one box picked by
+     variant", so the shape needs no new mesher path. */
+  const GOURD_BOX = [[[16 / 64, 0, 16 / 64, 48 / 64, 32 / 64, 48 / 64]]];
+  const _gourd = (name, side, top) => ({
+    name, solid:false, opaque:false, raycast:true, noTarget:true,
+    pass:0, model:'carpet', topOnly:true, stack:60, hardness:2.5, type:'wood',
+    boxes:GOURD_BOX[0], boxesByVar:GOURD_BOX,
+    faces:[side, side, top, top, side, side], desc: '',
+  });
+  PROPS[B.MELON]    = _gourd('Watermelon', T.MELON_SIDE, T.MELON_TOP);
+  PROPS[B.PUMPKIN]  = _gourd('Pumpkin', T.PUMPKIN_SIDE, T.PUMPKIN_TOP);
   PROPS[B.WHEAT]    = { name:'Wheat', solid:false, opaque:false, raycast:true, noTarget:true, pass:1, model:'cross', stack:99, hardness:0, type:'grass', boxes:[[0.15,0,0.15,0.85,0.9,0.85]], faces:[T.WHEAT], desc: '' };
   PROPS[B.STONE_BRICK]    = { name:'Stone brick', solid:true, opaque:true, raycast:true, pass:0, model:'cube', stack:60,  hardness:8.5, type:'stone', faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
   PROPS[B.STONE_BRICKSLAB]    = { name:'Stone brick slab', solid:true, opaque:false, raycast:true, pass:0, model:'slab', rot:'all', stack:60, hardness:8.5, type:'stone', boxes:[[0,0,0,1,0.5,1]], boxesByVar: SLAB_VAR, faces:[T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK,T.STONE_BRICK], desc: '' };
@@ -1764,6 +1818,21 @@ function VOXEL_CORE() {
           data[idx(lx, h + 1, lz)] = B.WHEAT;
         }
 
+      /* ---- flint stones (0.732): dark nodules lying loose on the turf, 0.05% of grass columns.
+         Runs BEFORE the plant scatter on purpose — the plants all require air above them, so
+         claiming the cell first is what stops a 22% grass roll from swallowing a 0.05% one.
+         Grass-only, which already rules out desert and beach; SNO rules out the snow biome. ---- */
+      for (let lz = 0; lz < CZ; lz++)
+        for (let lx = 0; lx < CX; lx++) {
+          const gi = (lx + 2) + (lz + 2) * 20;
+          const h = H[gi];
+          if (h < 99 || h > 198 || SNO[gi]) continue;
+          if ((data[idx(lx, h, lz)] & 255) !== B.GRASS) continue;
+          if ((data[idx(lx, h + 1, lz)] & 255) !== B.AIR) continue;
+          if (hash3(cx * 73 + lx + 8100, 43, cz * 67 + lz + 8100) >= 0.002) continue;    // 0.2%
+          data[idx(lx, h + 1, lz)] = B.FLINT_ROCK;
+        }
+
       /* ---- surface plants: short grass (small amount over all forest/plains, none in
          desert/snow) + poppy / blue orchid flowers (denser in plains/meadows) ---- */
       for (let lz = 0; lz < CZ; lz++)
@@ -1791,8 +1860,13 @@ function VOXEL_CORE() {
           if (r < flowerCh) {
             data[idx(lx, h + 1, lz)] = hash3(cx * 31 + lx + 12, 19, cz * 29 + lz + 7) < 0.5 ? B.POPPY : B.ORCHID;
           } else if (r < flowerCh + berryCh) {
-            const stage = Math.min(2, (hash3(cx * 41 + lx + 909, 37, cz * 43 + lz + 606) * 3) | 0);
-            data[idx(lx, h + 1, lz)] = B.BERRY_BUSH | (stage << 8);
+            /* Stage and KIND are rolled from two independent hashes, so a fresh world already has
+               sprouts, bare bushes and ripe ones of both bushes — the regrow timer takes over from
+               there. The stage numbers are the growth order, so the roll is just 0..3. */
+            const stage = Math.min(BERRY_STAGE.GROWN, (hash3(cx * 41 + lx + 909, 37, cz * 43 + lz + 606) * 4) | 0);
+            const bush = hash3(cx * 53 + lx + 4242, 29, cz * 59 + lz + 2424) < 0.5
+                       ? B.REDBERRY_BUSH : B.BLUEBERRY_BUSH;
+            data[idx(lx, h + 1, lz)] = bush | (stage << 8);
           } else if (r < flowerCh + berryCh + tallCh && h + 2 < CY && (data[idx(lx, h + 2, lz)] & 255) === B.AIR) {
             data[idx(lx, h + 1, lz)] = B.TALL_LOWER;
             data[idx(lx, h + 2, lz)] = B.TALL_UPPER;
@@ -2498,7 +2572,8 @@ function VOXEL_CORE() {
 
   return { B, T, V, PROPS, SLAB_IDS, stairBoxesAt, makeGen, meshChunk, idx,
            logWidthOf, logWidthPx, LOG_W_MIN, LOG_W_MAX, LOG_W_NORMAL, LOG_W_BLOCK,
-           CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER, BERRY_STAGE,
+           CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER,
+           BERRY_STAGE, berryStage, isBerryBush,
            carpetMat, carpetSet, carpetTop, carpetPush, carpetPop, carpetFill, carpetRemoveAt };
 }
 
@@ -2527,7 +2602,8 @@ function WORKER_MAIN() {
 
 const CORE = VOXEL_CORE();
 const { B, V, PROPS, SLAB_IDS, logWidthOf, LOG_W_MIN, LOG_W_NORMAL } = CORE;
-const { CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER, BERRY_STAGE,
+const { CARPET_MAX, CARPET_MAT, CARPET_MAT_ITEM, CARPET_MAT_OF, CARPET_LITTER,
+        BERRY_STAGE, berryStage, isBerryBush,
         carpetMat, carpetSet, carpetTop, carpetPush, carpetPop, carpetFill, carpetRemoveAt } = CORE;
 
 // Items (IDs >= 256) — separate registry from blocks
@@ -2535,16 +2611,16 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                FLINT: 262, CLAY_BALL: 263, SNOWBALL: 264, BOWL: 265, MUSHROOM_STEW: 266, GLASS_SHARD: 267,
                IRON_INGOT: 268, IRON_NUGGET: 269, MELON_SLICE: 270,
                IRON_SHOVEL: 271, IRON_PICKAXE: 272, IRON_HATCHET: 273,
-               WOODEN_SHOVEL: 274, WOODEN_PICKAXE: 275, WOODEN_HATCHET: 276,
+               FLINT_SHOVEL: 274, FLINT_PICKAXE: 275, FLINT_HATCHET: 276,
                STONE_SHOVEL: 277, STONE_PICKAXE: 278, STONE_HATCHET: 279,
                DIAMOND_SHOVEL: 280, DIAMOND_PICKAXE: 281, DIAMOND_HATCHET: 282,
                BUCKET: 283, WATER_BUCKET: 284, WHEAT: 285, PUMPKIN_PIE: 286,
-               WOODEN_HOE: 287, STONE_HOE: 288, IRON_HOE: 289, DIAMOND_HOE: 290,
+               FLINT_HOE: 287, STONE_HOE: 288, IRON_HOE: 289, DIAMOND_HOE: 290,
                LAVA_BUCKET: 291, SULFUR: 292, CHARCOAL: 293, GUNPOWDER: 294, SUGAR_CANE: 295,
                SUGAR: 296, PAPER: 297, GOLDEN_PICKAXE: 298, GOLDEN_HATCHET: 299, GOLDEN_SHOVEL: 300,
                GOLDEN_HOE: 301, FLOUR: 302, BOOK: 303, RAW_COPPER: 304, COPPER_INGOT: 305, COPPER_NUGGET: 306,
                RAW_TIN: 307, TIN_INGOT: 308, TIN_NUGGET: 309, RAW_GOLD: 310, GOLD_INGOT: 311, GOLD_NUGGET: 312,
-               GLOW_DUST: 313, BRICK: 314, GOLDEN_APPLE: 315, BREAD: 316, WOODEN_SWORD: 317, STONE_SWORD: 318,
+               GLOW_DUST: 313, BRICK: 314, GOLDEN_APPLE: 315, BREAD: 316, FLINT_SWORD: 317, STONE_SWORD: 318,
                IRON_SWORD: 319, GOLDEN_SWORD: 320, DIAMOND_SWORD: 321, STRING: 322, IRON_SHEARS: 323, FEATHER: 324,
                MUTTON: 325, COOKED_MUTTON: 326,
                LEATHER_HELMET: 327, LEATHER_CHESTPLATE: 328, LEATHER_LEGGINGS: 329, LEATHER_BOOTS: 330,
@@ -2552,7 +2628,10 @@ const ITEM = { STICK: 256, COAL: 257, COAL_CHUNK: 258, RAW_IRON: 259, DIAMOND: 2
                GOLDEN_HELMET: 335, GOLDEN_CHESTPLATE: 336, GOLDEN_LEGGINGS: 337, GOLDEN_BOOTS: 338,
                DIAMOND_HELMET: 339, DIAMOND_CHESTPLATE: 340, DIAMOND_LEGGINGS: 341, DIAMOND_BOOTS: 342,
                IRON_GLOVES: 343, BELT: 344, BARK: 345, FIBER: 346, CLOTH: 347, BERRIES: 348,
-               ROTTEN_FLESH: 349 };
+               ROTTEN_FLESH: 349,
+               LEATHER: 350, BEEF: 351, COOKED_BEEF: 352, SADDLE: 353, LEATHER_GLOVES: 354,
+               // BERRIES (348) stays the RED berry so existing stashes keep their contents
+               BLUE_BERRIES: 355 };
 const ITEM_PROPS = {
   [ITEM.STICK]:         { name: 'Stick',         stack: 99, icon: 'stick', desc: 'Used as crafting ingredient' },
   [ITEM.BARK]:          { name: 'Bark',          stack: 99, icon: 'bark', desc: 'Used as fuel for 0.75 smelt' },
@@ -2572,6 +2651,7 @@ const ITEM_PROPS = {
   [ITEM.FEATHER]:       { name: 'Feather',       stack: 99, icon: 'feather', desc: 'Used as crafting ingredient' },
   [ITEM.FIBER]:         { name: 'Fiber',         stack: 99, icon: 'fiber', desc: 'Used as crafting ingredient' },
   [ITEM.CLOTH]:         { name: 'Cloth',         stack: 99, icon: 'cloth', desc: 'Used as crafting ingredient' },
+  [ITEM.LEATHER]:       { name: 'Leather',       stack: 99, icon: 'leather', desc: 'Used as crafting ingredient' },
 // ores
   [ITEM.COAL]:          { name: 'Coal',          stack: 99, icon: 'coal', desc: 'Used as fuel for 8 smelt' },
   [ITEM.COAL_CHUNK]:    { name: 'Coal chunk',    stack: 99, icon: 'coal_chunk', desc: 'Used as fuel for 1 smelt' },
@@ -2590,11 +2670,11 @@ const ITEM_PROPS = {
   [ITEM.DIAMOND]:       { name: 'Diamond',       stack: 99, icon: 'diamond', desc: 'Used as crafting ingredient' },
   // tools: stack 1, own durability (breaks at 0), toolSpeed = mining-time divisor on matching
   // blocks. tier: 0 = bare hand, 1 wooden, 2 stone, 3 iron, 4 steel, 5 diamond — gates drops (MINE_REQ).
-  [ITEM.WOODEN_SWORD]:   { name: 'Wooden sword',    stack: 1, icon: 'wooden_sword',   tool: 'sword',   tier: 1, toolSpeed: 1,    damage: 4,   attackSpeed: 1.8,   durability: 20, desc: '' },
-  [ITEM.WOODEN_SHOVEL]:  { name: 'Wooden shovel',   stack: 1, icon: 'wooden_shovel',  tool: 'shovel',  tier: 1, toolSpeed: 2,    damage: 2,   attackSpeed: 1.0,   durability: 40, desc: '' },
-  [ITEM.WOODEN_PICKAXE]: { name: 'Wooden pickaxe',  stack: 1, icon: 'wooden_pickaxe', tool: 'pick',    tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.0,   durability: 40, desc: '' },
-  [ITEM.WOODEN_HATCHET]: { name: 'Wooden hatchet',  stack: 1, icon: 'wooden_hatchet', tool: 'hatchet', tier: 1, toolSpeed: 2,    damage: 5,   attackSpeed: 0.8,   durability: 40, desc: '' },
-  [ITEM.WOODEN_HOE]:     { name: 'Wooden hoe',      stack: 1, icon: 'wooden_hoe',     tool: 'hoe',     tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.2,   durability: 30, desc: '' },
+  [ITEM.FLINT_SWORD]:   { name: 'Flint sword',    stack: 1, icon: 'flint_sword',   tool: 'sword',   tier: 1, toolSpeed: 1,    damage: 4,   attackSpeed: 1.8,   durability: 20, desc: '' },
+  [ITEM.FLINT_SHOVEL]:  { name: 'Flint shovel',   stack: 1, icon: 'flint_shovel',  tool: 'shovel',  tier: 1, toolSpeed: 2,    damage: 2,   attackSpeed: 1.0,   durability: 40, desc: '' },
+  [ITEM.FLINT_PICKAXE]: { name: 'Flint pickaxe',  stack: 1, icon: 'flint_pickaxe', tool: 'pick',    tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.0,   durability: 40, desc: '' },
+  [ITEM.FLINT_HATCHET]: { name: 'Flint hatchet',  stack: 1, icon: 'flint_hatchet', tool: 'hatchet', tier: 1, toolSpeed: 2,    damage: 5,   attackSpeed: 0.8,   durability: 40, desc: '' },
+  [ITEM.FLINT_HOE]:     { name: 'Flint hoe',      stack: 1, icon: 'flint_hoe',     tool: 'hoe',     tier: 1, toolSpeed: 2,    damage: 3,   attackSpeed: 1.2,   durability: 30, desc: '' },
   [ITEM.STONE_SWORD]:    { name: 'Stone sword',     stack: 1, icon: 'stone_sword',    tool: 'sword',   tier: 2, toolSpeed: 2,    damage: 5,   attackSpeed: 1.7,   durability: 50, desc: '' },
   [ITEM.STONE_SHOVEL]:   { name: 'Stone shovel',    stack: 1, icon: 'stone_shovel',   tool: 'shovel',  tier: 2, toolSpeed: 4,    damage: 3,   attackSpeed: 0.8,   durability: 100, desc: '' },
   [ITEM.STONE_PICKAXE]:  { name: 'Stone pickaxe',   stack: 1, icon: 'stone_pickaxe',  tool: 'pick',    tier: 2, toolSpeed: 4,    damage: 4,   attackSpeed: 0.8,   durability: 100, desc: '' },
@@ -2621,19 +2701,26 @@ const ITEM_PROPS = {
   [ITEM.WATER_BUCKET]:  { name: 'Water Bucket',  stack: 1,  icon: 'water_bucket', desc: '' },
   [ITEM.LAVA_BUCKET]:   { name: 'Lava Bucket',   stack: 1,  icon: 'lava_bucket', desc: '' },
   [ITEM.SNOWBALL]:      { name: 'Snowball',      stack: 30, icon: 'snowball', throwable: true, desc: '' },
+  // craftable, but nothing rides yet — it is gear waiting for a mount
+  [ITEM.SADDLE]:        { name: 'Saddle',        stack: 1,  icon: 'saddle', desc: 'For riding, once there is something to ride' },
  //plants
   [ITEM.SUGAR_CANE]:    { name: 'Sugar cane',    stack: 99, icon: 'sugarcane', desc: '' },
   [ITEM.WHEAT]:         { name: 'Wheat',         stack: 99, icon: 'wheat', desc: '' },
 // Consumables
   [ITEM.APPLE]:         { name: 'Apple',          stack: 99, icon: 'apple',         foodSatFull: 3, food: 5,  foodSat: 8,  eatTime: 1.4, desc: '' },
   [ITEM.MELON_SLICE]:   { name: 'Melon slice',    stack: 40, icon: 'melon_slice',   foodSatFull: 1, food: 1,  foodSat: 2,  eatTime: 1.0, desc: '' },
-  [ITEM.BERRIES]:       { name: 'Berries',        stack: 60, icon: 'berries',       foodSatFull: 1, food: 2,  foodSat: 2,  eatTime: 0.9, desc: '' },
+  // two colours, identical to eat — which bush you found is flavour, not a stat choice
+  [ITEM.BERRIES]:       { name: 'Red berries',    stack: 60, icon: 'redberries',    foodSatFull: 1, food: 2,  foodSat: 2,  eatTime: 0.9, desc: '' },
+  [ITEM.BLUE_BERRIES]:  { name: 'Blue berries',   stack: 60, icon: 'blueberries',   foodSatFull: 1, food: 2,  foodSat: 2,  eatTime: 0.9, desc: '' },
   [ITEM.PUMPKIN_PIE]:   { name: 'Pumpkin Pie',    stack: 10, icon: 'pumpkin_pie',   foodSatFull: 6, food: 10, foodSat: 12, eatTime: 4, desc: '' },
   [ITEM.MUSHROOM_STEW]: { name: 'Mushroom stew',  stack: 20, icon: 'mushroom_stew', foodSatFull: 5, food: 8,  foodSat: 10, eatTime: 2.2, foodReturn: 265, desc: '' },
   [ITEM.BREAD]:         { name: 'Bread',          stack: 99, icon: 'bread',         foodSatFull: 4, food: 7,  foodSat: 8,  eatTime: 1.7, desc: '' },
   [ITEM.GOLDEN_APPLE]:  { name: 'Golden apple',   stack: 30, icon: 'golden_apple',  foodSatFull: 8, food: 5,  foodSat: 15,  eatTime: 2.0, desc: '' },
   [ITEM.MUTTON]:        { name: 'Mutton',         stack: 99, icon: 'mutton',        foodSatFull: 1, food: 2,  foodSat: 4,  eatTime: 1.8, desc: '' },
   [ITEM.COOKED_MUTTON]: { name: 'Cooked mutton',  stack: 99, icon: 'cooked_mutton', foodSatFull: 4, food: 6,  foodSat: 7,  eatTime: 2.1, desc: '' },
+  // beef is the best meat in the game once cooked, which is what makes hunting cows worth it
+  [ITEM.BEEF]:          { name: 'Raw beef',       stack: 99, icon: 'beef',          foodSatFull: 1, food: 3,  foodSat: 4,  eatTime: 1.9, desc: '' },
+  [ITEM.COOKED_BEEF]:   { name: 'Steak',          stack: 99, icon: 'cooked_beef',   foodSatFull: 5, food: 8,  foodSat: 10, eatTime: 2.2, desc: '' },
   [ITEM.ROTTEN_FLESH]:  { name: 'Rotten flesh',   stack: 99, icon: 'rotten_flesh',  foodSatFull: 0, food: 2,  foodSat: 1,  eatTime: 1.6, desc: 'Edible, but barely' },
 // Armor. `equip` names the equipment slot the piece goes into; `armor` is its point value.
 // 20 armor points = a full 10-icon bar. `armorMat` picks both the armor-bar sprite theme and the
@@ -2642,10 +2729,13 @@ const ITEM_PROPS = {
 //   moveSpeed   fraction of walk speed, e.g. -0.025 = the 2.5% slow each iron plate costs
 //   strength    flat bonus damage added to whatever the held weapon deals
 //   atkSpeed    fraction added to the attack-speed multiplier
-  [ITEM.LEATHER_HELMET]:     { name: 'Leather cap',        stack: 1, icon: 'leather_helmet',     equip: 'helmet',     armor: 1, tier: 1, durability: 55,  armorMat: 'leather', desc: '' },
-  [ITEM.LEATHER_CHESTPLATE]: { name: 'Leather tunic',      stack: 1, icon: 'leather_chestplate', equip: 'chestplate', armor: 3, tier: 1, durability: 80,  armorMat: 'leather', desc: '' },
-  [ITEM.LEATHER_LEGGINGS]:   { name: 'Leather trousers',   stack: 1, icon: 'leather_leggings',   equip: 'leggings',   armor: 2, tier: 1, durability: 75,  armorMat: 'leather', desc: '' },
-  [ITEM.LEATHER_BOOTS]:      { name: 'Leather boots',      stack: 1, icon: 'leather_boots',      equip: 'boots',      armor: 1, tier: 1, durability: 65,  armorMat: 'leather', desc: '' },
+  /* Leather is the insulating tier: every piece traps heat, which is 8% cold resistance and a 5%
+     heat PENALTY each. The boots are the one piece that helps you move (+0.5%). */
+  [ITEM.LEATHER_HELMET]:     { name: 'Leather cap',        stack: 1, icon: 'leather_helmet',     equip: 'helmet',     armor: 1, tier: 1, durability: 55,  armorMat: 'leather', coldResist: 0.08, heatResist: -0.05, desc: '' },
+  [ITEM.LEATHER_CHESTPLATE]: { name: 'Leather tunic',      stack: 1, icon: 'leather_chestplate', equip: 'chestplate', armor: 3, tier: 1, durability: 80,  armorMat: 'leather', coldResist: 0.08, heatResist: -0.05, desc: '' },
+  [ITEM.LEATHER_LEGGINGS]:   { name: 'Leather trousers',   stack: 1, icon: 'leather_leggings',   equip: 'leggings',   armor: 2, tier: 1, durability: 75,  armorMat: 'leather', coldResist: 0.08, heatResist: -0.05, desc: '' },
+  [ITEM.LEATHER_BOOTS]:      { name: 'Leather boots',      stack: 1, icon: 'leather_boots',      equip: 'boots',      armor: 1, tier: 1, durability: 65,  armorMat: 'leather', coldResist: 0.08, heatResist: -0.05, moveSpeed: 0.005, desc: '' },
+  [ITEM.LEATHER_GLOVES]:     { name: 'Leather gloves',     stack: 1, icon: 'leather_gloves',     equip: 'gloves',     armor: 1, tier: 1, durability: 50,  armorMat: 'leather', coldResist: 0.08, heatResist: -0.05, strength: 0.25, desc: '' },
   [ITEM.IRON_HELMET]:        { name: 'Iron helmet',        stack: 1, icon: 'iron_helmet',        equip: 'helmet',     armor: 2, tier: 3, durability: 165, armorMat: 'iron',    moveSpeed: -0.02, desc: '' },
   [ITEM.IRON_CHESTPLATE]:    { name: 'Iron chestplate',    stack: 1, icon: 'iron_chestplate',    equip: 'chestplate', armor: 6, tier: 3, durability: 240, armorMat: 'iron',    moveSpeed: -0.035, desc: '' },
   [ITEM.IRON_LEGGINGS]:      { name: 'Iron leggings',      stack: 1, icon: 'iron_leggings',      equip: 'leggings',   armor: 5, tier: 3, durability: 225, armorMat: 'iron',    moveSpeed: -0.03, desc: '' },
@@ -2700,7 +2790,7 @@ const TOOL_BLOCKS = {
   shovel: new Set([B.SAND, B.RED_SAND, B.DIRT, B.GRASS, B.SNOW, B.SNOW_CARPET, B.CARPET, B.CLAY, B.GRAVEL,]),
   pick:   new Set([B.STONE, B.COBBLE, B.COAL_ORE, B.IRON_ORE, B.DIAMOND_ORE, B.BRICKS, B.STONE_BRICK,
                    B.FURNACE, B.COBBLESLAB, B.BRICKSSLAB, B.BRICKSSTAIRS, B.STONE_BRICKSLAB, B.STONESLAB, B.GRASS, B.GLASSSLAB,
-                   B.MARBLE, B.GRANITE, B.LIMESTONE,
+                   B.MARBLE, B.GRANITE, B.LIMESTONE, B.GLASS,
                    B.SULFUR_BLOCK, B.SULFUR_DOWN_TIP, B.SULFUR_UP_TIP, B.TIN_ORE, B.COPPER_ORE, B.GOLD_ORE]),
   hatchet: new Set([B.LOG, B.PLANKS, B.BIRCH_LOG, B.BIRCH_PLANKS, B.STRIPPED_LOG, B.STRIPPED_BIRCH_LOG, B.SPRUCE_LOG, B.STRIPPED_SPRUCE_LOG, B.SPRUCE_PLANKS,
                     B.MELON, B.PUMPKIN, B.CRAFTING_BENCH, B.DOOR, B.STAIRS, B.OAKSLAB, B.CACTUS]),
@@ -2718,6 +2808,50 @@ function toolFactor(heldId, blockId) {
   const p = heldId != null && heldId >= 256 ? ITEM_PROPS[heldId] : null;
   return (p && p.tool && TOOL_BLOCKS[p.tool] && TOOL_BLOCKS[p.tool].has(blockId)) ? p.toolSpeed : 1;
 }
+/* Billboards cost a tool NOTHING (0.7345): a torch, a flower, a sapling, a mushroom. You brush
+   them aside — no edge touches anything, so no edge dulls. */
+const isFreeBreak = (id) => { const p = PROPS[id & 255]; return !!(p && p.model === 'cross'); };
+// ...and the ground layers — leaf litter, snow, the layered carpet — are swept, not dug. They
+// still cost the ordinary point of wear, they just never count as the WRONG tool for the job.
+const isLayerBlock = (id) => {
+  const p = PROPS[id & 255];
+  return !!(p && (p.model === 'carpet' || p.model === 'carpet_stack'));
+};
+
+/* Using the WRONG tool on a block (0.7344) — a pickaxe on dirt. Costs double wear and pays no
+   experience, so a tool is something you pick for the job rather than one blunt instrument.
+
+   True only when some tool class actually CLAIMS the block and what you are holding is not one of
+   them. Two cases deliberately excluded: bare hands (nothing to blunt, and hands are not a wrong
+   choice), and blocks no class claims at all — glass, wool, a torch have no right tool, so there
+   is nothing to get wrong about them. */
+function isWrongTool(heldId, blockId) {
+  const p = heldId != null && heldId >= 256 ? ITEM_PROPS[heldId] : null;
+  if (!p || !p.tool) return false;
+  const id = blockId & 255;
+  // 0.7345: a billboard or a ground layer is a brush-aside, not a dig — nothing to do wrong
+  if (isFreeBreak(id) || isLayerBlock(id)) return false;
+  let claimed = false;
+  for (const cls in TOOL_BLOCKS) {
+    if (!TOOL_BLOCKS[cls].has(id)) continue;
+    if (cls === p.tool) return false;               // the held tool is one of this block's own
+    claimed = true;
+  }
+  return claimed;
+}
+/* Bare hands break FOLIAGE and nothing else (0.7341). Carpets, billboards and leaves come away by
+   hand; every solid block needs a tool in hand before the crack even starts. That is what makes
+   the flint tier a real gate rather than a convenience — and it is why the flint recipes cost no
+   wood, since a log is on the far side of this rule. */
+const LEAF_BLOCKS = new Set([B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES]);
+function handBreakable(id) {
+  const p = PROPS[id & 255];
+  if (!p) return false;
+  return p.model === 'cross' || p.model === 'carpet' || p.model === 'carpet_stack'
+      || LEAF_BLOCKS.has(id & 255);
+}
+// does what is in hand count as a tool at all? (any tool class — pick, shovel, hatchet, hoe, ...)
+const isToolItem = (id) => !!(id != null && id >= 256 && ITEM_PROPS[id] && ITEM_PROPS[id].tool);
 
 // Block drop table: block ID -> drop block ID (null = nothing, undefined = drop self)
 const BLOCK_DROP = {
@@ -2729,13 +2863,20 @@ const BLOCK_DROP = {
 function blockDrop(blockId, isNatural = false) {
   // a layered carpet drops through carpetBreakInfo(), one item per broken layer — never here
   if (blockId === B.CARPET) return [];
+  // a flint stone is never mined by hand (noTarget), but an explosion can still take one out —
+  // and when it does it should hand over the same flint a pickup would
+  if (blockId === B.FLINT_ROCK) return [{ id: ITEM.FLINT, count: 1 }];
   // litter is a leaf block lying flat — it yields exactly what leaves yield
   if (blockId === B.LEAF_CARPET) blockId = B.LEAVES;
   else if (blockId === B.BIRCH_LEAF_CARPET) blockId = B.BIRCH_LEAVES;
   else if (blockId === B.SPRUCE_LEAF_CARPET) blockId = B.SPRUCE_LEAVES;
   if (blockId === B.LEAVES || blockId === B.BIRCH_LEAVES || blockId === B.SPRUCE_LEAVES) {
     const drops = [];
-    const stickChance = isNatural ? 0.009 : 0.004;
+    /* 2% since 0.7343. Leaves are the ONLY stick source a player can reach before their first
+       tool (0.7341 put logs behind the tool gate), so 0.9% made the opening tool a grind through
+       whole canopies. Player-PLACED leaves stay far lower on purpose: replanting a leaf block to
+       re-break it must never be a better rate than finding a tree. */
+    const stickChance = isNatural ? 0.05 : 0.012;
     if (Math.random() < stickChance)
       drops.push({ id: ITEM.STICK, count: Math.floor(Math.random() * 3) + 1 });
     const appleChance = isNatural ? 0.002 : 0.0005;
@@ -2765,7 +2906,7 @@ function blockDrop(blockId, isNatural = false) {
   if (blockId === B.WHEAT) return [{ id: ITEM.WHEAT, count: 1 + Math.floor(Math.random() * 2) }];
   // grass and berry bushes drop nothing when destroyed — bush pickup is the only way to work them
   if (blockId === B.TALLGRASS || blockId === B.TALL_LOWER || blockId === B.TALL_UPPER ||
-      blockId === B.BERRY_BUSH) return [];
+      isBerryBush(blockId)) return [];
   if (blockId === B.GLASS) return [{ id: ITEM.GLASS_SHARD, count: 2 + Math.floor(Math.random() * 3) }];
   if (blockId === B.CLAY)  return [{ id: ITEM.CLAY_BALL, count: 4 }];
   if (blockId === B.SNOW)  return [{ id: ITEM.SNOWBALL,  count: 2 + Math.floor(Math.random() * 3) }];

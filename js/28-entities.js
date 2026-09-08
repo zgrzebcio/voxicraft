@@ -225,11 +225,64 @@ function buildSheep() {
   return { root, head, body, legs: [legFL, legFR, legBL, legBR],
            wool: [woolBody, woolHead], mat, wmat, mats: [mat, wmat] };
 }
-function animateSheep(m, phase, swing, headPitch) {
+// shared by every four-legged mob: front pair alternates, back pair mirrors it
+function animateQuadruped(m, phase, swing, headPitch) {
   const s = Math.sin(phase) * swing, c = Math.sin(phase + Math.PI) * swing;
   m.legs[0].rotation.x = s;  m.legs[1].rotation.x = c;   // front pair alternates
   m.legs[2].rotation.x = c;  m.legs[3].rotation.x = s;   // back pair mirrors it
   m.head.rotation.x = headPitch;
+}
+
+/* ================================ cow ================================
+   Two hide patterns, one rig. The sheets (textures/Entity/cow_brown.png / cow_white.png) are
+   GENERATED, not hand-drawn — `node tools/mkcow.js` rewrites them, evaluating the spots in 3D
+   against the box each texel belongs to so a patch runs over an edge and carries on onto the next
+   face. Both variants use the same 64x64 region layout, so a variant is nothing but a different
+   map on the same geometry:
+     body  10w x 10h x 16d at (0, 0)      head 7x7x7 at (0, 27)
+     leg   4w x 12h x 4d   at (29, 27)    horn 2x2x2 at (46, 27)
+   Anything that moves those numbers has to move them in the generator too, or the spots stop
+   lining up across the box seams. */
+const COW_VARIANTS = ['brown', 'white'];
+const _cowTex = {};
+function _cowTexture(variant) {
+  if (!_cowTex[variant]) {
+    const t = new THREE.TextureLoader().load('textures/Entity/cow_' + variant + '.png');
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    _cowTex[variant] = t;
+  }
+  return _cowTex[variant];
+}
+function _newCowMat(variant) {
+  return new THREE.MeshBasicMaterial({ map: _cowTexture(variant), transparent: true, alphaTest: 0.5 });
+}
+function _cowLeg(mat) {
+  const g = new THREE.Group();
+  const m = _part(mat, 4, 12, 4, 29, 27);
+  m.position.y = -6 * PX;                       // pivots at the hip, same as the sheep
+  g.add(m);
+  return g;
+}
+function buildCow(variant = 'brown') {
+  const root = new THREE.Group();
+  const mat = _newCowMat(variant);
+  const body = _part(mat, 10, 10, 16, 0, 0);
+  body.position.set(0, 17 * PX, 0);
+  const head = new THREE.Group();               // horns ride with the head, so it gets a pivot
+  head.position.set(0, 20 * PX, 11.5 * PX);
+  const skull = _part(mat, 7, 7, 7, 0, 27);
+  const hornR = _part(mat, 2, 2, 2, 46, 27); hornR.position.set(-4 * PX, 3 * PX, -1 * PX);
+  const hornL = _part(mat, 2, 2, 2, 46, 27); hornL.position.set( 4 * PX, 3 * PX, -1 * PX);
+  head.add(skull, hornR, hornL);
+  const legFL = _cowLeg(mat); legFL.position.set(-3.5 * PX, 12 * PX,  5 * PX);
+  const legFR = _cowLeg(mat); legFR.position.set( 3.5 * PX, 12 * PX,  5 * PX);
+  const legBL = _cowLeg(mat); legBL.position.set(-3.5 * PX, 12 * PX, -5 * PX);
+  const legBR = _cowLeg(mat); legBR.position.set( 3.5 * PX, 12 * PX, -5 * PX);
+  root.add(body, head, legFL, legFR, legBL, legBR);
+  return { root, head, body, legs: [legFL, legFR, legBL, legBR], mat, mats: [mat] };
 }
 
 /* ================================ third-person view ================================ */
@@ -434,10 +487,10 @@ const ENT_CARRY_POOL = [
   { id: () => ITEM.APPLE,         min: 1, max: 2  },
   { id: () => ITEM.GLOW_DUST,     min: 1, max: 2  },
   { id: () => ITEM.STICK,         min: 1, max: 4  },
-  { id: () => ITEM.WOODEN_PICKAXE, min: 1, max: 1 },
+  { id: () => ITEM.FLINT_PICKAXE, min: 1, max: 1 },
   { id: () => ITEM.STONE_PICKAXE,  min: 1, max: 1 },
   { id: () => ITEM.STONE_SHOVEL,   min: 1, max: 1 },
-  { id: () => ITEM.WOODEN_HATCHET,  min: 1, max: 1 },
+  { id: () => ITEM.FLINT_HATCHET,  min: 1, max: 1 },
   { id: () => ITEM.IRON_PICKAXE,   min: 1, max: 1 },
 ];
 const _ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
@@ -452,6 +505,16 @@ const SHEEP_GRAZE_CD = 5;                // how often a shorn sheep looks for gr
 const SHEEP_GRAZE_CHANCE = 0.25;
 const SHEEP_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
 
+/* ---- cows (0.73): the other passive grazer ----
+   Same behaviour as a sheep minus the fleece — they wander, and bolt when hit. Tougher and a bit
+   slower, and they carry the only source of leather in the game. */
+const COW_HP = 12;
+const COW_SPEED = 1.7, COW_FLEE_SPEED = 4.4;
+const COW_FLEE_TIME = 6;
+const COW_BIOMES = new Set(['Plains', 'Forest', 'Birch Forest']);
+// one grazer is either a sheep or a cow: both run through _updateGrazer and both bolt when hit
+const isGrazer = (e) => e.kind === 'sheep' || e.kind === 'cow';
+
 /* ---- zombies (0.715): the first genuinely HOSTILE mob ----
    They are not part of the permanent per-chunk population. A chunk rolls for zombies every time
    it finishes generating — a brand new chunk or an old one being loaded back in — but only while
@@ -465,9 +528,21 @@ const ZOMBIE_DMG = 4;
 // player from inside terrain the player cannot see.
 const ZOMBIE_CHASE_RANGE = 64;
 const ZOMBIE_RISE_TIME = 1.2;            // seconds spent climbing out of the ground
-const ZOMBIE_CHUNK_CHANCE = 0.10;        // per chunk load, at night
-const ZOMBIE_PACK_MIN = 1, ZOMBIE_PACK_MAX = 2;
-const ZOMBIE_CAP = 24;                   // hard ceiling — chunk reloads must not stack up forever
+/* Spawn rate (retuned 0.7295 — the old numbers built 10-strong hordes). Three separate limits,
+   because one alone was not enough: walking into fresh terrain streams in dozens of chunks in a
+   couple of seconds, and every one of them used to roll independently.
+     CHANCE  how often a chunk load even considers a zombie
+     PACK    how many come up at that one spot (a pack of 1 now — no clusters)
+     GAP     seconds between any two spawns WORLD-WIDE, which is what actually stops a wave:
+             a burst of chunk loads can now only produce one zombie
+     CAP     the ceiling on how many can be alive at once */
+const ZOMBIE_CHUNK_CHANCE = 0.05;        // per chunk load, at night
+const ZOMBIE_PACK_MIN = 1, ZOMBIE_PACK_MAX = 1;
+const ZOMBIE_SPAWN_GAP = 6;              // seconds between spawns, across the whole world
+const ZOMBIE_CAP = 10;                   // hard ceiling — chunk reloads must not stack up forever
+// World-global, NOT per player: this throttles the world's spawner, which runs once per chunk
+// load rather than once per player per frame, so it must not live in a per-seat slot.
+var _zombieSpawnT = -1e9;
 const ZOMBIE_BURN_GRACE = 0.7;           // seconds in the open before it catches
 const ZOMBIE_BURN_DPS = 1.8;
 const ZOMBIE_SPAWN_MIN_DIST = 14;        // never sprouts in the player's face
@@ -536,6 +611,30 @@ function spawnSheep(x, y, z, opts = {}) {
   return ent;
 }
 
+function spawnCow(x, y, z, opts = {}) {
+  // hide pattern is rolled once and persisted, so a herd stays the herd you found
+  const variant = COW_VARIANTS.includes(opts.variant)
+    ? opts.variant : COW_VARIANTS[Math.floor(Math.random() * COW_VARIANTS.length)];
+  const m = buildCow(variant);
+  m.root.position.set(x, y, z);
+  scene.add(m.root);
+  const ent = {
+    model: m, x, y, z, vy: 0, yaw: Math.random() * Math.PI * 2,
+    hp: opts.hp != null ? opts.hp : COW_HP, onGround: false,
+    state: 'wander', wanderT: 0, walk: 0, hurtT: 0,
+    fleeT: 0, jumpCd: 0, kx: 0, kz: 0, hazCd: 0, airT: ENT_AIR_MAX,
+    escapeT: 0, turnCd: 0, flailT: 0,
+    variant,
+    hx: opts.hx != null ? opts.hx : x,
+    hz: opts.hz != null ? opts.hz : z,
+    inventory: [],
+    kind: 'cow',
+    name: 'Cow',
+  };
+  ENTITIES.push(ent);
+  return ent;
+}
+
 /* A zombie starts fully underground and `riseT` lifts it into place — the model is offset, not
    the collision position, so it is already standing on solid ground the whole time. */
 function spawnZombie(x, y, z) {
@@ -561,7 +660,10 @@ function _removeEntity(i) {
   scene.remove(ENTITIES[i].model.root);
   ENTITIES.splice(i, 1);
 }
-function clearEntities() { while (ENTITIES.length) _removeEntity(ENTITIES.length - 1); }
+function clearEntities() {
+  while (ENTITIES.length) _removeEntity(ENTITIES.length - 1);
+  _zombieSpawnT = -1e9;                   // a new world starts with the spawn cooldown clear
+}
 
 // AABB test against solid voxels for a candidate position
 function _entBlocked(x, y, z) {
@@ -670,6 +772,12 @@ function _entDropLoot(ent) {
     if (ent.woolly) { pop(B.WOOL, 1); pop(ITEM.STRING, _ri(1, 3)); }
     return;
   }
+  if (ent.kind === 'cow') {
+    pop(ITEM.BEEF, _ri(1, 3));
+    const hide = _ri(0, 2);                    // 0 is a real outcome — not every hide is usable
+    if (hide > 0) pop(ITEM.LEATHER, hide);
+    return;
+  }
   if (ent.kind === 'zombie') {
     const n = _ri(0, 2);                       // 0 is a real outcome — some leave nothing
     if (n > 0) pop(ITEM.ROTTEN_FLESH, n);
@@ -709,9 +817,9 @@ function damageEntity(ent, dmg) {
   ent.hp -= dmg;
   ent.hurtT = 0.25;
   ent.flailT = ENT_FLAIL_TIME;                   // limbs thrash on impact even while standing
-  // Sheep are passive: they bolt rather than retaliate.
-  if (ent.kind === 'sheep') {
-    if (!player.canFly) ent.fleeT = SHEEP_FLEE_TIME;
+  // Grazers are passive: they bolt rather than retaliate.
+  if (isGrazer(ent)) {
+    if (!player.canFly) ent.fleeT = ent.kind === 'cow' ? COW_FLEE_TIME : SHEEP_FLEE_TIME;
     if (ent.hp <= 0) {
       if (!player.canFly) { _entDropLoot(ent); addXP(XP_MOB); }
       const i = ENTITIES.indexOf(ent);
@@ -888,6 +996,7 @@ function serializeEntities() {
       e.name, e.inventory.map(s => [s.id, s.count]),
       +e.hx.toFixed(1), +e.hz.toFixed(1),
       e.kind, e.kind === 'sheep' ? (e.woolly ? 1 : 0) : 0,
+      e.kind === 'cow' ? e.variant : 0,        // appended (0.73): older rows simply lack it
     ]);
   }
   return out;
@@ -896,8 +1005,18 @@ function restoreEntities(list) {
   if (!Array.isArray(list)) return;
   for (const r of list) {
     if (!Array.isArray(r) || r.length < 5) continue;
-    const [x, y, z, yaw, hp, name, inv, hx, hz, kind, woolly] = r;
+    const [x, y, z, yaw, hp, name, inv, hx, hz, kind, woolly, variant] = r;
     if (![x, y, z].every(v => typeof v === 'number' && isFinite(v))) continue;
+    if (kind === 'cow') {
+      const c = spawnCow(x, y, z, {
+        hp: typeof hp === 'number' && hp > 0 ? hp : COW_HP,
+        variant,                               // spawnCow re-rolls anything it does not recognise
+        hx: typeof hx === 'number' ? hx : x,
+        hz: typeof hz === 'number' ? hz : z,
+      });
+      if (typeof yaw === 'number') c.yaw = yaw;
+      continue;
+    }
     if (kind === 'sheep') {                    // saves written before sheep existed have no kind
       const s = spawnSheep(x, y, z, {
         hp: typeof hp === 'number' && hp > 0 ? hp : SHEEP_HP,
@@ -937,6 +1056,8 @@ const _entChunks = new Set();            // "cx,cz" of every chunk that has alre
 const ENT_CHUNK_CHANCE = 0.030;          // a wanderer in ~1 chunk in 33
 const SHEEP_CHUNK_CHANCE = 0.028;        // a flock in ~1 chunk in 36 — sheep were far too common
 const SHEEP_FLOCK_MIN = 1, SHEEP_FLOCK_MAX = 3;
+const COW_CHUNK_CHANCE = 0.010;          // a herd in ~1 chunk in 100 (0.7341: was 1 in 45)
+const COW_HERD_MIN = 1, COW_HERD_MAX = 2;
 
 // a legal surface spot inside this chunk, or null. Chunk-local — nothing to do with the player.
 function _findChunkSpot(cx, cz, biomes) {
@@ -964,21 +1085,23 @@ function trySpawnEntitiesInChunk(cx, cz) {
     const s = _findChunkSpot(cx, cz, ENT_BIOMES);
     if (s) spawnEntity(s.x, s.y, s.z);
   }
-  if (Math.random() < SHEEP_CHUNK_CHANCE) {
-    const s = _findChunkSpot(cx, cz, SHEEP_BIOMES);
-    // grazers only appear on grass, and they arrive as a flock clustered on the same spot
-    if (s && s.top === B.GRASS) {
-      const n = SHEEP_FLOCK_MIN + Math.floor(Math.random() * (SHEEP_FLOCK_MAX - SHEEP_FLOCK_MIN + 1));
-      for (let i = 0; i < n; i++) {
-        const ox = (Math.random() * 4 - 2), oz = (Math.random() * 4 - 2);
-        const sx = s.x + ox, sz = s.z + oz;
-        // a scattered flock member that lands somewhere cramped falls back to the anchor spot,
-        // which already passed the full room test
-        if (_entBlocked(sx, s.y, sz) || _entHazard(sx, s.y, sz) || !_entSpawnRoom(sx, s.y, sz))
-          { spawnSheep(s.x, s.y, s.z); continue; }
-        spawnSheep(sx, s.y, sz);
-      }
-    }
+  _rollHerd(cx, cz, SHEEP_CHUNK_CHANCE, SHEEP_BIOMES, SHEEP_FLOCK_MIN, SHEEP_FLOCK_MAX, spawnSheep);
+  _rollHerd(cx, cz, COW_CHUNK_CHANCE,   COW_BIOMES,   COW_HERD_MIN,   COW_HERD_MAX,   spawnCow);
+}
+/* One grazer group. They only appear on grass, and they arrive clustered on a single vetted spot
+   rather than scattered across the chunk — which is what makes a field read as a field. */
+function _rollHerd(cx, cz, chance, biomes, min, max, spawn) {
+  if (Math.random() >= chance) return;
+  const s = _findChunkSpot(cx, cz, biomes);
+  if (!s || s.top !== B.GRASS) return;
+  const n = min + Math.floor(Math.random() * (max - min + 1));
+  for (let i = 0; i < n; i++) {
+    const sx = s.x + (Math.random() * 4 - 2), sz = s.z + (Math.random() * 4 - 2);
+    // a scattered member that lands somewhere cramped falls back to the anchor spot, which
+    // already passed the full room test
+    if (_entBlocked(sx, s.y, sz) || _entHazard(sx, s.y, sz) || !_entSpawnRoom(sx, s.y, sz))
+      { spawn(s.x, s.y, s.z); continue; }
+    spawn(sx, s.y, sz);
   }
 }
 /* Night mobs, rolled on EVERY chunk-gen finish rather than once per chunk for ever: a chunk that
@@ -989,6 +1112,8 @@ function trySpawnEntitiesInChunk(cx, cz) {
 function trySpawnNightMobsInChunk(cx, cz) {
   if (menuScene || !currentWorld || !anyPlayerSpawned()) return;
   if (!isNightForMobs()) return;
+  const nowS = performance.now() / 1000;
+  if (nowS - _zombieSpawnT < ZOMBIE_SPAWN_GAP) return;   // still inside the world-wide cooldown
   if (Math.random() >= ZOMBIE_CHUNK_CHANCE) return;
   let live = 0;
   for (const e of ENTITIES) if (e.kind === 'zombie') live++;
@@ -1001,6 +1126,7 @@ function trySpawnNightMobsInChunk(cx, cz) {
     if (dx * dx + dz * dz < ZOMBIE_SPAWN_MIN_DIST * ZOMBIE_SPAWN_MIN_DIST) return;
   }
   const n = Math.min(ZOMBIE_CAP - live, _ri(ZOMBIE_PACK_MIN, ZOMBIE_PACK_MAX));
+  if (n > 0) _zombieSpawnT = nowS;                  // armed only when one actually comes up
   for (let i = 0; i < n; i++) {
     const ox = Math.random() * 3 - 1.5, oz = Math.random() * 3 - 1.5;
     const zx = s.x + ox, zz = s.z + oz;
@@ -1079,18 +1205,22 @@ function _separateBodies(dt) {
   }
 }
 
-/* Sheep tick. Passive: wander, graze, and sprint directly away from the player after being hit.
-   A shorn sheep periodically tries to eat the grass block under it — that converts the grass to
-   dirt and starts the fleece growing back, which is animated by scaling the wool boxes. */
-function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
+/* Grazer tick — sheep and cows (0.73). Passive: wander, and sprint directly away from the player
+   after being hit. The fleece half is sheep-only: a shorn sheep periodically tries to eat the
+   grass block under it, which converts the grass to dirt and starts the wool growing back,
+   animated by scaling the fleece boxes. A cow simply skips that whole section. */
+function _updateGrazer(e, dt, pdx, pdz, distXZ, i) {
+  const cow = e.kind === 'cow';
+  const walkSpeed = cow ? COW_SPEED : SHEEP_SPEED;
+  const fleeSpeed = cow ? COW_FLEE_SPEED : SHEEP_FLEE_SPEED;
   if (e.flailT > 0) e.flailT -= dt;
   if (e.turnCd > 0) e.turnCd -= dt;
   if (e.fleeT > 0) e.fleeT -= dt;
 
   const inWater = (getBlock(Math.floor(e.x), Math.floor(e.y + 0.4), Math.floor(e.z)) & 255) === B.WATER;
 
-  /* ---- fleece: graze to regrow, then animate it filling out ---- */
-  if (!e.woolly) {
+  /* ---- fleece: graze to regrow, then animate it filling out (sheep only) ---- */
+  if (!cow && !e.woolly) {
     if (e.regrowing) {
       e.woolGrow = Math.min(1, e.woolGrow + dt / SHEEP_REGROW);
       if (e.woolGrow >= 1) { e.woolly = true; e.regrowing = false; }
@@ -1116,10 +1246,10 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
   if (inWater) {
     e.escapeT -= dt;
     if (e.escapeT <= 0) { e.escapeT = 0.8; e.yaw += 1.2; }
-    moveSpeed = SHEEP_SPEED;
+    moveSpeed = walkSpeed;
   } else if (e.fleeT > 0) {
     e.yaw = Math.atan2(-pdx, -pdz);            // straight away from whoever hit it
-    moveSpeed = SHEEP_FLEE_SPEED;
+    moveSpeed = fleeSpeed;
   } else {
     e.wanderT -= dt;
     if (e.wanderT <= 0) {
@@ -1127,10 +1257,10 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
       e.state = Math.random() < 0.45 ? 'idle' : 'wander';
       if (e.state === 'wander') e.yaw = Math.random() * Math.PI * 2;
     }
-    moveSpeed = e.state === 'wander' ? SHEEP_SPEED : 0;
+    moveSpeed = e.state === 'wander' ? walkSpeed : 0;
     const hdx = e.hx - e.x, hdz = e.hz - e.z;
     if (Math.hypot(hdx, hdz) > ENT_HOME_RANGE) {
-      e.yaw = Math.atan2(hdx, hdz); e.state = 'wander'; moveSpeed = SHEEP_SPEED;
+      e.yaw = Math.atan2(hdx, hdz); e.state = 'wander'; moveSpeed = walkSpeed;
     }
   }
 
@@ -1221,14 +1351,19 @@ function _updateSheep(e, dt, pdx, pdz, distXZ, i) {
   const m = e.model;
   m.root.position.set(e.x, e.y, e.z);
   m.root.rotation.y = e.yaw;
-  // grazing dips the head toward the ground
-  const graze = (!e.woolly && e.regrowing && e.woolGrow < 0.08) ? 0.9 : 0;
-  animateSheep(m, e.walk, swing, graze);
-  // fleece visibility/scale IS the regrow animation
-  const g = e.woolly ? 1 : (e.regrowing ? Math.max(0.06, e.woolGrow) : 0);
-  for (const w of m.wool) {
-    w.visible = g > 0.02;
-    w.scale.setScalar(g);
+  /* Grazing dips the head toward the ground. A standing cow crops grass too, and since it idles
+     roughly half the time the dip is EASED on the entity rather than snapped — the sheep's is a
+     brief one-off, a cow's would otherwise flick up and down all day. */
+  const dipTo = cow ? ((e.state === 'idle' && e.fleeT <= 0 && e.onGround) ? 0.55 : 0)
+                    : ((!e.woolly && e.regrowing && e.woolGrow < 0.08) ? 0.9 : 0);
+  e.headDip = (e.headDip || 0) + (dipTo - (e.headDip || 0)) * Math.min(1, dt * 3.5);
+  animateQuadruped(m, e.walk, swing, e.headDip);
+  if (m.wool) {                                  // fleece visibility/scale IS the regrow animation
+    const g = e.woolly ? 1 : (e.regrowing ? Math.max(0.06, e.woolGrow) : 0);
+    for (const w of m.wool) {
+      w.visible = g > 0.02;
+      w.scale.setScalar(g);
+    }
   }
   shadeHumanoid(m, e.x, e.y, e.z, e.hurtT > 0);
 }
@@ -1324,7 +1459,7 @@ function updateEntities(dt) {
     if (e.hurtT > 0) e.hurtT -= dt;
     if (e.atkCd > 0) e.atkCd -= dt;
     if (e.jumpCd > 0) e.jumpCd -= dt;
-    if (e.kind === 'sheep') { _updateSheep(e, dt, pdx, pdz, distXZ, i); continue; }
+    if (isGrazer(e)) { _updateGrazer(e, dt, pdx, pdz, distXZ, i); continue; }
     /* ---- zombie: claw out of the ground, hunt on sight, burn at dawn ---- */
     if (e.kind === 'zombie') {
       if (e.riseT > 0) {
@@ -1397,12 +1532,17 @@ function updateEntities(dt) {
         moveSpeed = 0;
         tp.hp -= (e.dmg || ENT_ATTACK_DMG);
         tp._dmgCause = `was slain by a ${e.name}`;
-        // knock the player back with the same decaying-velocity model the mobs use
+        /* Knock the player back with the same decaying-velocity model the mobs use, minus
+           whatever their armour set resists. Read inside `withPlayer(tp, ...)`: entities tick
+           once for the WORLD, so the equipment globals belong to whichever seat happens to be
+           installed — the resistance has to come from the player actually being hit. */
         const m = distXZ || 1;
         const kick = playerKick(tp);
-        kick.x = pdx / m * PLY_KNOCK;
-        kick.z = pdz / m * PLY_KNOCK;
-        if (!tp.flying && Math.abs(tp.vy) < 0.5) tp.vy = PLY_KNOCK_HOP;
+        const kbMul = 1 - (typeof playerKnockbackResist === 'function'
+                           ? withPlayer(tp, playerKnockbackResist) : 0);
+        kick.x = pdx / m * PLY_KNOCK * kbMul;
+        kick.z = pdz / m * PLY_KNOCK * kbMul;
+        if (!tp.flying && Math.abs(tp.vy) < 0.5) tp.vy = PLY_KNOCK_HOP * kbMul;
       }
     } else {
       e.wanderT -= dt;

@@ -36,7 +36,7 @@ const SWAP_KEYS = [
   'HOTBAR', 'invSlots', 'invSlots2', 'hotbarSel', 'survStash',
   'equipSlots', 'beltSlots', 'survEquip', 'survBelt',
   // what this player is doing right now
-  'mining', 'act', 'mouseBreak', 'mousePlace', 'pad',
+  'mining', 'act', 'mouseBreak', 'mousePlace', 'pad', 'crackMat',
   '_bushCd', 'handPlaceSwing', 'handPickSwing', '_eatTimer',
   // this seat's own inventory: its panel, its cursor, what it is dragging and what it has open
   'invOpen', 'invWrapEl', 'invEl', 'vcurEl', 'vdragEl', 'ctipEl',
@@ -290,6 +290,7 @@ function _bindPaneDom(pane, g) {
   g.dragFrom = null; g.dragHeld = null; g.lastHoverEl = null; g._invSeq = 0;
   g.craftMode = 'basic'; g.craftCat = 'all'; g._craftScroll = 0;
   g.activeFurnace = null; g.activeChest = null; g.activeChest2 = null; g.activeStructBlock = null;
+  g.crackMat = newCrackMat();          // this seat mines at its own stage — see 14-mining.js
   g._interactShown = '';
   g.blocknameTimer = 0;
   // a seat that had its debug text hidden last session opens that way again
@@ -373,7 +374,7 @@ function _newPlayerState(index) {
   p.pos = src.pos.clone();
   p.profileId = null;                 // set by the caller — never inherited from player one
   p.sleepingAt = null;                // ...nor player one's bed, which Object.assign would copy
-  p.spawnPos = null;
+  p.spawnPos = null; p.homeSpawn = null; p.spawnBedKey = null;
   p.vy = 0; p.fallStart = null; p.dead = false; p.spawned = false;
   p.hp = MAX_HP; p.food = MAX_FOOD; p.saturation = MAX_SATURATION; p.air = MAX_AIR;
   p.flying = src.canFly; p.fast = false; p.sneaking = false;
@@ -729,6 +730,8 @@ function renderAllViews(dt) {
     if (sel) { selBox.position.set(sel.px, sel.py, sel.pz); selBox.scale.set(sel.sx, sel.sy, sel.sz); selBox.updateMatrix(); }
     const cr = st.crack;
     crackMesh.visible = !!cr;
+    // the seat's OWN material, so its stage is the one this viewport shows (0.734)
+    if (crackMesh.material !== crackMat) crackMesh.material = crackMat;
     if (cr) { crackMesh.position.set(cr.px, cr.py, cr.pz); crackMesh.scale.set(cr.sx, cr.sy, cr.sz); }
     alignSkyTo(camera);                  // the dome is drawn around THIS eye
     applyEyeVolumeFog();                 // water / lava murk for THIS eye, restored per pass
@@ -779,6 +782,8 @@ function _serializeSlot(i) {
     yaw: p.yaw, pitch: p.pitch, hp: p.hp, food: p.food, saturation: p.saturation,
     flying: p.flying, hotSel: g.hotbarSel,
     spawnPos: p.spawnPos ? p.spawnPos.toArray() : null,
+    homeSpawn: p.homeSpawn ? p.homeSpawn.toArray() : null,
+    spawnBedKey: p.spawnBedKey || null,
     survHot: g.survStash.hot, survInv: g.survStash.inv, survInv2: g.survStash.inv2,
     survEquip: g.survEquip, survBelt: g.survBelt,
     xp: g.playerXP,
@@ -900,6 +905,9 @@ function applyExtraPlayerRestore(slot) {
   player.vy = 0; player.fallStart = null;
   player.spawnPos = Array.isArray(rec.spawnPos)
     ? new THREE.Vector3(rec.spawnPos[0], rec.spawnPos[1], rec.spawnPos[2]) : null;
+  player.homeSpawn = Array.isArray(rec.homeSpawn)
+    ? new THREE.Vector3(rec.homeSpawn[0], rec.homeSpawn[1], rec.homeSpawn[2]) : null;
+  player.spawnBedKey = rec.spawnBedKey || null;
   survStash = migrateStash(rec.survHot, rec.survInv, rec.survInv2);
   restoreEquip(rec.survEquip, rec.survBelt);
   loadInventoryForMode(currentInvMode);

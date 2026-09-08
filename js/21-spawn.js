@@ -29,7 +29,7 @@ function resetWorld(seed, terrainType) {
   initWorkers(seed, TERRAIN_TYPE);
   // every split-screen player restarts unspawned; the frame loop re-seats each of them
   for (const p of PLAYERS) {
-    p.spawnPos = null;
+    p.spawnPos = null; p.homeSpawn = null; p.spawnBedKey = null;
     p.spawned = false;
     p.pos.set(8.5, 96, 8.5);
     p.vy = 0; p.dead = false; p.sleepingAt = null;

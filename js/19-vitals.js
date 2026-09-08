@@ -98,7 +98,12 @@ function paintVitals() {
   // shadow slots (empty background) first, then filled state on top — HP left, food right
   // 10 hearts + 10 drumsticks each take 10 icons; canvas width = 20*step covers both rows
   const iconStep = GUI_SZ + 2;                     // 38px per slot (36 native + 2 gap)
-  const EDGE_INSET = 0;                            // flush with canvas edges — CSS width matches hotbar
+  /* Both rows pulled in off the canvas edges (0.7295) so hearts and food sit closer to the
+     crosshair instead of hugging the far ends of the hotbar. Canvas pixels, and the canvas is
+     drawn at 535/980 scale, so a real on-screen pixel costs ~1.83 here. Armor rides on hpX and
+     the oxygen bubbles on hunX, so all four rows move together.
+     0.732: 40 -> 47, another ~4 screen pixels inward per side. */
+  const EDGE_INSET = 47;
   const hpX = EDGE_INSET, hunX = w - iconStep * 10 + 2 - EDGE_INSET;
   const ROW_Y = GUI_SZ + 2;                       // bubble row + gap
   const spriteW = GUI_SZ;                         // 36px native, drawn 1:1
@@ -128,17 +133,43 @@ function paintVitals() {
      20 armor points = 10 full icons, so each icon is worth 2 points, same scale as hearts.
      The sprite set is chosen per material so other tiers can theme their own row later; any
      material without its own art falls back to the iron sprites. */
-  const armorPts = typeof playerArmorPoints === 'function' ? playerArmorPoints() : 0;
-  if (armorPts > 0) {
-    const mat = typeof playerArmorStyle === 'function' ? playerArmorStyle() : 'Iron';
-    const full = GUI_IMG['armor' + mat + 'Full'] || GUI_IMG.armorIronFull;
-    const half = GUI_IMG['armor' + mat + 'Half'] || GUI_IMG.armorIronHalf;
+  const armorMats = typeof playerArmorPointMats === 'function' ? playerArmorPointMats() : [];
+  if (armorMats.length > 0) {
+    /* Each icon covers TWO points, and the two can be different materials — the whole reason the
+       art ships a left half and a right half per tier. So the icon is composed rather than
+       picked: same material on both points draws the one full sprite, a mismatch (or a lone
+       leftover point) draws the halves that are actually there. Any tier without its own art
+       falls back to the iron sprites so a new material can never blank the row. */
+    const full  = (m) => GUI_IMG['armor' + m + 'Full']      || GUI_IMG.armorIronFull;
+    const left  = (m) => GUI_IMG['armor' + m + 'Half']      || GUI_IMG.armorIronHalf;
+    const right = (m) => GUI_IMG['armor' + m + 'HalfRight'] || GUI_IMG.armorIronHalfRight;
     for (let i = 0; i < 10; i++) {
       const ax = hpX + i * iconStep;
-      const frac = Math.ceil(Math.max(0, Math.min(2, armorPts - i * 2)));
+      const l = armorMats[i * 2] || null, r = armorMats[i * 2 + 1] || null;
+      if (!l && !r) { if (GUI_IMG.armorEmpty) vctx.drawImage(GUI_IMG.armorEmpty, ax, 0, spriteW, spriteW); continue; }
       if (GUI_IMG.armorEmpty) vctx.drawImage(GUI_IMG.armorEmpty, ax, 0, spriteW, spriteW);
-      if (frac >= 2 && full) vctx.drawImage(full, ax, 0, spriteW, spriteW);
-      else if (frac >= 1 && half) vctx.drawImage(half, ax, 0, spriteW, spriteW);
+      if (l && l === r) {
+        const f = full(l);
+        if (f) vctx.drawImage(f, ax, 0, spriteW, spriteW);
+        continue;
+      }
+      /* Each half is CLIPPED to its own side of the icon. The tiers do not agree on what a half
+         sprite contains — iron's carries the empty socket on its far side, leather's is a clean
+         50% crop — so drawing them one over the other let iron's empty side paint straight over
+         the leather next to it. Clipping makes the composite work whatever the art does; the
+         empty socket underneath is already painted. */
+      const half = spriteW / 2;
+      const clipDraw = (img, x0, w) => {
+        if (!img) return;
+        vctx.save();
+        vctx.beginPath();
+        vctx.rect(x0, 0, w, spriteW);
+        vctx.clip();
+        vctx.drawImage(img, ax, 0, spriteW, spriteW);
+        vctx.restore();
+      };
+      if (l) clipDraw(left(l),  ax,        half);
+      if (r) clipDraw(right(r), ax + half, spriteW - half);
     }
   }
 
@@ -210,10 +241,18 @@ let ensureVitalsSprites = () => {};
     foodHalf:            'textures/Gui/Vitals/Food/food_half.png',
     foodSaturation:      'textures/Gui/Vitals/Food/food_Saturation.png',
     foodSaturationHalf:  'textures/Gui/Vitals/Food/food_Saturation_half.png',
-    // armor bar — one sprite set per material so future tiers can theme their own row
-    armorEmpty:          'textures/Gui/Vitals/Armor/armor_empty.png',
-    armorIronFull:       'textures/Gui/Vitals/Armor/iron_armor_full.png',
-    armorIronHalf:       'textures/Gui/Vitals/Armor/iron_armor_half.png',
+    /* armor bar — one sprite set per material so each tier themes its own row. Halves come in
+       BOTH directions (0.73): the row fills left to right, so a single leftover point draws the
+       LEFT half; the right-half art is what a right-anchored row (the oxygen side) would need.
+       The old single `iron_armor_half.png` no longer exists, which is why an odd armor total used
+       to draw an empty socket where the half icon belongs. */
+    armorEmpty:            'textures/Gui/Vitals/Armor/armor_empty.png',
+    armorIronFull:         'textures/Gui/Vitals/Armor/iron_armor_full.png',
+    armorIronHalf:         'textures/Gui/Vitals/Armor/iron_armor_lefthalf.png',
+    armorIronHalfRight:    'textures/Gui/Vitals/Armor/iron_armor_righthalf.png',
+    armorLeatherFull:      'textures/Gui/Vitals/Armor/leather_armor_full.png',
+    armorLeatherHalf:      'textures/Gui/Vitals/Armor/leather_armor_lefthalf.png',
+    armorLeatherHalfRight: 'textures/Gui/Vitals/Armor/leather_armor_righthalf.png',
   };
   /* Requested on world load, not at boot (0.7147). Fourteen more HTTP requests for a bar that is
      only ever drawn in survival, behind a menu that never shows it — and on a slow static server
@@ -305,11 +344,17 @@ function updateVitals(dt) {
   // starve: HP drains when food is empty
   if (player.food <= 0) { player.hp = Math.max(0, player.hp - STARVE_HP_PER_S * dt); player._dmgCause = 'starved to death'; }
 
-  // fall damage: track apex → landing (walking mode only); water cancels any fall
+  /* Fall damage: track apex → landing (walking mode only); water cancels any fall.
+     The landing test is `onGround()` since 0.7341, not `vy >= 0`. Velocity is a poor proxy for
+     having landed: a fall that ends on a slab, a stair or any partial box can leave vy negative
+     for several frames while the body settles, and the hit only registered once something else
+     happened to push it back up — which is the damage that "arrived late". Standing on ground is
+     unambiguous and true on the very frame you touch down. `vy > 0` still clears the fall too, so
+     jumping out of a descent is not banked and charged to you on the next landing. */
   if (!player.flying) {
     if (player._inWater) player.fallStart = null;
     if (player.vy < -0.1 && player.fallStart == null) player.fallStart = player.pos.y;
-    else if (player.vy >= 0 && player.fallStart != null) {
+    else if ((onGround() || player.vy > 0) && player.fallStart != null) {
       const fell = player.fallStart - player.pos.y;
       // hay bale fully absorbs fall damage when you land on it
       const landOn = getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z)) & 255;
@@ -372,15 +417,28 @@ function updateVitals(dt) {
                              Math.floor(player.pos.z)) & 255) === B.WATER;
   if (eyeUnder !== player._eyeUnder) vitalsDirty = true;
   player._eyeUnder = eyeUnder;
+  /* The armor row used to ride on the HP/food repaint, which happened to be often enough to hide
+     the gap. It cannot now: swapping an iron chestplate for a leather one changes the icons
+     without changing the point TOTAL, so the mix itself is what the bar watches. Per player, on
+     the player, because this runs once per seat. */
+  if (typeof armorBarSignature === 'function') {
+    const sig = armorBarSignature();
+    if (sig !== player._armorSig) { player._armorSig = sig; vitalsDirty = true; }
+  }
+  /* The drowning clock lives ON THE PLAYER (0.734). It used to be `updateVitals._drownT`, a single
+     value on the function object — but updateVitals runs once PER SEAT, so the first player who
+     was not underwater reset it, every frame, for everyone who was. The result was that nobody
+     drowned unless EVERY player was under at once. Same trap as the 0.729 footstep accumulator:
+     per-frame state in a per-player function must not be module-level. */
   if (eyeUnder && !player.flying) {
     player.air = Math.max(0, player.air - dt * (MAX_AIR / 15));
     if (player.air <= 0) {
-      updateVitals._drownT = (updateVitals._drownT || 0) + dt;
-      if (updateVitals._drownT >= 1) { updateVitals._drownT -= 1; player.hp = Math.max(0, player.hp - 2); player._dmgCause = 'drowned'; }
+      player._drownT = (player._drownT || 0) + dt;
+      if (player._drownT >= 1) { player._drownT -= 1; player.hp = Math.max(0, player.hp - 2); player._dmgCause = 'drowned'; }
     }
   } else {
     player.air = Math.min(MAX_AIR, player.air + dt * 5);
-    updateVitals._drownT = 0;
+    player._drownT = 0;
   }
   if (Math.ceil(player.air) !== Math.ceil(prevAir) ||
       (prevAir < MAX_AIR && player.air >= MAX_AIR)) vitalsDirty = true;
@@ -473,6 +531,7 @@ function respawnPlayer() {
   if (s) {
     player.pos.set(s.x, s.y, s.z);
     if (!player.spawnPos) player.spawnPos = player.pos.clone();
+    if (!player.homeSpawn) player.homeSpawn = player.pos.clone();
   } else if (player.spawnPos) {
     player.pos.copy(player.spawnPos);
   } else {

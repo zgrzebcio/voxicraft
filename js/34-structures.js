@@ -48,10 +48,10 @@ const DEFAULT_LOOT = {
     rolls: [3, 6],
     xp: [3, 8],                        // experience for the first open — see awardLootXP
     entries: [
-      { id: 'WOODEN_PICKAXE', min: 1, max: 1, chance: 0.35 },
-      { id: 'WOODEN_HATCHET', min: 1, max: 1, chance: 0.35 },
-      { id: 'WOODEN_SHOVEL',  min: 1, max: 1, chance: 0.35 },
-      { id: 'WOODEN_SWORD',   min: 1, max: 1, chance: 0.30 },
+      { id: 'FLINT_PICKAXE', min: 1, max: 1, chance: 0.35 },
+      { id: 'FLINT_HATCHET', min: 1, max: 1, chance: 0.35 },
+      { id: 'FLINT_SHOVEL',  min: 1, max: 1, chance: 0.35 },
+      { id: 'FLINT_SWORD',   min: 1, max: 1, chance: 0.30 },
       { id: 'APPLE',          min: 1, max: 3, chance: 0.60 },
       { id: 'BREAD',          min: 1, max: 2, chance: 0.50 },
       { id: 'STRING',         min: 1, max: 4, chance: 0.30 },

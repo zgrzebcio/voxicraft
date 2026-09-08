@@ -31,10 +31,19 @@ const crackTextures = [];
     crackTextures.push(t);
   }
 }
-const crackMat = new THREE.MeshBasicMaterial({
-  map: crackTextures[0], transparent: true, depthWrite: false,
-  polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-});
+/* One material PER SEAT (0.734). The stage textures are shared — they are just images — but the
+   material is what carries "which stage am I showing", and a single shared one made two players
+   mining at once fight over it: each wrote its own stage every time its progress crossed 10%, so
+   BOTH viewports flickered between the two stages several times a second. The mesh stays shared
+   and is re-transformed per view; the render pass points it at the drawing seat's material.
+   `var`, not `const`, because SWAP_KEYS reaches it through globalThis. */
+function newCrackMat() {
+  return new THREE.MeshBasicMaterial({
+    map: crackTextures[0], transparent: true, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+}
+var crackMat = newCrackMat();
 function drawCrack(progress) {
   const i = Math.max(0, Math.min(CRACK_STAGES - 1, Math.floor(progress * CRACK_STAGES)));
   if (crackMat.map !== crackTextures[i]) { crackMat.map = crackTextures[i]; crackMat.needsUpdate = true; }

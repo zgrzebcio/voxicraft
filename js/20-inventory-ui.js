@@ -173,6 +173,13 @@ function itemTooltipHTML(id, dur) {
   if (!p) return '';
   let html = `<div class="tipName">${_tipEsc(p.name || '')}</div>`;
   if (p.desc) html += `<div class="tipDesc">${_tipEsc(p.desc)}</div>`;
+  /* Set bonus (0.731). Written once per MATERIAL in ARMOR_SET_BONUS rather than copied into five
+     `desc` strings, so the wording can never drift between the helmet and the boots. Gloves are
+     not part of the set, so they simply do not carry the line (0.732). */
+  if (p.equip && p.equip !== 'gloves' && p.armorMat && typeof ARMOR_SET_BONUS !== 'undefined') {
+    const b = ARMOR_SET_BONUS[p.armorMat];
+    if (b) html += `<div class="tipSet${b.good ? '' : ' bad'}">${_tipEsc(b.desc)}</div>`;
+  }
   const rows = [];
   if (p.tool) {
     const maxD = p.durability;
@@ -189,6 +196,8 @@ function itemTooltipHTML(id, dur) {
     if (p.strength) rows.push(['strength', (p.strength > 0 ? '+' : '') + _tipNum(p.strength)]);
     if (p.moveSpeed) rows.push(['move speed', (p.moveSpeed > 0 ? '+' : '') + _tipNum(p.moveSpeed * 100) + '%']);
     if (p.atkSpeed) rows.push(['attack speed', (p.atkSpeed > 0 ? '+' : '') + _tipNum(p.atkSpeed * 100) + '%']);
+    if (p.coldResist) rows.push(['cold resistance', (p.coldResist > 0 ? '+' : '') + _tipNum(p.coldResist * 100) + '%']);
+    if (p.heatResist) rows.push(['heat resistance', (p.heatResist > 0 ? '+' : '') + _tipNum(p.heatResist * 100) + '%']);
   }
   if (p.food != null) {
     rows.push(['food', _tipNum(p.food)]);
@@ -449,7 +458,12 @@ function toggleInventory(open, mode) {
     if (document.pointerLockElement) document.exitPointerLock();   // free the cursor
     const r = invEl.getBoundingClientRect();
     invCursor.x = r.left + r.width / 2; invCursor.y = r.top + r.height / 2;
-    invCursor.mode = getPad() ? 'pad' : 'mouse';
+    /* Only seat ZERO owns the mouse. Every other seat is on a pad and has no OS pointer, so
+       'mouse' mode there means a cursor that is never drawn and cannot be moved — the inventory
+       opens and there is simply nothing on screen. This used to fall back to 'mouse' whenever
+       getPad() came back empty for a moment, which is the disappearing cursor (0.734). A pad seat
+       is now pinned to 'pad' whatever the pad list says at this instant. */
+    invCursor.mode = (activePlayerSlot() === 0 && !getPad()) ? 'mouse' : 'pad';
   } else {
     cancelDrag();
     activeFurnace = null;                       // closing always detaches the furnace GUI

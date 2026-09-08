@@ -143,7 +143,12 @@ function boxDragMul(cx, cy, cz, R, H) {
 }
 function terrainSpeedMul() {
   const p = player.pos;
-  return boxDragMul(p.x, p.y, p.z, player.R - 0.02, player.H);
+  const raw = boxDragMul(p.x, p.y, p.z, player.R - 0.02, player.H);
+  /* A full leather set blunts the PENALTY, not the speed (0.732): a 40% leaf slowdown becomes 28%
+     rather than the player simply moving faster everywhere. Written this way so a resistance of 1
+     would remove the slowdown entirely and never overshoot into a speed boost. */
+  const r = typeof playerTerrainDragResist === 'function' ? playerTerrainDragResist() : 0;
+  return r > 0 ? 1 - (1 - raw) * (1 - r) : raw;
 }
 
 function collideAxis(axis, delta) {
@@ -223,6 +228,12 @@ function rayBox(o, d, X0, Y0, Z0, X1, Y1, Z1) {
   return { t: tmin, nx: n[0], ny: n[1], nz: n[2] };
 }
 
+/* 0.7295 — plants are targetable again, but only in creative. Bush pickup is the survival way to
+   gather grass/wheat/berries, and it needs the crosshair to pass straight through them; creative
+   has no bush pickup at all, so there the ray must stop on a plant or grass could not be removed
+   by hand. Reads `player.canFly` (the creative flag) live, per ray. */
+const _plantsTargetable = () => !!(typeof player !== 'undefined' && player && player.canFly);
+
 // Amanatides & Woo voxel traversal; skips non-raycastable blocks (water can never be targeted).
 // For non-cube models (slabs) it refines the cell hit against the real sub-boxes, so aiming
 // through a slab's empty upper half passes through instead of falsely targeting the cell.
@@ -237,11 +248,12 @@ function raycastVoxel(origin, dir, maxDist) {
   let tEnter = 0;                     // distance along the ray at which we entered the current cell
   for (let i = 0; i < 256; i++) {
     const b = getBlock(x, y, z), id = b & 255, prop = PROPS[id];
-    /* `noTarget` blocks are see-through to the crosshair: the ray passes straight on. Kept
-       separate from `raycast:false` because that flag also drops a block from the creative
-       palette (13-actions builds PLACEABLE from it) — grass still has to be placeable, it just
-       must never be what you are aiming at. */
-    if (b !== 0 && prop.raycast && !prop.noTarget) {
+    /* `noTarget` blocks are see-through to the crosshair in SURVIVAL: the ray passes straight
+       on, because bush pickup is what gathers them. Kept separate from `raycast:false` because
+       that flag also drops a block from the creative palette (13-actions builds PLACEABLE from
+       it) — grass still has to be placeable, it just must never be what a survival player is
+       aiming at. In creative the ray does stop on them (see _plantsTargetable). */
+    if (b !== 0 && prop.raycast && (!prop.noTarget || _plantsTargetable())) {
       const boxes = rayBoxesAt(x, y, z);                     // neighbour-aware (stair corners) box list
       if (!boxes) return { x, y, z, nx, ny, nz, id, t: tEnter };   // full cube: cell hit is the face hit
       let best = null, bestI = 0;                            // slab etc: refine against sub-boxes

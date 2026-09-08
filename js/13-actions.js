@@ -6,6 +6,19 @@
 // new blocks registered in VOXEL_CORE automatically appear in the inventory
 const PLACEABLE = PROPS.map((p, id) => (p && id !== B.AIR && p.raycast && !p.noInv) ? id : -1).filter(id => id >= 0);
 
+/* ---- disabled blocks (0.7295) ----
+   Slabs and stairs are switched OFF, not deleted: their PROPS entries, meshes, collision boxes
+   and merge rules all stay, so worlds that already contain them still load, render and break
+   normally. They simply have no way IN any more — no creative palette entry, no recipe.
+   Deliberately NOT filtered out of PLACEABLE, because _isValidId reads that list to decide
+   whether a saved slot survives a load: dropping them there would quietly bin the slabs sitting
+   in someone's existing survival chest. */
+const DISABLED_BLOCKS = new Set(
+  PROPS.map((p, id) => (p && (p.model === 'slab' || p.model === 'stairs')) ? id : -1).filter(id => id >= 0));
+const isDisabledBlock = (id) => id != null && id < 256 && DISABLED_BLOCKS.has(id);
+// an obtainable id: what the creative palette lists and what a recipe is allowed to hand out
+const isObtainable = (id) => !isDisabledBlock(id);
+
 // Inventories are per game mode:
 //  - creative: reset to default (one of every block, sorted by ID) every time creative is entered
 //  - survival: empty on first join, persists in localStorage, never touched by creative
@@ -32,19 +45,53 @@ const HOTBAR_SLOTS = INV_COLS;                 // 8
 const INV_SLOTS = INV_COLS * INV_ROWS;         // 32
 const INV2_SLOTS = INV_SLOTS;                  // second grid matches (creative palette overflows it)
 
+/* ---- creative palette order (0.7346) ----
+   Hand-ordered rather than sorted by block id, because ids are a history of when things were
+   ADDED and say nothing about what belongs next to what. Reads as: terrain, then the wood chain,
+   then loose ground, then the stones, then the built materials, ores, and finally everything
+   that stands ON the ground — furniture, then plants.
+
+   Anything PLACEABLE but missing from this list still appears: it falls to the end in id order,
+   so a newly registered block shows up on its own rather than vanishing until someone remembers
+   to add it here. */
+const CREATIVE_ORDER = [
+  B.GRASS, B.DIRT, B.STONE, B.COBBLE,
+  B.LOG, B.BIRCH_LOG, B.SPRUCE_LOG,
+  B.STRIPPED_LOG, B.STRIPPED_BIRCH_LOG, B.STRIPPED_SPRUCE_LOG,
+  B.PLANKS, B.BIRCH_PLANKS, B.SPRUCE_PLANKS,
+  B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES,
+  B.LEAF_CARPET, B.BIRCH_LEAF_CARPET, B.SPRUCE_LEAF_CARPET,
+  B.SAND, B.RED_SAND, B.GRAVEL, B.CLAY, B.SNOW, B.BEDROCK,
+  B.MARBLE, B.GRANITE, B.LIMESTONE, B.STONE_BRICK, B.BRICKS,
+  B.GLASS, B.GLOWSTONE, B.WOOL,
+  B.COAL_ORE, B.IRON_ORE, B.TIN_ORE, B.COPPER_ORE, B.GOLD_ORE, B.DIAMOND_ORE,
+  B.SULFUR_BLOCK, B.OBSIDIAN, B.CACTUS,
+  B.CRAFTING_BENCH, B.FURNACE, B.TNT, B.HAY, B.BED, B.CHEST, B.DOOR, B.STRUCTURE_BLOCK,
+  B.MELON, B.PUMPKIN, B.SNOW_CARPET, B.SUGAR_CANE, B.TORCH, B.SULFUR_UP_TIP,
+  B.RED_MUSHROOM, B.BROWN_MUSHROOM,
+  B.OAK_SAPLING, B.BIRCH_SAPLING, B.SPRUCE_SAPLING,
+  B.TALLGRASS, B.POPPY, B.ORCHID, B.PINCUSHION, B.WHEAT,
+  B.REDBERRY_BUSH, B.BLUEBERRY_BUSH, B.FLINT_ROCK,
+];
 function _defaultCreativeInventory() {
-  // blocks (sorted) then a few useful items (infinite water bucket) appended to the palette
-  const sorted = PLACEABLE.slice().sort((a, b) => a - b).concat([ITEM.WATER_BUCKET, ITEM.LAVA_BUCKET]);
+  const rank = new Map();
+  CREATIVE_ORDER.forEach((id, i) => rank.set(id, i));
+  const rankOf = (id) => rank.has(id) ? rank.get(id) : CREATIVE_ORDER.length + id;
+  // blocks in palette order, then a few useful items (infinite water bucket) appended
+  const sorted = PLACEABLE.filter(isObtainable).sort((a, b) => rankOf(a) - rankOf(b))
+                          .concat([ITEM.WATER_BUCKET, ITEM.LAVA_BUCKET]);
+  /* The hotbar starts EMPTY (0.7346). Creative used to deal the first eight blocks into it, which
+     meant every session opened holding grass, dirt and stone whether or not that was what you
+     wanted — and the palette read as if it began at slot nine. The whole palette lives in the
+     grids now, and you carry whatever you choose to drag down. */
   const hot = new Array(HOTBAR_SLOTS).fill(null);
   const inv = new Array(INV_SLOTS).fill(null);
   // overflow palette — scrolls in the UI. Sized well past the current block count so newly
   // registered blocks (structure block, spruce set, ...) don't silently fall off the end.
   const inv2 = new Array(Math.max(72, INV_SLOTS)).fill(null);
-  const n1 = HOTBAR_SLOTS, n2 = n1 + INV_SLOTS;
   for (let i = 0; i < sorted.length; i++) {
-    if (i < n1) hot[i] = mkSlot(sorted[i]);
-    else if (i < n2) inv[i - n1] = mkSlot(sorted[i]);
-    else if (i - n2 < inv2.length) inv2[i - n2] = mkSlot(sorted[i]);
+    if (i < INV_SLOTS) inv[i] = mkSlot(sorted[i]);
+    else if (i - INV_SLOTS < inv2.length) inv2[i - INV_SLOTS] = mkSlot(sorted[i]);
   }
   return { hot, inv, inv2 };
 }
@@ -122,10 +169,13 @@ const PLANT_REPLACE = [B.TALLGRASS, B.TALL_LOWER, B.TALL_UPPER];
 const isPlantReplaceable = (id) => PLANT_REPLACE.includes(id & 255);
 const isPlaceableInto = (id) =>
   id === B.AIR || id === B.WATER || id === B.LAVA || isPlantReplaceable(id);
-// clear a plant out of a cell before building there; tall grass is 2 cells, so take both halves
+// clear a plant out of a cell before building there; tall grass is 2 cells, so take both halves.
+// Every `noTarget` plant counts, not just the replaceable ones: creative can aim straight at a
+// wheat or berry cell now, and building there has to take the plant with it.
+const isNoTargetPlant = (id) => !!(PROPS[id & 255] && PROPS[id & 255].noTarget);
 function clearPlantAt(x, y, z) {
   const id = getBlock(x, y, z) & 255;
-  if (!isPlantReplaceable(id)) return;
+  if (!isPlantReplaceable(id) && !isNoTargetPlant(id)) return;
   if (id === B.TALL_LOWER) setBlock(x, y + 1, z, B.AIR);
   else if (id === B.TALL_UPPER) setBlock(x, y - 1, z, B.AIR);
   setBlock(x, y, z, B.AIR);
@@ -137,9 +187,11 @@ function clearPlantAt(x, y, z) {
 const OVERHANG_OK = [B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES,
                      B.LEAF_CARPET, B.BIRCH_LEAF_CARPET, B.SPRUCE_LEAF_CARPET, B.CARPET,
                      B.WATER, B.LAVA];
-// every layered carpet shares one stacking rule, so a new carpet type only has to set model:'carpet'
-const isCarpet = (id) => id != null && id < 256 &&
-  (PROPS[id]?.model === 'carpet' || PROPS[id]?.model === 'carpet_stack');
+/* Every layered carpet shares one stacking rule. The test is "does this block have a carpet
+   MATERIAL", not "is it drawn with the carpet model" (0.733): the flint stone borrows that model
+   purely for its flat geometry, and the model test made placing one in creative fall through to
+   `CARPET_MAT_OF[id] || CARPET_MAT.SNOW` — so a flint stone placed a layer of snow instead. */
+const isCarpet = (id) => id != null && id < 256 && (id === B.CARPET || !!CARPET_MAT_OF[id]);
 function logOverhangsCell(x, y, z) {
   // a log only bulges along its two NON-axis directions, so check each neighbour accordingly
   const dirs = [[1,0,0,0],[-1,0,0,0],[0,1,0,1],[0,-1,0,1],[0,0,1,2],[0,0,-1,2]];
@@ -181,6 +233,14 @@ function doBreak() {
   const hit = currentRay();
   if (!hit) return;
   if (isTNTFuseActive(hit.x, hit.y, hit.z)) return;             // armed TNT is unbreakable
+  // a plant can only be the target in creative, and it comes out whole — a lone floating
+  // TALL_UPPER left standing over the half you broke is not a thing anyone wants to see
+  if (isNoTargetPlant(hit.id)) {
+    // its own sound: these are not all grass any more (a flint stone is `type:'stone'`)
+    playBlockSound(hit.id, 'break', hit.x, hit.y, hit.z);
+    clearPlantAt(hit.x, hit.y, hit.z);
+    return;
+  }
   if (tryChopLog(hit.x, hit.y, hit.z)) return;   // axe on a log: strip / fell instead of breaking
   const inf = slabBreakInfo(getBlock(hit.x, hit.y, hit.z), hit.bi || 0);
   playBlockSound(hit.id, 'break', hit.x, hit.y, hit.z);
@@ -209,7 +269,15 @@ const BUSH_NAME = [];
 BUSH_NAME[B.TALLGRASS] = 'grass';
 BUSH_NAME[B.TALL_LOWER] = BUSH_NAME[B.TALL_UPPER] = 'tall grass';
 BUSH_NAME[B.WHEAT] = 'wheat';
-BUSH_NAME[B.BERRY_BUSH] = 'berry bush';
+BUSH_NAME[B.REDBERRY_BUSH] = 'red berry bush';
+BUSH_NAME[B.BLUEBERRY_BUSH] = 'blue berry bush';
+BUSH_NAME[B.FLINT_ROCK] = 'flint pebble';
+BUSH_NAME[B.MELON] = 'watermelon';
+BUSH_NAME[B.PUMPKIN] = 'pumpkin';
+// which fruit each bush hands over when it is ripe
+const BERRY_FRUIT = [];
+BERRY_FRUIT[B.REDBERRY_BUSH] = ITEM.BERRIES;
+BERRY_FRUIT[B.BLUEBERRY_BUSH] = ITEM.BLUE_BERRIES;
 /* Berry bush (0.698). Picking a GROWN bush takes the fruit and leaves the plant standing at
    `empty`, so it regrows (33-felling.js) instead of being consumed — a bush is a renewable
    patch, not a one-shot pickup. An unripe bush yields nothing but a better fiber roll, since
@@ -233,6 +301,11 @@ function _harvestFiber(x, y, z, rolls) {
    now? Returns {x, y, z, id, name} or null. Pure — it never changes the world. */
 function findBushPickup() {
   if (!playing || invOpen || menuScene || player.dead) return null;
+  /* Creative has no bush pickup (0.7295). It never yielded anything there anyway — bushGive and
+     _harvestFiber both bail on canFly — so all it did was uproot plants on a key you were more
+     likely to be holding by accident. Creative removes them with the crosshair instead, which is
+     why raycastVoxel stops on plants in that mode. */
+  if (player.canFly) return null;
   const p = player.pos, r = player.R * BUSH_REACH;
   const y0 = Math.floor(p.y);
   const x0 = Math.floor(p.x - r), x1 = Math.floor(p.x + r);
@@ -249,7 +322,13 @@ function findBushPickup() {
         bestD = d;
         const v = (val >> 8) & 255;
         // the prompt says what you would actually get, so a bare bush reads as bare
-        const name = id === B.BERRY_BUSH && v !== BERRY_STAGE.GROWN ? 'berry bush (unripe)' : BUSH_NAME[id];
+        let name = BUSH_NAME[id];
+        if (isBerryBush(id)) {
+          const st = berryStage(v);
+          // an unripe bush is not yet telling you which one it is, so neither does the prompt
+          if (st === BERRY_STAGE.SMALL) name = 'berry bush (sprout)';
+          else if (st !== BERRY_STAGE.GROWN) name = 'berry bush (unripe)';
+        }
         best = { x, y, z, id, v, name };
       }
   return best;
@@ -261,28 +340,49 @@ function harvestAtPlayer() {
   const { x, z, id } = t;
   handPickSwing = true;                          // 24-hands.js plays the grab on the next frame
   addXP(XP_HARVEST);                             // foraging counts, same as breaking a wild block
-  if (id === B.BERRY_BUSH) {
-    if (t.v === BERRY_STAGE.GROWN) {
+  if (isBerryBush(id)) {
+    const stage = berryStage(t.v);
+    // the BLOCK is the kind now, so a bush stays the bush it was through every pick for free
+    if (stage === BERRY_STAGE.GROWN) {
       // first pick on a ripe bush: take the fruit, leave the plant standing and empty
-      setBlock(x, t.y, z, B.BERRY_BUSH | (BERRY_STAGE.EMPTY << 8));
+      setBlock(x, t.y, z, id | (BERRY_STAGE.EMPTY << 8));
+      const fruit = BERRY_FRUIT[id];
       const n = BERRY_PICK_MIN + Math.floor(Math.random() * (BERRY_PICK_MAX - BERRY_PICK_MIN + 1));
-      for (let i = 0; i < n; i++) bushGive(ITEM.BERRIES, x, t.y, z);
+      for (let i = 0; i < n; i++) bushGive(fruit, x, t.y, z);
       if (!player.canFly && Math.random() < BERRY_FIBER_CHANCE) bushGive(ITEM.FIBER, x, t.y, z);
       queueBerryGrow(x, t.y, z);
-    } else if (t.v === BERRY_STAGE.FRUITLING) {
+    } else if (stage === BERRY_STAGE.FRUITLING) {
       // half-grown: the unripe fruit is lost, the plant survives at empty
-      setBlock(x, t.y, z, B.BERRY_BUSH | (BERRY_STAGE.EMPTY << 8));
+      setBlock(x, t.y, z, id | (BERRY_STAGE.EMPTY << 8));
       if (!player.canFly && Math.random() < BERRY_LEAF_FIBER_CHANCE) bushGive(ITEM.FIBER, x, t.y, z);
       queueBerryGrow(x, t.y, z);
     } else {
-      /* Nothing left to strip, so this pick takes the whole plant. That is the SECOND pick on a
-         bush you just picked — and the 1.1s cooldown between them is what keeps one held key from
-         stripping and uprooting a bush in the same motion. */
+      /* Empty or still a sprout: nothing left to strip, so this pick takes the whole plant. On an
+         empty bush that is the SECOND pick on one you just picked — and the 1.1s cooldown between
+         them is what keeps one held key from stripping and uprooting it in the same motion. */
       setBlock(x, t.y, z, B.AIR);
       if (!player.canFly && Math.random() < BERRY_LEAF_FIBER_CHANCE) bushGive(ITEM.FIBER, x, t.y, z);
     }
     playBlockSound(B.TALLGRASS, 'break', x, t.y, z);
     return BERRY_REPEAT;
+  }
+  /* Flint stone: the one pickup with a GUARANTEED yield. Fiber comes in rolls because grass is
+     everywhere; a flint nodule is rare enough (see FLINT_ROCK_CHANCE) that walking to one and
+     getting nothing would just be a punishment. */
+  if (id === B.FLINT_ROCK) {
+    setBlock(x, t.y, z, B.AIR);
+    playBlockSound(B.COBBLE, 'break', x, t.y, z);
+    bushGive(ITEM.FLINT, x, t.y, z);
+    return BUSH_REPEAT;
+  }
+  /* Gourds: picked up whole, and they hand over exactly what breaking them used to (0.7343) —
+     a melon comes apart into slices, a pumpkin comes away as itself. */
+  if (id === B.MELON || id === B.PUMPKIN) {
+    setBlock(x, t.y, z, B.AIR);
+    playBlockSound(id, 'break', x, t.y, z);
+    for (const d of blockDrop(id, true))
+      for (let n = 0; n < d.count; n++) bushGive(d.id, x, t.y, z);
+    return BUSH_REPEAT;
   }
   if (id === B.WHEAT) {
     setBlock(x, t.y, z, B.AIR);
@@ -508,9 +608,21 @@ function _doPlace() {
       if (axisN === ((hv & 1) ? -1 : 1) && tryMergeSlab(hit.x, hit.y, hit.z, hit.id, hv, heldId)) return;
     }
   }
-  const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
+  /* Creative can aim at a plant now, and "place on grass" has to mean where the grass STANDS,
+     not floating in the air in front of it. So a plant hit redirects the placement into its own
+     cell and mows it first — which is also what a survival placement into grass already did, it
+     just got there by aiming at the ground underneath. */
+  const ontoPlant = isNoTargetPlant(hit.id);
+  // ...and the plant's own entry face is meaningless for orientation (a cross model can be
+  // entered from the side), so tell the rest of the routine it was placed on the ground.
+  if (ontoPlant) { hit.nx = 0; hit.ny = 1; hit.nz = 0; }
+  const px = ontoPlant ? hit.x : hit.x + hit.nx,
+        py = ontoPlant ? hit.y : hit.y + hit.ny,
+        pz = ontoPlant ? hit.z : hit.z + hit.nz;
   const cur = getBlock(px, py, pz) & 255;
-  if (!isPlaceableInto(cur)) {                               // only into air/water/lava/grass...
+  // The plant itself is free ground for this placement — the clearPlantAt calls further down do
+  // the mowing, so a click that ends up placing nothing (empty hand, no headroom) leaves it be.
+  if (!isPlaceableInto(cur) && !(ontoPlant && isNoTargetPlant(cur))) {   // only into air/water/lava/grass...
     // ...case 2: unless the target cell holds a single slab the held slab can complete
     if (heldSlab && PROPS[cur].model === 'slab') {
       const tv = (getBlock(px, py, pz) >> 8) & 255;
@@ -639,6 +751,9 @@ function _doPlace() {
   let varb = 0;
   const rot = PROPS[id].rot;
   const type = PROPS[id].model;
+  // a placed berry bush arrives RIPE, matching the icon that was in the slot — a bare sprout
+  // would give no sign which of the two bushes had just been put down
+  if (isBerryBush(id)) varb = BERRY_STAGE.GROWN;
   if (rot === 'side') {
     // front faces the player: facing = horizontal direction from block toward player
     const ddx = player.pos.x - (px + 0.5), ddz = player.pos.z - (pz + 0.5);

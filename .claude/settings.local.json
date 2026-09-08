@@ -6,7 +6,25 @@
       "Bash(perl -0pi -e \"s/var _selfCrouch = 0;/var _selfCrouch = 0;\\\\nvar _selfLie = 0;                    \\\\/\\\\/ 0..1 eased \\\\\"in bed\\\\\" amount, tips the model onto its back/\" js/28-entities.js)",
       "Bash(perl -0pi -e \"s/'camView', '_selfModel', '_selfPhase', '_selfPrevX', '_selfPrevZ', '_selfCrouch',/'camView', '_selfModel', '_selfPhase', '_selfPrevX', '_selfPrevZ', '_selfCrouch', '_selfLie',/\" js/36-splitscreen.js)",
       "Bash(perl -0pi -e \"s/g\\\\._selfCrouch = 0;/g._selfCrouch = 0; g._selfLie = 0;/\" js/36-splitscreen.js)",
-      "Bash(node --check '$f')"
+      "Bash(node --check '$f')",
+      "Bash(node --check js/13-actions.js)",
+      "Bash(node -e \"console.log\\('node', process.version\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(node mkcow.js)",
+      "Bash(perl -0pi -e 's/const m = _sheepPart\\\\\\(mat, 4, 12, 4, 29, 27\\\\\\);/const m = _part\\(mat, 4, 12, 4, 29, 27\\);/; s/const body = _sheepPart\\\\\\(mat, 10, 10, 16, 0, 0\\\\\\);/const body = _part\\(mat, 10, 10, 16, 0, 0\\);/; s/const skull = _sheepPart\\\\\\(mat, 7, 7, 7, 0, 27\\\\\\);/const skull = _part\\(mat, 7, 7, 7, 0, 27\\);/; s/const hornR = _sheepPart\\\\\\(mat, 2, 2, 2, 46, 27\\\\\\);/const hornR = _part\\(mat, 2, 2, 2, 46, 27\\);/; s/const hornL = _sheepPart\\\\\\(mat, 2, 2, 2, 46, 27\\\\\\);/const hornL = _part\\(mat, 2, 2, 2, 46, 27\\);/' js/28-entities.js)",
+      "Bash(node rendercow.js)",
+      "Bash(node --check js/28-entities.js)",
+      "Bash(mkdir -p tools)",
+      "Bash(cp \"C:/Users/me/AppData/Local/Temp/claude/C--Users-me-voxiCraft/77475d6d-0562-41c5-9fee-8d39bf2b713d/scratchpad/png.js\" tools/png.js)",
+      "Bash(cp \"C:/Users/me/AppData/Local/Temp/claude/C--Users-me-voxiCraft/77475d6d-0562-41c5-9fee-8d39bf2b713d/scratchpad/mkcow.js\" tools/mkcow.js)",
+      "Bash(sed -i \"s#const OUT = 'C:/Users/me/voxiCraft/textures/Entity/';#const OUT = require\\('path'\\).join\\(__dirname, '..', 'textures', 'Entity'\\) + '/';#\" tools/mkcow.js)",
+      "Bash(node --check tools/mkcow.js)",
+      "Bash(sed -n '/^function withPlayer/,/^}/p' js/36-splitscreen.js)",
+      "Bash(sed -n '/^function withSlot/,/^}/p' js/36-splitscreen.js)",
+      "Bash(node --check js/31-armor.js)",
+      "Bash(node --check js/19-vitals.js)",
+      "Bash(node --check js/20-inventory-ui.js)",
+      "Bash(awk -F: '$2<2560')"
     ]
   }
 }

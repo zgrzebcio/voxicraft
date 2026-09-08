@@ -34,6 +34,14 @@ const modeLabel   = document.getElementById('modeLabel');
 
 const worldLoadingEl    = document.getElementById('worldLoading');
 const worldLoadingNameEl = document.getElementById('worldLoadingName');
+const worldLoadingStepEl = document.getElementById('worldLoadingStep');
+// runs every frame while the screen is up, so only touch the DOM when the wording actually changes
+let _loadingStep = '';
+function setLoadingStep(s) {
+  if (s === _loadingStep) return;
+  _loadingStep = s;
+  if (worldLoadingStepEl) worldLoadingStepEl.textContent = s;
+}
 let _loadingWorld = false;   // true while initial chunks are generating; hides loading screen when done
 
 let WORLDS = (() => { try { const a = JSON.parse(localStorage.getItem('vc_worlds')); return Array.isArray(a) ? a : []; } catch { return []; } })();
@@ -105,7 +113,9 @@ function saveWorld(syncToLS = false) {
     player: { pos: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw, pitch: player.pitch,
               hp: player.hp, food: player.food, saturation: player.saturation, flying: player.flying,
               hotSel: hotbarSel, profile: player.profileId || null,
-              spawnPos: player.spawnPos ? player.spawnPos.toArray() : null },
+              spawnPos: player.spawnPos ? player.spawnPos.toArray() : null,
+              homeSpawn: player.homeSpawn ? player.homeSpawn.toArray() : null,
+              spawnBedKey: player.spawnBedKey || null },
     /* One record per person who has played this world, tagged with their profile (0.721) — see
        the header of 36-splitscreen.js's persistence section. Player one ALSO keeps writing the
        original top-level fields above, so an older build still opens this save. */

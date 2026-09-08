@@ -263,9 +263,14 @@ document.addEventListener('mouseup', (e) => {
   if (e.button === 2) mousePlace = false;
 });
 
+/* The mouse belongs to SEAT ZERO and nobody else (0.734). These are document handlers, so they
+   write into whichever seat is installed when the event fires — normally slot 0, since the frame
+   loop reinstalls it, but nothing in the handler itself said so. Without the guard a mouse event
+   landing on a pad seat flips its cursor to 'mouse' mode, which hides it. */
+const mouseOwnsInput = () => typeof activePlayerSlot !== 'function' || activePlayerSlot() === 0;
 // inventory mouse drag & drop — coordinate-based (works over the pointer-events:none hotbar)
 document.addEventListener('mousemove', (e) => {
-  if (!invOpen) return;
+  if (!invOpen || !mouseOwnsInput()) return;
   invCursor.mode = 'mouse'; invCursor.x = e.clientX; invCursor.y = e.clientY;
 });
 // click-carry model (no hold needed):
@@ -274,7 +279,7 @@ document.addEventListener('mousemove', (e) => {
 //   Shift+LMB    quick-move; keep held down and sweep over slots to move them all
 let shiftSweep = false;
 document.addEventListener('mousedown', (e) => {
-  if (!invOpen || (e.button !== 0 && e.button !== 2)) return;
+  if (!invOpen || !mouseOwnsInput() || (e.button !== 0 && e.button !== 2)) return;
   invCursor.mode = 'mouse'; invCursor.x = e.clientX; invCursor.y = e.clientY;
   const s = slotAtPoint(e.clientX, e.clientY);
   if (!s) return;

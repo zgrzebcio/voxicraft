@@ -109,7 +109,7 @@ const XP_CRAFT = {};
   set(B.BED, 25); set(B.DOOR, 10); set(B.TNT, 30);
   // tools, by tier — the shape of your progression, so the payout follows it
   const toolTier = (n, ...ids) => { for (const i of ids) set(i, n); };
-  toolTier(6,  ITEM.WOODEN_SWORD, ITEM.WOODEN_SHOVEL, ITEM.WOODEN_PICKAXE, ITEM.WOODEN_HATCHET, ITEM.WOODEN_HOE);
+  toolTier(6,  ITEM.FLINT_SWORD, ITEM.FLINT_SHOVEL, ITEM.FLINT_PICKAXE, ITEM.FLINT_HATCHET, ITEM.FLINT_HOE);
   toolTier(12, ITEM.STONE_SWORD, ITEM.STONE_SHOVEL, ITEM.STONE_PICKAXE, ITEM.STONE_HATCHET, ITEM.STONE_HOE);
   toolTier(30, ITEM.IRON_SWORD, ITEM.IRON_SHOVEL, ITEM.IRON_PICKAXE, ITEM.IRON_HATCHET, ITEM.IRON_HOE);
   toolTier(40, ITEM.GOLDEN_SWORD, ITEM.GOLDEN_SHOVEL, ITEM.GOLDEN_PICKAXE, ITEM.GOLDEN_HATCHET, ITEM.GOLDEN_HOE);
@@ -118,6 +118,10 @@ const XP_CRAFT = {};
   // armor scales with how much iron went into it
   set(ITEM.IRON_GLOVES, 35); set(ITEM.IRON_BOOTS, 45); set(ITEM.IRON_HELMET, 55);
   set(ITEM.IRON_LEGGINGS, 75); set(ITEM.IRON_CHESTPLATE, 95);
+  // leather: the tier below, so roughly a third of the iron payout
+  set(ITEM.LEATHER_GLOVES, 10); set(ITEM.LEATHER_BOOTS, 14); set(ITEM.LEATHER_HELMET, 18);
+  set(ITEM.LEATHER_LEGGINGS, 25); set(ITEM.LEATHER_CHESTPLATE, 32);
+  set(ITEM.SADDLE, 25);
   // food
   set(ITEM.MUSHROOM_STEW, 4); set(ITEM.PUMPKIN_PIE, 8); set(ITEM.GOLDEN_APPLE, 60);
   set(ITEM.GUNPOWDER, 6); set(ITEM.GLOW_DUST, 8);

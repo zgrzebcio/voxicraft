@@ -71,17 +71,28 @@ function playerArmorPoints() {
   for (const s of equipSlots) if (s && ITEM_PROPS[s.id]?.armor) n += ITEM_PROPS[s.id].armor;
   return Math.min(20, n);
 }
-// which sprite set the armor bar should use — the highest-value piece decides the look
-function playerArmorStyle() {
-  let best = null, bestVal = -1;
-  for (const s of equipSlots) {
+/* The armor bar is MIXED (0.731). It used to pick ONE sprite set for the whole row — the
+   highest-value piece won — so an iron chestplate over leather trousers drew a row of solid iron.
+   One icon is worth two points, and the two points inside it can come from DIFFERENT materials:
+   that is exactly the case the left-half / right-half sprites exist for. So the bar is driven by
+   a flat list of one entry PER POINT, in a fixed equipment order, rather than by a single
+   "which material wins" answer.
+   Capped at 20 to match playerArmorPoints, so the list and the total can never disagree. */
+const ARMOR_BAR_ORDER = ['helmet', 'chestplate', 'leggings', 'boots', 'gloves'];
+const _matName = (m) => m ? m.charAt(0).toUpperCase() + m.slice(1) : 'Iron';
+function playerArmorPointMats() {
+  const out = [];
+  for (const key of ARMOR_BAR_ORDER) {
+    const s = equipSlots[EQUIP_INDEX[key]];
     const p = s && ITEM_PROPS[s.id];
-    if (!p || !p.armor || !p.armorMat) continue;
-    if (p.armor > bestVal) { bestVal = p.armor; best = p.armorMat; }
+    if (!p || !p.armor) continue;
+    const mat = _matName(p.armorMat);
+    for (let i = 0; i < p.armor && out.length < 20; i++) out.push(mat);
   }
-  if (!best) return 'Iron';
-  return best.charAt(0).toUpperCase() + best.slice(1);   // 'iron' -> 'Iron'
+  return out;
 }
+// cheap change-detector for the HUD: repaint the bar when the MIX changes, not just the total
+const armorBarSignature = () => playerArmorPointMats().join(',');
 // Minecraft's rule: each point cuts 4% of incoming damage, capped at 80%.
 function armorDamageMultiplier() {
   return 1 - Math.min(0.8, playerArmorPoints() * 0.04);
@@ -110,11 +121,73 @@ function _equipSum(field) {
 }
 // flat bonus damage added on top of the held weapon (iron gloves = +0.75)
 function playerStrength() { return _equipSum('strength'); }
+
+/* ---------------------------------- set bonuses (0.731) ----------------------------------
+   Wear all FOUR body pieces of one material and the set does something the pieces alone do not.
+   Gloves are deliberately excluded from the test: they are the cheap fifth piece, and letting
+   them gate the bonus would mean the bonus vanished the moment a pair broke.
+
+   A bonus is permanent while the set is on — it is not a timer — so it reports `time: Infinity`
+   and the panel prints an infinity sign instead of a countdown. Taking a piece off, or wearing
+   one out, drops the set and the effect with it, because nothing is stored: it is recomputed from
+   what is equipped every time it is asked for. */
+const ARMOR_SET_SLOTS = ['helmet', 'chestplate', 'leggings', 'boots'];
+const ARMOR_SET_BONUS = {
+  iron:    { name: 'Knockback resistance', knockback: 0.20, good: true,
+             desc: 'Full set: +20% knockback resistance' },
+  /* Leather does NOT slow you down — it blunts the slowdown the GROUND inflicts. Wading through
+     leaf litter and deep snow costs 30% less than it does barefoot, which is what soft boots are
+     actually for. It is a multiplier on the penalty, not on your speed. */
+  leather: { name: 'Slowness resistance',  terrainDrag: 0.30, good: true,
+             desc: 'Full set: leaf and snow slowdown 30% weaker' },
+};
+// the material every body piece shares, or null if the set is incomplete or mismatched
+function playerArmorSet() {
+  let mat = null;
+  for (const key of ARMOR_SET_SLOTS) {
+    const s = equipSlots[EQUIP_INDEX[key]];
+    const m = s && ITEM_PROPS[s.id]?.armorMat;
+    if (!m) return null;
+    if (mat === null) mat = m;
+    else if (m !== mat) return null;
+  }
+  return mat;
+}
+const armorSetBonus = () => ARMOR_SET_BONUS[playerArmorSet()] || null;
+// 0..1 fraction of incoming knockback cancelled (iron set = 0.20)
+function playerKnockbackResist() {
+  const b = armorSetBonus();
+  return b && b.knockback ? Math.min(1, b.knockback) : 0;
+}
+// 0..1 fraction of the terrain slowdown cancelled (leather set = 0.30)
+function playerTerrainDragResist() {
+  const b = armorSetBonus();
+  return b && b.terrainDrag ? Math.min(1, b.terrainDrag) : 0;
+}
+/* Everything currently affecting the player, permanent set bonuses first. PLAYER_EFFECTS is still
+   the home for genuine TIMED effects; nothing produces one yet. */
+function activeEffects() {
+  const out = [];
+  const b = armorSetBonus();
+  if (b) out.push({ name: b.name, time: Infinity, good: b.good });
+  for (const e of PLAYER_EFFECTS) out.push(e);
+  return out;
+}
+
 // multiplier on walking speed; floored so gear can never freeze the player
-const playerMoveSpeedMul = () => Math.max(0.25, 1 + _equipSum('moveSpeed'));
+const playerMoveSpeedMul = () => {
+  const b = armorSetBonus();
+  return Math.max(0.25, 1 + _equipSum('moveSpeed') + (b && b.moveSpeed ? b.moveSpeed : 0));
+};
 function playerMoveSpeedPct() { return Math.round(playerMoveSpeedMul() * 100); }
 // multiplier on swing rate — >1 swings faster, so it DIVIDES the cooldown
 const playerAtkSpeedMul = () => Math.max(0.25, 1 + _equipSum('atkSpeed'));
+/* Environmental resistances (0.7295). No item grants either yet and nothing reads them for damage
+   — they are stat lines the panel reserves, so the gear that will carry them has somewhere to
+   show up. Summed as a fraction (0.15 = 15% resisted) and clamped to 100%. */
+const _resPct = (field) => Math.round(Math.min(1, Math.max(-1, _equipSum(field))) * 100);
+function playerColdResist() { return _resPct('coldResist'); }
+function playerHeatResist() { return _resPct('heatResist'); }
 // active timed effects — nothing produces them yet, but the panel already lists them
 const PLAYER_EFFECTS = [];
 
@@ -271,6 +344,19 @@ function _pvSyncArmor() {
     add(_pvModel.legR, _armorPiece(bootsTex, 4, 12, 4, 0, 16, G2), [0, -6 * PX, 0]);
     add(_pvModel.legL, _armorPiece(bootsTex, 4, 12, 4, 0, 16, G2), [0, -6 * PX, 0]);
   }
+  /* Gloves (0.731) — the pair had stats and a recipe but nothing to look at. There is no glove
+     region on either sheet, so they borrow the BOTTOM five pixels of the chestplate's arm
+     (40,16): on the armour layer that is the cuff, which is exactly what a gauntlet looks like.
+     v is 16 + (12 - 5) so the sub-box samples the wrist end, and 4 + 5 = 9 keeps it inside the
+     sheet's 32-pixel height. Grown to G2 so it sits outside a chestplate sleeve rather than
+     fighting it for depth. */
+  const gloves = matOf('gloves');
+  const glovesTex = gloves && _armorTex(gloves + '_tophalf');
+  if (glovesTex) {
+    const cuffY = -(12 - 5 / 2) * PX;               // bottom of a 12-long arm that pivots at the top
+    add(_pvModel.armR, _armorPiece(glovesTex, 4, 5, 4, 40, 23, G2), [0, cuffY, 0]);
+    add(_pvModel.armL, _armorPiece(glovesTex, 4, 5, 4, 40, 23, G2), [0, cuffY, 0]);
+  }
 }
 
 let _pvSpin = 0;
@@ -315,14 +401,25 @@ function buildEquipPanel() {
   const str = playerStrength();
   const atk = playerAtkSpeedMul();
   const sign = (n, unit = '') => (n > 0 ? '+' : '') + (+n.toFixed(2)) + unit;
+  const cold = playerColdResist(), heat = playerHeatResist();
   let stats = `<div class="stRow"><span>armor</span><b>${pts}</b></div>` +
               `<div class="stRow"><span>damage reduced</span><b>${red}%</b></div>` +
               `<div class="stRow${spd === 100 ? '' : ' bad'}"><span>move speed</span><b>${spd}%</b></div>` +
               `<div class="stRow${str ? ' good' : ''}"><span>strength</span><b>${sign(str)}</b></div>` +
               `<div class="stRow${atk === 1 ? '' : (atk > 1 ? ' good' : ' bad')}"><span>attack speed</span>` +
-              `<b>${Math.round(atk * 100)}%</b></div>`;
-  stats += PLAYER_EFFECTS.length
-    ? PLAYER_EFFECTS.map(e => `<div class="stRow eff"><span>${e.name}</span><b>${e.time}s</b></div>`).join('')
+              `<b>${Math.round(atk * 100)}%</b></div>` +
+              // reserved lines: nothing grants them yet, so they read 0% until gear does
+              `<div class="stRow${cold ? ' good' : ''}"><span>cold resistance</span><b>${cold}%</b></div>` +
+              `<div class="stRow${heat ? ' good' : ''}"><span>heat resistance</span><b>${heat}%</b></div>` +
+              '<div class="stRow slotFree"><span>&mdash;</span><b>&mdash;</b></div>';
+  stats += '<div class="ctitle stTitle">Effects</div>';
+  const eff = activeEffects();
+  stats += eff.length
+    ? eff.map(e => {
+        // a set bonus lasts as long as the set is worn, so it shows an infinity sign, not a clock
+        const t = (e.time === Infinity) ? '&infin;' : e.time + 's';
+        return `<div class="stRow eff${e.good === false ? ' bad' : ''}"><span>${e.name}</span><b>${t}</b></div>`;
+      }).join('')
     : '<div class="stRow none"><span>no active effects</span></div>';
   // belt row: only present while a belt is worn, sized by that belt's slot count
   const cap = beltCapacity();

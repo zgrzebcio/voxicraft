@@ -105,10 +105,11 @@
   #inv .title { color:#9ab; font-size:12px; text-align:center; }
   #inv .grid { display:flex; flex-direction:column-reverse; gap:4px; }   /* row 0 at the bottom */
   #inv .grid + .grid { padding-top:8px; border-top:1px solid rgba(255,255,255,.12); }  /* split 2nd/main grid */
-  /* creative overflow palette: fixed viewport height (3 rows) that scrolls, so extra rows never
-     grow the panel. 3 rows = 3*46px slots + 2*4px gaps. */
-  /* 4 rows on show by default (46px slot + 4px gap each), instead of the old 2.9 */
-  #inv .invScroll { max-height:204px; overflow-y:auto; overflow-x:hidden; pointer-events:auto;
+  /* Creative overflow palette: a fixed viewport that scrolls, so extra rows never grow the panel.
+     10 rows since 0.7346 (46px slot + 4px gap each, minus the trailing gap = 496px), which is one
+     more than the 9 the 72-slot palette actually fills — so the scrollbar is there for a future
+     block rather than for every session. */
+  #inv .invScroll { max-height:496px; overflow-y:auto; overflow-x:hidden; pointer-events:auto;
                     padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.12);
                     scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.30) transparent; }
   #inv .invScroll::-webkit-scrollbar { width:8px; }
@@ -122,7 +123,10 @@
 
   /* ---- equipment (right of the inventory) ----
      two columns of five slots flanking a live player preview, stats underneath */
-  #equipPanel { display:none; flex-direction:column; gap:6px;
+  /* min-height (0.7295): the panel used to end wherever the stat list happened to stop, so it
+     grew and shrank as effects came and went and the whole row of panels jumped with it. It is
+     now tall enough for the full stat block plus a few active effects, and stays that size. */
+  #equipPanel { display:none; flex-direction:column; gap:6px; min-height:492px;
                 background:rgba(16,18,30,.94); border:1px solid rgba(255,255,255,.15);
                 border-radius:10px; padding:12px; }
   #equipPanel .ctitle { color:#9ab; font-size:12px; text-align:center; }
@@ -141,12 +145,19 @@
   #equipPreview { width:132px; height:200px; border-radius:6px;
                   background:linear-gradient(180deg, rgba(60,72,104,.55), rgba(18,22,36,.75));
                   border:1px solid rgba(255,255,255,.12); overflow:hidden; flex:0 0 auto; }
-  #equipStats { display:flex; flex-direction:column; gap:2px;
+  /* flex:1 makes the stat list eat the panel's spare height, so the reserved room lands here
+     (under the stats) rather than as a gap somewhere above the equipment grid */
+  #equipStats { display:flex; flex-direction:column; gap:2px; flex:1 1 auto; min-height:150px;
                 border-top:1px solid rgba(255,255,255,.14); padding-top:5px; }
+  #equipStats .ctitle { margin-top:6px; padding-top:5px;
+                        border-top:1px solid rgba(255,255,255,.10); }
+  /* reserved stat line — a slot with nothing wired to it yet */
+  #equipStats .stRow.slotFree span, #equipStats .stRow.slotFree b { color:#5c6675; }
   #equipStats .stRow { display:flex; justify-content:space-between; gap:12px; font-size:11px; }
   #equipStats .stRow span { color:#8fa0b4; }
   #equipStats .stRow b { color:#e8eef6; font-weight:600; }
   #equipStats .stRow.eff span { color:#7fd6a0; }
+  #equipStats .stRow.eff.bad span, #equipStats .stRow.eff.bad b { color:#e8a06a; }   /* a penalty */
   #equipStats .stRow.good b { color:#7fd6a0; }     /* buff */
   #equipStats .stRow.bad b  { color:#e8a06a; }     /* penalty, e.g. armor weight */
   #equipStats .stRow.none span { color:#6b7789; font-style:italic; }
@@ -241,6 +252,10 @@
           text-shadow:0 1px 2px #000; box-shadow:0 3px 10px rgba(0,0,0,.6); }
   #ctip .tipName { font-weight:700; font-size:13px; line-height:1.25; white-space:nowrap; }
   #ctip .tipDesc { color:#9fb0c4; font-size:11px; line-height:1.35; margin-top:3px; font-style:italic; }
+  /* armour set bonus: green when it helps, orange when it costs you, grey when it doesn't apply */
+  #ctip .tipSet { color:#7fd6a0; font-size:11px; line-height:1.35; margin-top:3px; }
+  #ctip .tipSet.bad  { color:#e8a06a; }
+  #ctip .tipSet.none { color:#6b7789; font-style:italic; }
   #ctip .tipStats { margin-top:6px; padding-top:5px; border-top:1px solid rgba(255,255,255,.14);
                     display:flex; flex-direction:column; gap:2px; }
   #ctip .tipRow { display:flex; justify-content:space-between; gap:10px; font-size:11px; }
@@ -395,8 +410,11 @@
   #worldLoading { position:fixed; inset:0; background:rgba(4,6,12,.92); backdrop-filter:blur(4px);
                  align-items:center; justify-content:center; z-index:9; display:none; }
   #worldLoadingName { font-size:22px; font-weight:600; letter-spacing:0.5px; color:#9fd58a;
-                     margin-bottom:22px; text-align:center;
+                     margin-bottom:8px; text-align:center;
                      font-family:'Segoe UI', system-ui, sans-serif; }
+  /* says WHICH wait you are in, so a slow texture fetch does not read as a frozen screen */
+  #worldLoadingStep { font-size:13px; color:#7c8f84; margin-bottom:18px; text-align:center;
+                     font-family:'Segoe UI', system-ui, sans-serif; min-height:16px; }
   .wl-dots { display:flex; justify-content:center; gap:10px; }
   .wl-dots span { width:9px; height:9px; background:#4a7060; border-radius:50%;
                  animation:wlb 1.2s infinite ease-in-out; }

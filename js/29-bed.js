@@ -168,6 +168,7 @@ function bedBroken(x, y, z, oldVal) {
   const isHead = (varb & 8) !== 0;
   const fx = isHead ? x - d[0] : x;
   const fz = isHead ? z - d[1] : z;
+  releaseBedSpawns(bedKey(fx, y, fz));
   removeBedMesh(bedKey(fx, y, fz));
   const ox = isHead ? x - d[0] : x + d[0];
   const oz = isHead ? z - d[1] : z + d[1];
@@ -252,14 +253,40 @@ function trySleep(x, y, z) {
   player.yaw = pose.yaw;
   player.pitch = -0.55;                            // looking up at the ceiling
   player.vy = 0; player.flying = false; player.fast = false; player.sneaking = false;
+  /* Lying down switches you to third person (0.7341) so you can actually see yourself on the
+     mattress — the whole point of the pose. Look is untouched: the mouse still turns the head
+     freely, it is only walking that is gated. The view you were using is remembered and handed
+     back when you get up. */
+  if (typeof camView !== 'undefined') {
+    player._camViewBeforeBed = camView;
+    camView = 1;                                   // over the shoulder
+  }
   if (rec) rec.occupant = player;
-  // sleeping here makes this your respawn point
+  /* Sleeping here makes this your respawn point, and the bed is REMEMBERED (0.7341) — break it
+     and you go back to where the world first put you, rather than respawning at a bed that is no
+     longer there. `homeSpawn` is that original point, captured the first time anyone spawns. */
+  if (!player.homeSpawn) player.homeSpawn = (player.spawnPos || player.pos).clone();
   player.spawnPos = new THREE.Vector3(foot.x + 0.5, y, foot.z + 0.5);
+  player.spawnBedKey = bedKey(foot.x, foot.y, foot.z);
+  toast('respawn point set');
   const waiting = PLAYERS.filter(p => p.spawned && !isSleeping(p)).length;
   if (waiting) toast(waiting === 1 ? 'waiting for 1 more player to sleep'
                                    : `waiting for ${waiting} more players to sleep`);
   else toast('sneak to get up');
   return true;
+}
+
+/* Anyone whose respawn point was THIS bed goes back to their original spawn (0.7341). Called
+   before the mesh goes, from bedBroken — so breaking a bed you slept in tells you so rather than
+   silently respawning you at a gap in the floor later. */
+function releaseBedSpawns(key) {
+  for (const p of PLAYERS) {
+    if (p.spawnBedKey !== key) continue;
+    p.spawnBedKey = null;
+    p.spawnPos = p.homeSpawn ? p.homeSpawn.clone() : null;
+    // only tell the player it happened to — everyone else's bed is none of their business
+    withPlayer(p, () => toast('bed broken — respawn point reset'));
+  }
 }
 
 /* Get up. Steps off to the side of the bed so nobody wakes inside the frame, and releases the
@@ -268,6 +295,12 @@ function leaveBed(p = player) {
   const s = p.sleepingAt;
   if (!s) return;
   p.sleepingAt = null;
+  // hand back whatever view they were using before they lay down
+  if (p._camViewBeforeBed != null) {
+    const back = p._camViewBeforeBed;
+    p._camViewBeforeBed = null;
+    withPlayer(p, () => { camView = back; });
+  }
   const rec = BEDS.get(s.key);
   if (rec && rec.occupant === p) rec.occupant = null;
   // sidestep perpendicular to the bed, falling back to the foot cell if that is walled in
@@ -321,14 +354,17 @@ function updateBed(dt) {
   }
   _sleepFade = Math.min(1, _sleepFade + dt * 2.2);
   _sleepEl.style.opacity = _sleepFade.toFixed(3);
-  if (_sleepFade >= 1) {                        // fully black: advance to dawn and get everyone up
+  if (_sleepFade >= 1) {                        // fully black: advance to dawn
     worldDay++;
     worldTime = BED_WAKE_TIME;
     for (const p of live) {
       p.food = Math.max(p.food, 6);             // a night's rest staves off starving
       if (p.hp > 0) p.hp = Math.min(MAX_HP, p.hp + 4);
-      leaveBed(p);
     }
+    /* Nobody is stood up (0.7341). The night skipping used to end with leaveBed for everyone, so
+       the fade came back on a player already dumped beside the bed — you never saw yourself wake.
+       They stay lying; `isNightForSleep` is false now, so _sleeping drops on the next tick and the
+       fade runs back out over the sleeper still on the mattress. Sneak is what gets you up. */
     _sleeping = false;
     toast('Good morning');
   }
